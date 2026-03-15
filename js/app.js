@@ -195,7 +195,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     sel.innerHTML = '<option value="">-- No school --</option>' +
       DB.getSchools().map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
     // Clear form
-    ['regName','regEmail','regPassword','regConfirm'].forEach(id => {
+    ['regName','regEmail','regPassword','regPasswordConfirm'].forEach(id => {
       document.getElementById(id).value = '';
     });
     document.getElementById('registerError').textContent = '';
@@ -212,7 +212,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const name     = document.getElementById('regName').value.trim();
     const email    = document.getElementById('regEmail').value.trim();
     const password = document.getElementById('regPassword').value;
-    const confirm  = document.getElementById('regConfirm').value;
+    const confirm  = document.getElementById('regPasswordConfirm').value;
     const schoolId = document.getElementById('regSchool').value || null;
     const errEl    = document.getElementById('registerError');
 
