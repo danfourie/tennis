@@ -204,7 +204,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   document.getElementById('registerSubmitBtn').addEventListener('click', doRegister);
-  document.getElementById('regConfirm').addEventListener('keydown', e => {
+  document.getElementById('regPasswordConfirm').addEventListener('keydown', e => {
     if (e.key === 'Enter') doRegister();
   });
 
