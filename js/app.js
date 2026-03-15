@@ -1,11 +1,19 @@
 /**
  * app.js — Main application bootstrap and shared utilities
+ *
+ * Boot sequence:
+ *   1. Show loading overlay
+ *   2. firebase.initializeApp(FIREBASE_CONFIG)
+ *   3. DB.loadAll()        — fetch all Firestore collections into the in-memory cache
+ *   4. DB.subscribeAll()   — attach real-time listeners for live updates
+ *   5. Auth.init()         — attach onAuthStateChanged
+ *   6. Init all UI modules
+ *   7. Hide loading overlay
  */
 
 // ================================================================
 // MODAL MANAGER
 // ================================================================
-
 const Modal = (() => {
   function open(id) {
     document.getElementById(id).classList.remove('hidden');
@@ -21,7 +29,6 @@ const Modal = (() => {
 // ================================================================
 // TOAST
 // ================================================================
-
 function toast(msg, type = '') {
   const el = document.getElementById('toast');
   el.textContent = msg;
@@ -34,7 +41,6 @@ function toast(msg, type = '') {
 // ================================================================
 // ESCAPE HTML
 // ================================================================
-
 function esc(str) {
   if (!str) return '';
   return String(str)
@@ -47,7 +53,6 @@ function esc(str) {
 // ================================================================
 // NAVIGATION
 // ================================================================
-
 function navigate(view) {
   document.querySelectorAll('.view').forEach(v => v.classList.add('hidden'));
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
@@ -58,18 +63,78 @@ function navigate(view) {
 }
 
 // ================================================================
+// LOADING OVERLAY
+// ================================================================
+function setLoading(visible, message) {
+  const overlay = document.getElementById('loadingOverlay');
+  if (!overlay) return;
+  overlay.classList.toggle('hidden', !visible);
+  if (message) {
+    const msgEl = overlay.querySelector('.loading-message');
+    if (msgEl) msgEl.textContent = message;
+  }
+}
+
+function showFatalError(msg) {
+  const overlay = document.getElementById('loadingOverlay');
+  if (!overlay) return;
+  overlay.innerHTML = `
+    <div class="loading-box error-box">
+      <div class="loading-icon">⚠️</div>
+      <div class="loading-message">${esc(msg)}</div>
+      <p style="font-size:.85rem;color:#6b7280;margin-top:.5rem">
+        Check <code>js/firebase-config.js</code> and see <strong>FIREBASE-SETUP.md</strong>.
+      </p>
+      <button onclick="location.reload()" class="btn btn-primary" style="margin-top:1rem">Retry</button>
+    </div>`;
+  overlay.classList.remove('hidden');
+}
+
+// ================================================================
 // BOOTSTRAP
 // ================================================================
+document.addEventListener('DOMContentLoaded', async () => {
 
-document.addEventListener('DOMContentLoaded', () => {
-  // Init modules
-  Auth.init();
-  Calendar.init();
-  Leagues.init();
-  Tournaments.init();
-  Admin.init();
+  setLoading(true, 'Connecting to Firebase…');
 
-  // Navigation
+  // ── Validate config ──────────────────────────────────────
+  if (!FIREBASE_CONFIG || FIREBASE_CONFIG.apiKey === 'YOUR_API_KEY') {
+    showFatalError('Firebase is not configured. Please fill in js/firebase-config.js.');
+    return;
+  }
+
+  try {
+    // ── Initialise Firebase ─────────────────────────────────
+    firebase.initializeApp(FIREBASE_CONFIG);
+
+    // ── Load data from Firestore ────────────────────────────
+    setLoading(true, 'Loading data…');
+    await DB.loadAll();
+
+    // ── Subscribe to real-time updates ──────────────────────
+    DB.subscribeAll(collection => {
+      if (['venues', 'bookings', 'closures'].includes(collection)) Calendar.refresh();
+      if (['venues', 'schools', 'closures'].includes(collection)) Admin.refresh();
+      if (['leagues', 'schools', 'venues'].includes(collection))  Leagues.refresh();
+      if (['tournaments', 'venues'].includes(collection))          Tournaments.refresh();
+    });
+
+    // ── Initialise UI modules ───────────────────────────────
+    Auth.init();
+    Calendar.init();
+    Leagues.init();
+    Tournaments.init();
+    Admin.init();
+
+  } catch (err) {
+    console.error('Firebase init failed:', err);
+    showFatalError('Could not connect to Firebase: ' + err.message);
+    return;
+  }
+
+  setLoading(false);
+
+  // ── Navigation ─────────────────────────────────────────────
   document.querySelectorAll('.nav-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const view = btn.dataset.view;
@@ -78,11 +143,13 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // Login button
+  // ── Login ──────────────────────────────────────────────────
   document.getElementById('loginBtn').addEventListener('click', () => {
+    document.getElementById('loginEmail').value    = '';
     document.getElementById('loginPassword').value = '';
+    document.getElementById('loginError').textContent = '';
     Modal.open('loginModal');
-    setTimeout(() => document.getElementById('loginPassword').focus(), 50);
+    setTimeout(() => document.getElementById('loginEmail').focus(), 50);
   });
 
   document.getElementById('logoutBtn').addEventListener('click', () => {
@@ -92,38 +159,100 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   document.getElementById('loginSubmitBtn').addEventListener('click', doLogin);
-  document.getElementById('loginPassword').addEventListener('keydown', e => {
-    if (e.key === 'Enter') doLogin();
+  ['loginEmail', 'loginPassword'].forEach(id => {
+    document.getElementById(id).addEventListener('keydown', e => {
+      if (e.key === 'Enter') doLogin();
+    });
   });
 
-  function doLogin() {
-    const pw = document.getElementById('loginPassword').value;
-    if (Auth.login(pw)) {
+  async function doLogin() {
+    const email    = document.getElementById('loginEmail').value.trim();
+    const password = document.getElementById('loginPassword').value;
+    const errEl    = document.getElementById('loginError');
+
+    if (!email || !password) { errEl.textContent = 'Enter email and password'; return; }
+
+    const btn = document.getElementById('loginSubmitBtn');
+    btn.disabled = true; btn.textContent = 'Signing in…';
+    errEl.textContent = '';
+
+    const result = await Auth.login(email, password);
+
+    btn.disabled = false; btn.textContent = 'Login';
+
+    if (result.ok) {
       Modal.close('loginModal');
-      Admin.refresh();
-      Calendar.refresh();
-      Leagues.refresh();
-      Tournaments.refresh();
-      toast('Welcome, Master! 🔑', 'success');
+      toast('Welcome back! 🎾', 'success');
     } else {
-      document.getElementById('loginPassword').value = '';
-      toast('Incorrect password', 'error');
+      errEl.textContent = result.error || 'Login failed';
     }
   }
 
-  // Modal close buttons (data-modal attribute)
+  // ── Register ───────────────────────────────────────────────
+  document.getElementById('registerBtn').addEventListener('click', () => {
+    // Populate school dropdown
+    const sel = document.getElementById('regSchool');
+    sel.innerHTML = '<option value="">-- No school --</option>' +
+      DB.getSchools().map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+    // Clear form
+    ['regName','regEmail','regPassword','regConfirm'].forEach(id => {
+      document.getElementById(id).value = '';
+    });
+    document.getElementById('registerError').textContent = '';
+    Modal.open('registerModal');
+    setTimeout(() => document.getElementById('regName').focus(), 50);
+  });
+
+  document.getElementById('registerSubmitBtn').addEventListener('click', doRegister);
+  document.getElementById('regConfirm').addEventListener('keydown', e => {
+    if (e.key === 'Enter') doRegister();
+  });
+
+  async function doRegister() {
+    const name     = document.getElementById('regName').value.trim();
+    const email    = document.getElementById('regEmail').value.trim();
+    const password = document.getElementById('regPassword').value;
+    const confirm  = document.getElementById('regConfirm').value;
+    const schoolId = document.getElementById('regSchool').value || null;
+    const errEl    = document.getElementById('registerError');
+
+    if (!name)                      { errEl.textContent = 'Full name is required';              return; }
+    if (!email)                     { errEl.textContent = 'Email is required';                   return; }
+    if (password.length < 6)        { errEl.textContent = 'Password must be at least 6 characters'; return; }
+    if (password !== confirm)       { errEl.textContent = 'Passwords do not match';              return; }
+
+    const btn = document.getElementById('registerSubmitBtn');
+    btn.disabled = true; btn.textContent = 'Creating account…';
+    errEl.textContent = '';
+
+    const result = await Auth.register(email, password, name, schoolId);
+
+    btn.disabled = false; btn.textContent = 'Create Account';
+
+    if (result.ok) {
+      Modal.close('registerModal');
+      const isMaster = result.role === 'master';
+      toast(
+        isMaster ? 'Welcome, Master! You are the first user. 🔑' : 'Account created! Welcome 🎾',
+        'success'
+      );
+      if (isMaster) navigate('admin');
+    } else {
+      errEl.textContent = result.error || 'Registration failed';
+    }
+  }
+
+  // ── Modal close buttons ────────────────────────────────────
   document.addEventListener('click', e => {
     const btn = e.target.closest('[data-modal]');
     if (btn) Modal.close(btn.dataset.modal);
 
-    // Close on overlay click
     if (e.target.classList.contains('modal-overlay')) {
       const id = e.target.id;
       if (id) Modal.close(id);
     }
   });
 
-  // Keyboard close
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') {
       document.querySelectorAll('.modal-overlay:not(.hidden)').forEach(m => {
@@ -132,6 +261,5 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Initial view
   navigate('calendar');
 });

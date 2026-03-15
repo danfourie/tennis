@@ -117,8 +117,15 @@ const Leagues = (() => {
       standings: generateStandings(schoolIds),
     };
 
-    if (id) { DB.updateLeague(league); toast('League updated', 'success'); }
-    else { DB.addLeague(league); toast('League created', 'success'); }
+    if (id) {
+      DB.updateLeague(league);
+      DB.writeAudit('league_updated', 'league', `Updated league: ${name}`, league.id, name);
+      toast('League updated', 'success');
+    } else {
+      DB.addLeague(league);
+      DB.writeAudit('league_created', 'league', `Created league: ${name}`, league.id, name);
+      toast('League created', 'success');
+    }
 
     Modal.close('leagueModal');
     render();
@@ -251,22 +258,31 @@ const Leagues = (() => {
       });
     });
 
-    // Score editing
-    if (Auth.isAdmin()) {
+    // Score editing — any logged-in user can enter scores
+    if (Auth.isLoggedIn()) {
       body.querySelectorAll('.score-input').forEach(inp => {
         inp.addEventListener('change', () => {
           const fixtureId = inp.dataset.fixture;
           const field = inp.dataset.field;
           const fixture = league.fixtures.find(f => f.id === fixtureId);
           if (fixture) {
+            const oldVal = fixture[field];
             fixture[field] = parseInt(inp.value) || 0;
             recalcStandings(league);
             DB.updateLeague(league);
+            DB.writeAudit(
+              'score_updated', 'league',
+              `Score: ${fixture.homeSchoolName} vs ${fixture.awaySchoolName} — ${field}: ${oldVal ?? 'blank'} → ${fixture[field]}`,
+              league.id, league.name
+            );
             toast('Score saved', 'success');
           }
         });
       });
+    }
 
+    // Venue assignment — master only
+    if (Auth.isAdmin()) {
       body.querySelectorAll('.fixture-venue-sel').forEach(sel => {
         sel.addEventListener('change', () => {
           const fixtureId = sel.dataset.fixture;
@@ -323,7 +339,7 @@ const Leagues = (() => {
             </select>`
           : esc(f.venueName || 'TBA');
 
-        const scoreCell = Auth.isAdmin()
+        const scoreCell = Auth.isLoggedIn()
           ? `<div class="score-cell">
               <input class="score-input" type="number" min="0" max="99" value="${hasScore ? f.homeScore : ''}" data-fixture="${f.id}" data-field="homeScore" style="width:40px">
               <span style="margin:0 .25rem;color:var(--neutral)">—</span>
@@ -373,6 +389,8 @@ const Leagues = (() => {
 
   function deleteLeague(id) {
     if (!confirm('Delete this league and all its fixtures?')) return;
+    const league = DB.getLeagues().find(l => l.id === id);
+    DB.writeAudit('league_deleted', 'league', `Deleted league: ${league ? league.name : id}`, id, league ? league.name : null);
     DB.deleteLeague(id);
     render();
     toast('League deleted');

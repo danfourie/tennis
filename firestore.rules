@@ -1,0 +1,134 @@
+rules_version = '2';
+
+// Tennis Court Manager — Firestore Security Rules (Multi-User)
+//
+// Roles (stored in /users/{uid}.role):
+//   'master' → full admin — can read/write everything
+//   'user'   → registered user — limited write access
+//    null    → anonymous visitor — read only
+//
+// To deploy:
+//   firebase deploy --only firestore:rules
+// (requires Firebase CLI: npm install -g firebase-tools)
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helper functions ─────────────────────────────────────────────────────
+
+    // Returns the role stored in the caller's /users/{uid} document.
+    // Uses get() — counts as one extra read per rule evaluation.
+    function getRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    // True when the signed-in user has role == 'master'.
+    function isMaster() {
+      return request.auth != null && getRole() == 'master';
+    }
+
+    // True for any signed-in user (regardless of role).
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // ── Venues ───────────────────────────────────────────────────────────────
+    // Public read; only master can write.
+    match /venues/{docId} {
+      allow read:  if true;
+      allow write: if isMaster();
+    }
+
+    // ── Schools ──────────────────────────────────────────────────────────────
+    match /schools/{docId} {
+      allow read:  if true;
+      allow write: if isMaster();
+    }
+
+    // ── Closures ─────────────────────────────────────────────────────────────
+    match /closures/{docId} {
+      allow read:  if true;
+      allow write: if isMaster();
+    }
+
+    // ── Settings ─────────────────────────────────────────────────────────────
+    match /settings/{docId} {
+      allow read:  if true;
+      allow write: if isMaster();
+    }
+
+    // ── Bookings ─────────────────────────────────────────────────────────────
+    // Read:   public (calendar is view-only for visitors)
+    // Create: master (direct booking) OR signed-in user creating their OWN
+    //         pending request (status must be 'pending', requestedBy == uid)
+    // Update: master (approve/reject/edit) OR owner of a pending request
+    // Delete: master OR owner of their own pending request
+    match /bookings/{docId} {
+      allow read: if true;
+
+      allow create: if isMaster()
+        || (isSignedIn()
+            && request.resource.data.status == 'pending'
+            && request.resource.data.requestedBy == request.auth.uid);
+
+      allow update: if isMaster()
+        || (isSignedIn()
+            && resource.data.requestedBy == request.auth.uid
+            && resource.data.status == 'pending');
+
+      allow delete: if isMaster()
+        || (isSignedIn()
+            && resource.data.requestedBy == request.auth.uid
+            && resource.data.status == 'pending');
+    }
+
+    // ── Leagues ──────────────────────────────────────────────────────────────
+    // Create / delete: master only.
+    // Update: any signed-in user (to enter scores).
+    match /leagues/{docId} {
+      allow read:   if true;
+      allow create: if isMaster();
+      allow delete: if isMaster();
+      allow update: if isSignedIn();
+    }
+
+    // ── Tournaments ──────────────────────────────────────────────────────────
+    // Same policy as leagues.
+    match /tournaments/{docId} {
+      allow read:   if true;
+      allow create: if isMaster();
+      allow delete: if isMaster();
+      allow update: if isSignedIn();
+    }
+
+    // ── Users ────────────────────────────────────────────────────────────────
+    // Read:   master can read all profiles; users can read their own.
+    // Create: any signed-in user can create their own profile (registration).
+    // Update: master can update any profile;
+    //         user can update their own BUT cannot change their own role.
+    // Delete: master only.
+    match /users/{uid} {
+      allow read:   if isMaster() || request.auth.uid == uid;
+
+      allow create: if request.auth != null && request.auth.uid == uid;
+
+      allow update: if isMaster()
+        || (request.auth != null
+            && request.auth.uid == uid
+            && request.resource.data.role == resource.data.role);
+
+      allow delete: if isMaster();
+    }
+
+    // ── Audit Log ────────────────────────────────────────────────────────────
+    // Read:   master only (contains who-did-what information).
+    // Create: any signed-in user (the app writes audit entries on their behalf).
+    // Update / Delete: nobody (immutable records).
+    match /auditLog/{docId} {
+      allow read:   if isMaster();
+      allow create: if isSignedIn();
+      allow update: if false;
+      allow delete: if false;
+    }
+  }
+}

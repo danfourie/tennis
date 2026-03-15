@@ -1,9 +1,16 @@
 /**
  * calendar.js — Weekly court availability calendar
+ *
+ * Role-aware behaviour:
+ *   Master  → can book slots directly (confirmed)
+ *   User    → can request slots (creates pending booking for master approval)
+ *             can cancel their own pending requests
+ *             can see all bookings and requests
+ *   Visitor → view-only; no clickable actions on available slots
  */
 
 const Calendar = (() => {
-  let currentWeekStart = weekStart(new Date());
+  let currentWeekStart  = weekStart(new Date());
   let currentVenueFilter = 'all';
 
   function init() {
@@ -28,14 +35,10 @@ const Calendar = (() => {
   }
 
   function populateVenueFilter() {
-    const sel = document.getElementById('venueFilter');
+    const sel    = document.getElementById('venueFilter');
     const venues = DB.getVenues();
-    // Remove old options except "All"
     while (sel.options.length > 1) sel.remove(1);
-    venues.forEach(v => {
-      const opt = new Option(v.name, v.id);
-      sel.add(opt);
-    });
+    venues.forEach(v => sel.add(new Option(v.name, v.id)));
   }
 
   function refresh() {
@@ -44,17 +47,15 @@ const Calendar = (() => {
   }
 
   function render() {
-    const container = document.getElementById('calendarContainer');
-    const venues = DB.getVenues();
+    const container      = document.getElementById('calendarContainer');
+    const venues         = DB.getVenues();
     const filteredVenues = currentVenueFilter === 'all'
       ? venues
       : venues.filter(v => v.id === currentVenueFilter);
 
-    // Week dates: Mon–Sun
-    const days = Array.from({ length: 7 }, (_, i) => addDays(currentWeekStart, i));
+    const days     = Array.from({ length: 7 }, (_, i) => addDays(currentWeekStart, i));
     const todayStr = toDateStr(new Date());
 
-    // Update week label
     document.getElementById('weekLabel').textContent =
       `${formatDateShort(days[0])} – ${formatDateShort(days[6])} ${days[0].getFullYear()}`;
 
@@ -63,23 +64,22 @@ const Calendar = (() => {
       return;
     }
 
-    const slots = getTimeSlots();
+    const slots    = getTimeSlots();
     const settings = DB.getSettings();
 
     let html = `<div class="calendar-grid">`;
 
-    // Header
-    html += `<div class="cal-header-row">
-      <div class="cal-header-time">Court</div>`;
+    // Header row
+    html += `<div class="cal-header-row"><div class="cal-header-time">Court</div>`;
     days.forEach((d, i) => {
-      const dStr = toDateStr(d);
+      const dStr    = toDateStr(d);
       const isToday = dStr === todayStr;
       html += `<div class="cal-header-day${isToday ? ' today' : ''}">
         <div class="cal-day-name">${DAY_NAMES[i]}</div>
         <div class="cal-day-num">${d.getDate()}</div>
       </div>`;
     });
-    html += `</div>`; // end header
+    html += `</div>`;
 
     // Venue sections
     filteredVenues.forEach(venue => {
@@ -92,8 +92,8 @@ const Calendar = (() => {
         html += `<div class="cal-court-label">Court ${ci + 1}</div>`;
 
         days.forEach(d => {
-          const dStr = toDateStr(d);
-          const isToday = dStr === todayStr;
+          const dStr       = toDateStr(d);
+          const isToday    = dStr === todayStr;
           const courtClosed = isCourtClosed(venue.id, ci, dStr, null);
           html += `<div class="cal-day-cell${isToday ? ' today' : ''}${courtClosed ? ' closed' : ''}">`;
 
@@ -104,13 +104,10 @@ const Calendar = (() => {
               html += _renderSlot(venue, ci, dStr, slot, courtClosed, settings.slotDuration);
             });
           }
-
           html += `</div>`;
         });
-
         html += `</div>`; // end court row
       }
-
       html += `</div>`; // end venue section
     });
 
@@ -120,21 +117,23 @@ const Calendar = (() => {
       <div class="legend-item"><div class="legend-dot" style="background:#fef3c7;border:1px solid #fcd34d"></div> Booked</div>
       <div class="legend-item"><div class="legend-dot" style="background:#ede9fe;border:1px solid #c4b5fd"></div> League</div>
       <div class="legend-item"><div class="legend-dot" style="background:#fce7f3;border:1px solid #f9a8d4"></div> Tournament</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#fff7ed;border:1px dashed #f97316"></div> Pending</div>
       <div class="legend-item"><div class="legend-dot" style="background:#f3f4f6;border:1px solid #d1d5db"></div> Closed</div>
     </div>`;
 
     html += `</div>`; // end grid
     container.innerHTML = html;
 
-    // Attach click handlers
+    // Click handlers — use data-slot-time (not data-slot) to get the actual time
     container.querySelectorAll('[data-slot]').forEach(el => {
       el.addEventListener('click', () => {
-        const { venue: vId, court, date, slot } = el.dataset;
+        const { venue: vId, court, date, slotTime: slot } = el.dataset;
         openSlotModal(vId, parseInt(court), date, slot);
       });
     });
   }
 
+  // ── Slot chip renderer ─────────────────────────────────────
   function _hasTimeSpecificClosure(venueId, courtIndex, dateStr) {
     return DB.getClosures().some(c => {
       if (c.venueId !== venueId) return false;
@@ -154,62 +153,126 @@ const Calendar = (() => {
 
     const booking = getSlotBooking(venue.id, ci, dStr, slot);
     if (booking) {
-      const type = booking.type || 'booking';
-      const cls = type === 'league' ? 'league' : type === 'tournament' ? 'tournament' : 'booked';
-      const label = esc(booking.label || booking.schoolName || 'Booked');
-      return `<button class="slot-chip ${cls}" data-slot="1" data-venue="${venue.id}" data-court="${ci}" data-date="${dStr}" data-slot-time="${slot}" title="${label} @ ${slot}">${label}<span class="slot-time">${slot}</span></button>`;
+      const isPending = booking.status === 'pending';
+      const type      = booking.type || 'booking';
+      const cls       = isPending ? 'pending-request'
+        : type === 'league'     ? 'league'
+        : type === 'tournament' ? 'tournament'
+        : 'booked';
+      const rawLabel  = booking.label || booking.schoolName || (isPending ? 'Pending' : 'Booked');
+      const label     = esc(rawLabel);
+      const badge     = isPending ? ' ⏳' : '';
+      return `<button class="slot-chip ${cls}" data-slot="1" data-venue="${venue.id}" data-court="${ci}" data-date="${dStr}" data-slot-time="${slot}" title="${label}${badge} @ ${slot}">${label}${badge}<span class="slot-time">${slot}</span></button>`;
     }
 
-    // Available
-    if (Auth.isAdmin()) {
+    // Available — clickable for logged-in users, static for visitors
+    if (Auth.isMaster()) {
       return `<button class="slot-chip available admin-can-book" data-slot="1" data-venue="${venue.id}" data-court="${ci}" data-date="${dStr}" data-slot-time="${slot}" title="Book this slot">${slot}</button>`;
+    }
+    if (Auth.isLoggedIn()) {
+      return `<button class="slot-chip available user-can-request" data-slot="1" data-venue="${venue.id}" data-court="${ci}" data-date="${dStr}" data-slot-time="${slot}" title="Request this slot">${slot}</button>`;
     }
     return `<span class="slot-chip available" title="Available">${slot}</span>`;
   }
 
+  // ── Slot modal ─────────────────────────────────────────────
   function openSlotModal(venueId, courtIndex, dateStr, timeStr) {
     const venue = DB.getVenues().find(v => v.id === venueId);
     if (!venue) return;
+
     const booking = getSlotBooking(venueId, courtIndex, dateStr, timeStr);
-    const title = document.getElementById('bookingModalTitle');
-    const body = document.getElementById('bookingModalBody');
-    const footer = document.getElementById('bookingModalFooter');
+    const title   = document.getElementById('bookingModalTitle');
+    const body    = document.getElementById('bookingModalBody');
+    const footer  = document.getElementById('bookingModalFooter');
 
     title.textContent = `Court ${courtIndex + 1} — ${esc(venue.name)}`;
 
     if (booking) {
-      // View / edit existing booking
-      const school = booking.schoolId ? DB.getSchools().find(s => s.id === booking.schoolId) : null;
+      // ── View existing booking ──────────────────────────────
+      const isPending  = booking.status === 'pending';
+      const school     = booking.schoolId ? DB.getSchools().find(s => s.id === booking.schoolId) : null;
+      const currentUid = Auth.getUser() ? Auth.getUser().uid : null;
+      const isOwnRequest = isPending && booking.requestedBy && booking.requestedBy === currentUid;
+
       body.innerHTML = `
         <div class="booking-detail">
+          ${isPending ? `<div class="pending-notice">⏳ Pending master approval</div>` : ''}
           <div class="booking-info-row">
             <div class="booking-info-item"><span class="label">Date</span><span class="value">${formatDate(dateStr)}</span></div>
             <div class="booking-info-item"><span class="label">Time</span><span class="value">${timeStr}</span></div>
             <div class="booking-info-item"><span class="label">Court</span><span class="value">Court ${courtIndex + 1}</span></div>
-            <div class="booking-info-item"><span class="label">Type</span><span class="value"><span class="badge badge-${booking.type === 'league' ? 'blue' : booking.type === 'tournament' ? 'amber' : 'green'}">${booking.type || 'booking'}</span></span></div>
+            <div class="booking-info-item"><span class="label">Type</span><span class="value">
+              <span class="badge badge-${isPending ? 'amber' : booking.type === 'league' ? 'blue' : booking.type === 'tournament' ? 'amber' : 'green'}">
+                ${isPending ? 'Pending' : (booking.type || 'booking')}
+              </span>
+            </span></div>
           </div>
           <div class="booking-info-row">
             <div class="booking-info-item"><span class="label">Booked by</span><span class="value">${esc(booking.label || booking.schoolName || '—')}</span></div>
             ${school ? `<div class="booking-info-item"><span class="label">School</span><span class="value">${esc(school.name)}</span></div>` : ''}
+            ${isPending ? `<div class="booking-info-item"><span class="label">Requested by</span><span class="value">${esc(booking.requestedByName || '?')}</span></div>` : ''}
             ${booking.notes ? `<div class="booking-info-item"><span class="label">Notes</span><span class="value">${esc(booking.notes)}</span></div>` : ''}
           </div>
         </div>`;
 
-      footer.innerHTML = Auth.isAdmin()
-        ? `<button class="btn btn-secondary" data-modal="bookingModal">Close</button>
-           <button class="btn btn-danger" id="deleteBookingBtn">Delete Booking</button>`
-        : `<button class="btn btn-secondary" data-modal="bookingModal">Close</button>`;
-
-      if (Auth.isAdmin()) {
+      if (Auth.isMaster() && isPending) {
+        // Master: approve or reject pending request
+        footer.innerHTML = `
+          <button class="btn btn-secondary" data-modal="bookingModal">Close</button>
+          <button class="btn btn-danger"    id="rejectBookingBtn">Reject</button>
+          <button class="btn btn-primary"   id="approveBookingBtn">Approve ✓</button>`;
+        document.getElementById('approveBookingBtn').onclick = () => {
+          DB.approveBooking(booking.id);
+          DB.writeAudit('booking_approved', 'booking',
+            `Approved request by ${esc(booking.requestedByName || 'user')}: ${esc(booking.label || '')} on ${dateStr}`,
+            booking.id, booking.label || '');
+          Modal.close('bookingModal');
+          render();
+          toast('Booking approved ✓', 'success');
+        };
+        document.getElementById('rejectBookingBtn').onclick = () => {
+          DB.rejectBooking(booking.id);
+          DB.writeAudit('booking_rejected', 'booking',
+            `Rejected request by ${esc(booking.requestedByName || 'user')}: ${esc(booking.label || '')} on ${dateStr}`,
+            booking.id, booking.label || '');
+          Modal.close('bookingModal');
+          render();
+          toast('Request rejected');
+        };
+      } else if (Auth.isMaster()) {
+        // Master: delete confirmed booking
+        footer.innerHTML = `
+          <button class="btn btn-secondary" data-modal="bookingModal">Close</button>
+          <button class="btn btn-danger" id="deleteBookingBtn">Delete Booking</button>`;
         document.getElementById('deleteBookingBtn').onclick = () => {
           DB.deleteBooking(booking.id);
+          DB.writeAudit('booking_deleted', 'booking',
+            `Booking deleted: ${esc(booking.label || '')} on ${dateStr}`,
+            booking.id, booking.label || '');
           Modal.close('bookingModal');
           render();
           toast('Booking deleted', 'success');
         };
+      } else if (isOwnRequest) {
+        // Owner: cancel own pending request
+        footer.innerHTML = `
+          <button class="btn btn-secondary" data-modal="bookingModal">Close</button>
+          <button class="btn btn-danger" id="cancelRequestBtn">Cancel My Request</button>`;
+        document.getElementById('cancelRequestBtn').onclick = () => {
+          DB.deleteBooking(booking.id);
+          DB.writeAudit('booking_cancelled', 'booking',
+            `Request cancelled by requester: ${esc(booking.label || '')} on ${dateStr}`,
+            booking.id, booking.label || '');
+          Modal.close('bookingModal');
+          render();
+          toast('Request cancelled');
+        };
+      } else {
+        footer.innerHTML = `<button class="btn btn-secondary" data-modal="bookingModal">Close</button>`;
       }
-    } else if (Auth.isAdmin()) {
-      // Create new booking
+
+    } else if (Auth.isMaster()) {
+      // ── Master: create a confirmed booking ────────────────
       const schools = DB.getSchools();
       body.innerHTML = `
         <div class="form-stack">
@@ -247,24 +310,24 @@ const Calendar = (() => {
           </div>
         </div>`;
 
-      // Populate slot picker
-      const slots = getTimeSlots();
-      const picker = document.getElementById('slotPicker');
+      const slots        = getTimeSlots();
+      const picker       = document.getElementById('slotPicker');
       const selectedSlots = new Set([timeStr]);
+
       slots.forEach(s => {
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'timeslot-btn' + (s === timeStr ? ' selected' : '');
+        const btn      = document.createElement('button');
+        btn.type       = 'button';
+        btn.className  = 'timeslot-btn' + (s === timeStr ? ' selected' : '');
         btn.textContent = s;
         const existing = getSlotBooking(venueId, courtIndex, dateStr, s);
-        const closed = isCourtClosed(venueId, courtIndex, dateStr, s);
+        const closed   = isCourtClosed(venueId, courtIndex, dateStr, s);
         if (existing || closed) {
           btn.disabled = true;
-          btn.title = existing ? 'Already booked' : 'Court closed';
+          btn.title    = existing ? 'Already booked' : 'Court closed';
         } else {
           btn.onclick = () => {
             if (selectedSlots.has(s)) { selectedSlots.delete(s); btn.classList.remove('selected'); }
-            else { selectedSlots.add(s); btn.classList.add('selected'); }
+            else                       { selectedSlots.add(s);    btn.classList.add('selected'); }
           };
         }
         picker.appendChild(btn);
@@ -272,31 +335,171 @@ const Calendar = (() => {
 
       footer.innerHTML = `
         <button class="btn btn-secondary" data-modal="bookingModal">Cancel</button>
-        <button class="btn btn-primary" id="saveBookingBtn">Save Booking</button>`;
+        <button class="btn btn-primary"   id="saveBookingBtn">Save Booking</button>`;
 
       document.getElementById('saveBookingBtn').onclick = () => {
-        const label = document.getElementById('newBookingLabel').value.trim();
-        const type = document.getElementById('newBookingType').value;
+        const label    = document.getElementById('newBookingLabel').value.trim();
+        const type     = document.getElementById('newBookingType').value;
         const schoolId = document.getElementById('newBookingSchool').value;
-        const notes = document.getElementById('newBookingNotes').value.trim();
-        const school = schoolId ? DB.getSchools().find(s => s.id === schoolId) : null;
+        const notes    = document.getElementById('newBookingNotes').value.trim();
+        const school   = schoolId ? DB.getSchools().find(s => s.id === schoolId) : null;
         if (selectedSlots.size === 0) { toast('Select at least one time slot', 'error'); return; }
+
         selectedSlots.forEach(sl => {
           DB.addBooking({
             venueId, courtIndex, date: dateStr, timeSlot: sl,
             type, schoolId: schoolId || null,
-            label: label || (school ? school.name : type),
+            label:      label || (school ? school.name : type),
             schoolName: school ? school.name : null,
             notes,
+            status:     'confirmed',
           });
         });
+        DB.writeAudit('booking_created', 'booking',
+          `Booked: ${label || type} on ${dateStr} (${[...selectedSlots].join(', ')}) at ${venue.name} Court ${courtIndex+1}`,
+          null, label || type);
         Modal.close('bookingModal');
         render();
         toast(`${selectedSlots.size} slot(s) booked`, 'success');
       };
+
+    } else if (Auth.isLoggedIn()) {
+      // ── Regular user: submit a booking request ────────────
+      const schools  = DB.getSchools();
+      const profile  = Auth.getProfile();
+      const mySchool = profile && profile.schoolId
+        ? schools.find(s => s.id === profile.schoolId) : null;
+
+      body.innerHTML = `
+        <div class="form-stack">
+          <div class="booking-info-row">
+            <div class="booking-info-item"><span class="label">Date</span><span class="value">${formatDate(dateStr)}</span></div>
+            <div class="booking-info-item"><span class="label">Court</span><span class="value">Court ${courtIndex + 1}</span></div>
+          </div>
+          <div class="form-group">
+            <label>Select Time Slot(s)</label>
+            <div class="timeslot-picker" id="slotPicker"></div>
+          </div>
+          <div class="form-group">
+            <label>Booking Type</label>
+            <select id="newBookingType">
+              <option value="booking">General Booking</option>
+              <option value="league">League Match</option>
+              <option value="practice">Practice</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>School (optional)</label>
+            <select id="newBookingSchool">
+              <option value="">-- No school --</option>
+              ${schools.map(s => `<option value="${s.id}"${mySchool && s.id === mySchool.id ? ' selected' : ''}>${esc(s.name)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Label / Name</label>
+            <input type="text" id="newBookingLabel" placeholder="e.g. Practice session">
+          </div>
+          <div class="form-group">
+            <label>Notes (optional)</label>
+            <input type="text" id="newBookingNotes" placeholder="Any extra details for the admin">
+          </div>
+          <p class="form-hint">⏳ Your request will be reviewed by the administrator before it is confirmed.</p>
+        </div>`;
+
+      const slots         = getTimeSlots();
+      const picker        = document.getElementById('slotPicker');
+      const selectedSlots = new Set([timeStr]);
+
+      slots.forEach(s => {
+        const btn      = document.createElement('button');
+        btn.type       = 'button';
+        btn.className  = 'timeslot-btn' + (s === timeStr ? ' selected' : '');
+        btn.textContent = s;
+        const existing  = getSlotBooking(venueId, courtIndex, dateStr, s);
+        const closed    = isCourtClosed(venueId, courtIndex, dateStr, s);
+        if (existing || closed) {
+          btn.disabled = true;
+          btn.title    = existing ? 'Already booked / pending' : 'Court closed';
+        } else {
+          btn.onclick = () => {
+            if (selectedSlots.has(s)) { selectedSlots.delete(s); btn.classList.remove('selected'); }
+            else                       { selectedSlots.add(s);    btn.classList.add('selected'); }
+          };
+        }
+        picker.appendChild(btn);
+      });
+
+      footer.innerHTML = `
+        <button class="btn btn-secondary" data-modal="bookingModal">Cancel</button>
+        <button class="btn btn-warning"   id="saveRequestBtn">Submit Request ⏳</button>`;
+
+      document.getElementById('saveRequestBtn').onclick = () => {
+        const label    = document.getElementById('newBookingLabel').value.trim();
+        const type     = document.getElementById('newBookingType').value;
+        const schoolId = document.getElementById('newBookingSchool').value;
+        const notes    = document.getElementById('newBookingNotes').value.trim();
+        const school   = schoolId ? DB.getSchools().find(s => s.id === schoolId) : null;
+        const user     = Auth.getUser();
+        const prof     = Auth.getProfile();
+        if (selectedSlots.size === 0) { toast('Select at least one time slot', 'error'); return; }
+
+        selectedSlots.forEach(sl => {
+          DB.addBooking({
+            venueId, courtIndex, date: dateStr, timeSlot: sl,
+            type, schoolId: schoolId || null,
+            label:             label || (school ? school.name : type),
+            schoolName:        school ? school.name : null,
+            notes,
+            status:            'pending',
+            requestedBy:       user ? user.uid : null,
+            requestedByName:   prof ? (prof.displayName || prof.email) : (user ? user.email : 'Unknown'),
+            requestedAt:       new Date().toISOString(),
+          });
+        });
+        DB.writeAudit('booking_requested', 'booking',
+          `Request submitted by ${prof ? (prof.displayName || prof.email) : 'user'}: ${label || type} on ${dateStr} at ${venue.name} Court ${courtIndex+1}`,
+          null, label || type);
+        Modal.close('bookingModal');
+        render();
+        toast(`${selectedSlots.size} slot request(s) submitted for approval`, 'success');
+      };
+
     } else {
-      body.innerHTML = `<p class="text-muted text-center">This slot is available. Login as master to book.</p>`;
+      // ── Visitor ───────────────────────────────────────────
+      body.innerHTML = `
+        <div style="text-align:center;padding:1rem">
+          <p class="text-muted">This slot is available.</p>
+          <p style="margin-top:.5rem;font-size:.9rem">
+            <a href="#" id="loginFromSlot" style="color:var(--primary);font-weight:600">Log in</a> or
+            <a href="#" id="registerFromSlot" style="color:var(--primary);font-weight:600">register</a>
+            to request a booking.
+          </p>
+        </div>`;
       footer.innerHTML = `<button class="btn btn-secondary" data-modal="bookingModal">Close</button>`;
+
+      document.getElementById('loginFromSlot').onclick = e => {
+        e.preventDefault();
+        Modal.close('bookingModal');
+        document.getElementById('loginEmail').value = '';
+        document.getElementById('loginPassword').value = '';
+        document.getElementById('loginError').textContent = '';
+        Modal.open('loginModal');
+        setTimeout(() => document.getElementById('loginEmail').focus(), 50);
+      };
+      document.getElementById('registerFromSlot').onclick = e => {
+        e.preventDefault();
+        Modal.close('bookingModal');
+        // Populate school select
+        const sel = document.getElementById('regSchool');
+        sel.innerHTML = '<option value="">-- No school --</option>' +
+          DB.getSchools().map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+        ['regName','regEmail','regPassword','regConfirm'].forEach(id => {
+          document.getElementById(id).value = '';
+        });
+        document.getElementById('registerError').textContent = '';
+        Modal.open('registerModal');
+        setTimeout(() => document.getElementById('regName').focus(), 50);
+      };
     }
 
     Modal.open('bookingModal');

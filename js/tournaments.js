@@ -117,8 +117,15 @@ const Tournaments = (() => {
     // Generate draw
     t.draw = generateDraw(t);
 
-    if (id) { DB.updateTournament(t); toast('Tournament updated', 'success'); }
-    else { DB.addTournament(t); toast('Tournament created', 'success'); }
+    if (id) {
+      DB.updateTournament(t);
+      DB.writeAudit('tournament_updated', 'tournament', `Updated tournament: ${name}`, t.id, name);
+      toast('Tournament updated', 'success');
+    } else {
+      DB.addTournament(t);
+      DB.writeAudit('tournament_created', 'tournament', `Created tournament: ${name}`, t.id, name);
+      toast('Tournament created', 'success');
+    }
 
     Modal.close('tournamentModal');
     render();
@@ -470,14 +477,14 @@ const Tournaments = (() => {
 
     body.innerHTML = `<div class="draw-container">${metaHtml}${drawHtml}</div>`;
 
-    // Score editing
-    if (Auth.isAdmin()) {
+    // Score editing — any logged-in user can enter scores
+    if (Auth.isLoggedIn()) {
       body.querySelectorAll('.match-score-input').forEach(inp => {
         inp.addEventListener('change', () => _saveMatchScore(t, inp));
       });
     }
 
-    // Show admin edit players button
+    // Show edit players button — master only
     const editBtn = document.getElementById('drawAddPlayersBtn');
     editBtn.classList.toggle('hidden', !Auth.isAdmin());
 
@@ -503,10 +510,10 @@ const Tournaments = (() => {
         const p2Bye = m.p2 && m.p2.bye;
 
         const scoreDisplay = m.score && m.score !== 'BYE'
-          ? Auth.isAdmin()
+          ? Auth.isLoggedIn()
             ? `<input class="match-score-input editable-score" value="${m.score}" data-match="${m.id}" data-tournament="${t.id}" data-bracket="main" style="width:60px;text-align:center">`
             : `<span>${m.score}</span>`
-          : m.score === 'BYE' ? '' : Auth.isAdmin()
+          : m.score === 'BYE' ? '' : Auth.isLoggedIn()
             ? `<input class="match-score-input editable-score" value="" placeholder="6-4" data-match="${m.id}" data-tournament="${t.id}" data-bracket="main" style="width:60px;text-align:center">`
             : '';
 
@@ -585,7 +592,7 @@ const Tournaments = (() => {
       g.matches.forEach(m => {
         const p1 = m.p1, p2 = m.p2;
         const scored = m.score && m.score !== 'BYE';
-        const scoreField = Auth.isAdmin()
+        const scoreField = Auth.isLoggedIn()
           ? `<input class="match-score-input editable-score" value="${m.score || ''}" placeholder="6-4" data-match="${m.id}" data-tournament="${t.id}" data-bracket="spider" data-group="${g.id}">`
           : `<span>${m.score || '—'}</span>`;
 
@@ -684,6 +691,7 @@ const Tournaments = (() => {
     }
 
     DB.updateTournament(t);
+    DB.writeAudit('score_updated', 'tournament', `Match score entered: ${score}`, t.id, t.name);
     toast('Score saved', 'success');
   }
 
@@ -796,6 +804,8 @@ const Tournaments = (() => {
 
   function deleteTournament(id) {
     if (!confirm('Delete this tournament?')) return;
+    const t = DB.getTournaments().find(x => x.id === id);
+    DB.writeAudit('tournament_deleted', 'tournament', `Deleted tournament: ${t ? t.name : id}`, id, t ? t.name : null);
     DB.deleteTournament(id);
     render();
     toast('Tournament deleted');
