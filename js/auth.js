@@ -89,6 +89,11 @@ const Auth = (() => {
       _profile = profile;
       _role    = role;
 
+      // Re-sync UI now that role is confirmed — onAuthStateChanged fired
+      // earlier (before the profile doc existed) and set role to 'user'.
+      _updateUI();
+      _refreshViews();
+
       return { ok: true, role };
     } catch (err) {
       return { ok: false, error: _authMsg(err) };
