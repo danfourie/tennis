@@ -254,13 +254,28 @@ const Admin = (() => {
     toast('Closure added', 'success');
   }
 
-  // ---- PASSWORD ----
-  function changePassword() {
+  // ---- PASSWORD (via Firebase Auth) ----
+  async function changePassword() {
     const np = document.getElementById('newPassword').value;
-    if (!np || np.length < 4) { toast('Password must be at least 4 characters', 'error'); return; }
-    DB.setPassword(np);
-    document.getElementById('newPassword').value = '';
-    toast('Password updated', 'success');
+    if (!np || np.length < 6) { toast('Password must be at least 6 characters', 'error'); return; }
+    const btn = document.getElementById('changePasswordBtn');
+    btn.disabled = true;
+    btn.textContent = 'Updating…';
+    try {
+      await Auth.changePassword(np);
+      document.getElementById('newPassword').value = '';
+      toast('Password updated ✓', 'success');
+    } catch (err) {
+      // Firebase requires recent sign-in for sensitive ops
+      if (err.code === 'auth/requires-recent-login') {
+        toast('Please log out and sign in again before changing your password', 'error');
+      } else {
+        toast('Error: ' + err.message, 'error');
+      }
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Update';
+    }
   }
 
   return { init, refresh };
