@@ -48,8 +48,9 @@ const Auth = (() => {
       const doc = await firebase.firestore().collection('users').doc(uid).get();
       _profile = doc.exists ? doc.data() : null;
       _role    = _profile ? (_profile.role || 'user') : 'user';
+      console.log('[Auth] profile loaded — uid:', uid, '| role:', _role, '| exists:', doc.exists);
     } catch (err) {
-      console.warn('Could not load user profile:', err);
+      console.warn('[Auth] Could not load user profile (permissions?):', err.code, err.message);
       _role = 'user';
     }
   }

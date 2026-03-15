@@ -6,20 +6,17 @@ rules_version = '2';
 //   'master' → full admin — can read/write everything
 //   'user'   → registered user — limited write access
 //    null    → anonymous visitor — read only
-//
-// To deploy:
-//   firebase deploy --only firestore:rules
-// (requires Firebase CLI: npm install -g firebase-tools)
 
 service cloud.firestore {
   match /databases/{database}/documents {
 
     // ── Helper functions ─────────────────────────────────────────────────────
 
-    // Returns the role stored in the caller's /users/{uid} document.
-    // Uses get() — counts as one extra read per rule evaluation.
+    // Safely returns the role stored in /users/{uid}.
+    // Uses exists() first so .data never throws a null-pointer error.
     function getRole() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+      let ref = /databases/$(database)/documents/users/$(request.auth.uid);
+      return exists(ref) ? get(ref).data.role : null;
     }
 
     // True when the signed-in user has role == 'master'.
@@ -33,7 +30,6 @@ service cloud.firestore {
     }
 
     // ── Venues ───────────────────────────────────────────────────────────────
-    // Public read; only master can write.
     match /venues/{docId} {
       allow read:  if true;
       allow write: if isMaster();
@@ -58,11 +54,6 @@ service cloud.firestore {
     }
 
     // ── Bookings ─────────────────────────────────────────────────────────────
-    // Read:   public (calendar is view-only for visitors)
-    // Create: master (direct booking) OR signed-in user creating their OWN
-    //         pending request (status must be 'pending', requestedBy == uid)
-    // Update: master (approve/reject/edit) OR owner of a pending request
-    // Delete: master OR owner of their own pending request
     match /bookings/{docId} {
       allow read: if true;
 
@@ -83,8 +74,6 @@ service cloud.firestore {
     }
 
     // ── Leagues ──────────────────────────────────────────────────────────────
-    // Create / delete: master only.
-    // Update: any signed-in user (to enter scores).
     match /leagues/{docId} {
       allow read:   if true;
       allow create: if isMaster();
@@ -93,7 +82,6 @@ service cloud.firestore {
     }
 
     // ── Tournaments ──────────────────────────────────────────────────────────
-    // Same policy as leagues.
     match /tournaments/{docId} {
       allow read:   if true;
       allow create: if isMaster();
@@ -102,13 +90,13 @@ service cloud.firestore {
     }
 
     // ── Users ────────────────────────────────────────────────────────────────
-    // Read:   master can read all profiles; users can read their own.
-    // Create: any signed-in user can create their own profile (registration).
-    // Update: master can update any profile;
-    //         user can update their own BUT cannot change their own role.
-    // Delete: master only.
+    // IMPORTANT: self-read is checked WITHOUT calling isMaster() to avoid
+    // a circular get() that would deny the read before the role is known.
     match /users/{uid} {
-      allow read:   if isMaster() || request.auth.uid == uid;
+      // Any authenticated user can always read their own profile
+      allow read: if request.auth != null && request.auth.uid == uid;
+      // Master can read all profiles
+      allow read: if isMaster();
 
       allow create: if request.auth != null && request.auth.uid == uid;
 
@@ -121,9 +109,6 @@ service cloud.firestore {
     }
 
     // ── Audit Log ────────────────────────────────────────────────────────────
-    // Read:   master only (contains who-did-what information).
-    // Create: any signed-in user (the app writes audit entries on their behalf).
-    // Update / Delete: nobody (immutable records).
     match /auditLog/{docId} {
       allow read:   if isMaster();
       allow create: if isSignedIn();
