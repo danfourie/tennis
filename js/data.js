@@ -5,12 +5,11 @@
  *   • All READ methods are synchronous — they pull from an in-memory cache.
  *   • All WRITE methods update the cache immediately (so the UI stays snappy)
  *     and fire an async Firestore write in the background.
- *   • DB.loadAll()     → called once on startup; populates the cache from Firestore.
- *   • DB.subscribeAll()→ sets up real-time onSnapshot listeners so every browser
- *                        tab stays in sync automatically.
- *
- * This design means calendar.js / leagues.js / admin.js etc. need NO changes
- * to their synchronous DB.getXxx() calls.
+ *   • DB.loadAll()      → called once on startup; populates the cache from Firestore.
+ *   • DB.subscribeAll() → real-time onSnapshot listeners so every browser tab
+ *                         stays in sync automatically.
+ *   • DB.loadUsers()    → async, fetched separately (master-only, for Admin panel).
+ *   • DB.writeAudit()   → lightweight event log stored in the auditLog collection.
  */
 
 // ============================================================
@@ -23,6 +22,7 @@ const _cache = {
   leagues:     [],
   tournaments: [],
   closures:    [],
+  users:       [],   // loaded on demand by master
   settings: {
     timeSlotStart: '07:00',
     timeSlotEnd:   '21:00',
@@ -33,9 +33,9 @@ const _cache = {
 // ============================================================
 // FIRESTORE SHORTHAND
 // ============================================================
-function _fs() { return firebase.firestore(); }
-function _col(name) { return _fs().collection(name); }
-function _doc(col, id) { return _fs().collection(col).doc(id); }
+function _fs()        { return firebase.firestore(); }
+function _col(name)   { return _fs().collection(name); }
+function _doc(col,id) { return _fs().collection(col).doc(id); }
 
 // ============================================================
 // DB OBJECT
@@ -51,12 +51,10 @@ const DB = {
     _doc('venues', venue.id).set(venue).catch(console.error);
     return venue;
   },
-
   updateVenue(venue) {
     _cache.venues = _cache.venues.map(v => v.id === venue.id ? venue : v);
     _doc('venues', venue.id).set(venue).catch(console.error);
   },
-
   deleteVenue(id) {
     _cache.venues = _cache.venues.filter(v => v.id !== id);
     _doc('venues', id).delete().catch(console.error);
@@ -71,12 +69,10 @@ const DB = {
     _doc('schools', school.id).set(school).catch(console.error);
     return school;
   },
-
   updateSchool(school) {
     _cache.schools = _cache.schools.map(s => s.id === school.id ? school : s);
     _doc('schools', school.id).set(school).catch(console.error);
   },
-
   deleteSchool(id) {
     _cache.schools = _cache.schools.filter(s => s.id !== id);
     _doc('schools', id).delete().catch(console.error);
@@ -91,23 +87,35 @@ const DB = {
     _doc('bookings', booking.id).set(booking).catch(console.error);
     return booking;
   },
-
   updateBooking(booking) {
     _cache.bookings = _cache.bookings.map(b => b.id === booking.id ? booking : b);
     _doc('bookings', booking.id).set(booking).catch(console.error);
   },
-
   deleteBooking(id) {
     _cache.bookings = _cache.bookings.filter(b => b.id !== id);
     _doc('bookings', id).delete().catch(console.error);
   },
-
   getBookingsForCell(venueId, courtIndex, dateStr) {
     return _cache.bookings.filter(b =>
-      b.venueId     === venueId  &&
-      b.courtIndex  === courtIndex &&
-      b.date        === dateStr
+      b.venueId    === venueId &&
+      b.courtIndex === courtIndex &&
+      b.date       === dateStr
     );
+  },
+
+  // ── Pending booking helpers ────────────────────────────────
+  getPendingBookings() {
+    return _cache.bookings.filter(b => b.status === 'pending');
+  },
+  approveBooking(id) {
+    const booking = _cache.bookings.find(b => b.id === id);
+    if (!booking) return;
+    booking.status = 'confirmed';
+    booking.approvedAt = new Date().toISOString();
+    this.updateBooking(booking);
+  },
+  rejectBooking(id) {
+    this.deleteBooking(id);
   },
 
   // ── Leagues ───────────────────────────────────────────────
@@ -119,12 +127,10 @@ const DB = {
     _doc('leagues', league.id).set(league).catch(console.error);
     return league;
   },
-
   updateLeague(league) {
     _cache.leagues = _cache.leagues.map(l => l.id === league.id ? league : l);
     _doc('leagues', league.id).set(league).catch(console.error);
   },
-
   deleteLeague(id) {
     _cache.leagues = _cache.leagues.filter(l => l.id !== id);
     _doc('leagues', id).delete().catch(console.error);
@@ -139,12 +145,10 @@ const DB = {
     _doc('tournaments', t.id).set(t).catch(console.error);
     return t;
   },
-
   updateTournament(t) {
     _cache.tournaments = _cache.tournaments.map(x => x.id === t.id ? t : x);
     _doc('tournaments', t.id).set(t).catch(console.error);
   },
-
   deleteTournament(id) {
     _cache.tournaments = _cache.tournaments.filter(t => t.id !== id);
     _doc('tournaments', id).delete().catch(console.error);
@@ -159,15 +163,81 @@ const DB = {
     _doc('closures', c.id).set(c).catch(console.error);
     return c;
   },
-
   deleteClosure(id) {
     _cache.closures = _cache.closures.filter(c => c.id !== id);
     _doc('closures', id).delete().catch(console.error);
   },
 
-  // ── Password (legacy stub — now handled by Firebase Auth) ─
+  // ── Users (master-only, loaded on demand) ─────────────────
+  getUsers() { return _cache.users; },
+
+  async loadUsers() {
+    try {
+      const snap = await _col('users').get();
+      _cache.users = snap.docs.map(d => d.data());
+    } catch (err) {
+      console.warn('Could not load users:', err);
+    }
+    return _cache.users;
+  },
+
+  updateUser(user) {
+    _cache.users = _cache.users.map(u => u.uid === user.uid ? user : u);
+    _doc('users', user.uid).set(user).catch(console.error);
+  },
+
+  deleteUserProfile(uid) {
+    _cache.users = _cache.users.filter(u => u.uid !== uid);
+    _doc('users', uid).delete().catch(console.error);
+  },
+
+  // ── Audit Log ─────────────────────────────────────────────
+  /**
+   * Write an immutable audit record to the auditLog Firestore collection.
+   * Called by all modules whenever a significant action is taken.
+   *
+   * @param {string} action      - Short action key, e.g. 'booking_approved'
+   * @param {string} category    - 'booking' | 'league' | 'tournament' | 'admin' | 'user'
+   * @param {string} description - Human-readable description of what happened
+   * @param {string} [entityId]  - ID of the primary affected document
+   * @param {string} [entityName]- Name of the primary affected document
+   */
+  writeAudit(action, category, description, entityId, entityName) {
+    try {
+      const profile = typeof Auth !== 'undefined' ? Auth.getProfile() : null;
+      const entry = {
+        id:          uid(),
+        action,
+        category,
+        description,
+        entityId:    entityId   || null,
+        entityName:  entityName || null,
+        by:          profile ? (profile.displayName || profile.email) : 'System',
+        byUid:       profile ? profile.uid : null,
+        at:          new Date().toISOString(),
+      };
+      _doc('auditLog', entry.id).set(entry).catch(console.error);
+    } catch (err) {
+      console.warn('Audit write failed:', err);
+    }
+  },
+
+  async loadAuditLog(limit = 100) {
+    try {
+      const snap = await _col('auditLog')
+        .orderBy('at', 'desc')
+        .limit(limit)
+        .get();
+      return snap.docs.map(d => d.data());
+    } catch (err) {
+      console.warn('Could not load audit log:', err);
+      return [];
+    }
+  },
+
+  // ── Password (legacy stub) ────────────────────────────────
   getPassword() { return null; },
-  setPassword()  { /* no-op: password changes go through Auth.changePassword() */ },
+  setPassword()  { /* handled by Auth.changePassword() */ },
 
   // ── Settings ──────────────────────────────────────────────
   getSettings() { return _cache.settings; },
@@ -177,10 +247,8 @@ const DB = {
     _doc('settings', 'global').set(s).catch(console.error);
   },
 
-  // ── Load all collections from Firestore (called on startup) ──
+  // ── Load all public collections from Firestore ────────────
   async loadAll() {
-    const db = _fs();
-
     const [venues, schools, bookings, leagues, tournaments, closures, settingsDoc] =
       await Promise.all([
         _col('venues').get(),
@@ -200,18 +268,11 @@ const DB = {
     _cache.closures    = closures.docs.map(d => d.data());
     if (settingsDoc.exists) _cache.settings = settingsDoc.data();
 
-    // Seed demo data only when this is a brand-new Firestore project
-    if (_cache.venues.length === 0) {
-      await this._seed();
-    }
+    // Seed demo data if this is a brand-new project
+    if (_cache.venues.length === 0) await this._seed();
   },
 
-  // ── Real-time subscriptions ────────────────────────────────
-  /**
-   * Sets up onSnapshot listeners for every collection.
-   * @param {Function} onUpdate  Called with the collection name after each update.
-   * @returns {Function}         Call to unsubscribe all listeners.
-   */
+  // ── Real-time subscriptions ───────────────────────────────
   subscribeAll(onUpdate) {
     const unsubs = [];
 
@@ -221,7 +282,7 @@ const DB = {
           _cache[cacheKey] = snap.docs.map(d => d.data());
           if (onUpdate) onUpdate(colName);
         },
-        err => console.warn(`Firestore listener error [${colName}]:`, err)
+        err => console.warn(`Firestore listener [${colName}]:`, err)
       );
       unsubs.push(unsub);
     };
@@ -233,26 +294,23 @@ const DB = {
     watch('tournaments', 'tournaments');
     watch('closures',    'closures');
 
-    // Settings doc listener
-    const settingsUnsub = _doc('settings', 'global').onSnapshot(
-      doc => {
-        if (doc.exists) {
-          _cache.settings = doc.data();
-          if (onUpdate) onUpdate('settings');
-        }
-      },
-      err => console.warn('Firestore listener error [settings]:', err)
+    unsubs.push(
+      _doc('settings', 'global').onSnapshot(
+        doc => {
+          if (doc.exists) { _cache.settings = doc.data(); if (onUpdate) onUpdate('settings'); }
+        },
+        err => console.warn('Firestore listener [settings]:', err)
+      )
     );
-    unsubs.push(settingsUnsub);
 
     return () => unsubs.forEach(u => u());
   },
 
-  // ── Seed demo data into Firestore ─────────────────────────
+  // ── Demo seed data ────────────────────────────────────────
   async _seed() {
-    const v1 = this.addVenue({ name: 'Riverside Tennis Club',  address: '1 River Rd',   courts: 4 });
-    const v2 = this.addVenue({ name: 'Central Sports Complex', address: '20 Main St',   courts: 6 });
-    const v3 = this.addVenue({ name: 'Eastside Academy',       address: '5 East Ave',   courts: 3 });
+    const v1 = this.addVenue({ name: 'Riverside Tennis Club',  address: '1 River Rd',  courts: 4 });
+    const v2 = this.addVenue({ name: 'Central Sports Complex', address: '20 Main St',  courts: 6 });
+    const v3 = this.addVenue({ name: 'Eastside Academy',       address: '5 East Ave',  courts: 3 });
     this.addSchool({ name: 'Greenview High',    venueId: v1.id, contact: 'Coach Adams', color: '#3b82f6' });
     this.addSchool({ name: 'Sunridge College',  venueId: v2.id, contact: 'Coach Brown', color: '#f59e0b' });
     this.addSchool({ name: 'Northpeak Academy', venueId: v3.id, contact: 'Coach Chen',  color: '#ef4444' });
@@ -261,7 +319,7 @@ const DB = {
 };
 
 // ============================================================
-// HELPER FUNCTIONS (unchanged from original)
+// HELPER FUNCTIONS
 // ============================================================
 
 function isCourtClosed(venueId, courtIndex, dateStr, timeStr) {
@@ -278,25 +336,23 @@ function isCourtClosed(venueId, courtIndex, dateStr, timeStr) {
 
 function getSlotBooking(venueId, courtIndex, dateStr, timeStr) {
   return DB.getBookings().find(b =>
-    b.venueId     === venueId  &&
-    b.courtIndex  === courtIndex &&
-    b.date        === dateStr  &&
-    b.timeSlot    === timeStr
+    b.venueId    === venueId &&
+    b.courtIndex === courtIndex &&
+    b.date       === dateStr &&
+    b.timeSlot   === timeStr
   );
 }
 
-// Unique ID generator
 function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 }
 
-// Date helpers
-function toDateStr(d)      { return d.toISOString().slice(0, 10); }
-function parseDate(str)    { const [y, m, d] = str.split('-').map(Number); return new Date(y, m - 1, d); }
-function weekStart(d)      { const day = new Date(d); day.setDate(day.getDate() - day.getDay() + 1); return day; }
-function addDays(d, n)     { const r = new Date(d); r.setDate(r.getDate() + n); return r; }
-function formatDate(str)   { return parseDate(str).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' }); }
-function formatDateShort(d){ return d.toLocaleDateString('en-ZA', { day: 'numeric', month: 'short' }); }
+function toDateStr(d)       { return d.toISOString().slice(0, 10); }
+function parseDate(str)     { const [y, m, d] = str.split('-').map(Number); return new Date(y, m - 1, d); }
+function weekStart(d)       { const day = new Date(d); day.setDate(day.getDate() - day.getDay() + 1); return day; }
+function addDays(d, n)      { const r = new Date(d); r.setDate(r.getDate() + n); return r; }
+function formatDate(str)    { return parseDate(str).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' }); }
+function formatDateShort(d) { return d.toLocaleDateString('en-ZA', { day: 'numeric', month: 'short' }); }
 
 const DAY_NAMES      = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const DAY_NAMES_FULL = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];

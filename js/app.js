@@ -1,15 +1,14 @@
 /**
  * app.js — Main application bootstrap and shared utilities
  *
- * Firebase initialisation is async, so the boot sequence is:
- *   1. DOMContentLoaded fires
- *   2. Show loading overlay
- *   3. firebase.initializeApp(FIREBASE_CONFIG)
- *   4. DB.loadAll()  — fetch all Firestore collections into the in-memory cache
- *   5. DB.subscribeAll() — attach real-time listeners for live updates
- *   6. Auth.init()   — attach onAuthStateChanged
- *   7. Init all UI modules (Calendar, Leagues, Tournaments, Admin)
- *   8. Hide loading overlay
+ * Boot sequence:
+ *   1. Show loading overlay
+ *   2. firebase.initializeApp(FIREBASE_CONFIG)
+ *   3. DB.loadAll()        — fetch all Firestore collections into the in-memory cache
+ *   4. DB.subscribeAll()   — attach real-time listeners for live updates
+ *   5. Auth.init()         — attach onAuthStateChanged
+ *   6. Init all UI modules
+ *   7. Hide loading overlay
  */
 
 // ================================================================
@@ -84,8 +83,7 @@ function showFatalError(msg) {
       <div class="loading-icon">⚠️</div>
       <div class="loading-message">${esc(msg)}</div>
       <p style="font-size:.85rem;color:#6b7280;margin-top:.5rem">
-        Check your Firebase configuration in <code>js/firebase-config.js</code>
-        and see <strong>FIREBASE-SETUP.md</strong> for instructions.
+        Check <code>js/firebase-config.js</code> and see <strong>FIREBASE-SETUP.md</strong>.
       </p>
       <button onclick="location.reload()" class="btn btn-primary" style="margin-top:1rem">Retry</button>
     </div>`;
@@ -99,30 +97,29 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   setLoading(true, 'Connecting to Firebase…');
 
-  // ── 1. Validate config ──────────────────────────────────
+  // ── Validate config ──────────────────────────────────────
   if (!FIREBASE_CONFIG || FIREBASE_CONFIG.apiKey === 'YOUR_API_KEY') {
     showFatalError('Firebase is not configured. Please fill in js/firebase-config.js.');
     return;
   }
 
   try {
-    // ── 2. Initialise Firebase ───────────────────────────
+    // ── Initialise Firebase ─────────────────────────────────
     firebase.initializeApp(FIREBASE_CONFIG);
 
-    // ── 3. Load all data from Firestore ──────────────────
+    // ── Load data from Firestore ────────────────────────────
     setLoading(true, 'Loading data…');
     await DB.loadAll();
 
-    // ── 4. Subscribe to real-time updates ────────────────
+    // ── Subscribe to real-time updates ──────────────────────
     DB.subscribeAll(collection => {
-      // Re-render the relevant view whenever Firestore pushes an update
       if (['venues', 'bookings', 'closures'].includes(collection)) Calendar.refresh();
       if (['venues', 'schools', 'closures'].includes(collection)) Admin.refresh();
-      if (['leagues', 'schools', 'venues'].includes(collection)) Leagues.refresh();
-      if (['tournaments', 'venues'].includes(collection)) Tournaments.refresh();
+      if (['leagues', 'schools', 'venues'].includes(collection))  Leagues.refresh();
+      if (['tournaments', 'venues'].includes(collection))          Tournaments.refresh();
     });
 
-    // ── 5. Initialise modules ────────────────────────────
+    // ── Initialise UI modules ───────────────────────────────
     Auth.init();
     Calendar.init();
     Leagues.init();
@@ -137,7 +134,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   setLoading(false);
 
-  // ── Navigation ───────────────────────────────────────────
+  // ── Navigation ─────────────────────────────────────────────
   document.querySelectorAll('.nav-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const view = btn.dataset.view;
@@ -146,9 +143,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   });
 
-  // ── Login button ─────────────────────────────────────────
+  // ── Login ──────────────────────────────────────────────────
   document.getElementById('loginBtn').addEventListener('click', () => {
-    document.getElementById('loginEmail').value = '';
+    document.getElementById('loginEmail').value    = '';
     document.getElementById('loginPassword').value = '';
     document.getElementById('loginError').textContent = '';
     Modal.open('loginModal');
@@ -162,8 +159,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   document.getElementById('loginSubmitBtn').addEventListener('click', doLogin);
-
-  // Allow Enter key in either login field
   ['loginEmail', 'loginPassword'].forEach(id => {
     document.getElementById(id).addEventListener('keydown', e => {
       if (e.key === 'Enter') doLogin();
@@ -175,34 +170,79 @@ document.addEventListener('DOMContentLoaded', async () => {
     const password = document.getElementById('loginPassword').value;
     const errEl    = document.getElementById('loginError');
 
-    if (!email || !password) {
-      errEl.textContent = 'Enter email and password';
-      return;
-    }
+    if (!email || !password) { errEl.textContent = 'Enter email and password'; return; }
 
-    const loginBtn = document.getElementById('loginSubmitBtn');
-    loginBtn.disabled = true;
-    loginBtn.textContent = 'Signing in…';
+    const btn = document.getElementById('loginSubmitBtn');
+    btn.disabled = true; btn.textContent = 'Signing in…';
     errEl.textContent = '';
 
     const result = await Auth.login(email, password);
 
-    loginBtn.disabled = false;
-    loginBtn.textContent = 'Login';
+    btn.disabled = false; btn.textContent = 'Login';
 
     if (result.ok) {
       Modal.close('loginModal');
-      Admin.refresh();
-      Calendar.refresh();
-      Leagues.refresh();
-      Tournaments.refresh();
-      toast('Welcome, Master! 🔑', 'success');
+      toast('Welcome back! 🎾', 'success');
     } else {
       errEl.textContent = result.error || 'Login failed';
     }
   }
 
-  // ── Modal close buttons ──────────────────────────────────
+  // ── Register ───────────────────────────────────────────────
+  document.getElementById('registerBtn').addEventListener('click', () => {
+    // Populate school dropdown
+    const sel = document.getElementById('regSchool');
+    sel.innerHTML = '<option value="">-- No school --</option>' +
+      DB.getSchools().map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+    // Clear form
+    ['regName','regEmail','regPassword','regConfirm'].forEach(id => {
+      document.getElementById(id).value = '';
+    });
+    document.getElementById('registerError').textContent = '';
+    Modal.open('registerModal');
+    setTimeout(() => document.getElementById('regName').focus(), 50);
+  });
+
+  document.getElementById('registerSubmitBtn').addEventListener('click', doRegister);
+  document.getElementById('regConfirm').addEventListener('keydown', e => {
+    if (e.key === 'Enter') doRegister();
+  });
+
+  async function doRegister() {
+    const name     = document.getElementById('regName').value.trim();
+    const email    = document.getElementById('regEmail').value.trim();
+    const password = document.getElementById('regPassword').value;
+    const confirm  = document.getElementById('regConfirm').value;
+    const schoolId = document.getElementById('regSchool').value || null;
+    const errEl    = document.getElementById('registerError');
+
+    if (!name)                      { errEl.textContent = 'Full name is required';              return; }
+    if (!email)                     { errEl.textContent = 'Email is required';                   return; }
+    if (password.length < 6)        { errEl.textContent = 'Password must be at least 6 characters'; return; }
+    if (password !== confirm)       { errEl.textContent = 'Passwords do not match';              return; }
+
+    const btn = document.getElementById('registerSubmitBtn');
+    btn.disabled = true; btn.textContent = 'Creating account…';
+    errEl.textContent = '';
+
+    const result = await Auth.register(email, password, name, schoolId);
+
+    btn.disabled = false; btn.textContent = 'Create Account';
+
+    if (result.ok) {
+      Modal.close('registerModal');
+      const isMaster = result.role === 'master';
+      toast(
+        isMaster ? 'Welcome, Master! You are the first user. 🔑' : 'Account created! Welcome 🎾',
+        'success'
+      );
+      if (isMaster) navigate('admin');
+    } else {
+      errEl.textContent = result.error || 'Registration failed';
+    }
+  }
+
+  // ── Modal close buttons ────────────────────────────────────
   document.addEventListener('click', e => {
     const btn = e.target.closest('[data-modal]');
     if (btn) Modal.close(btn.dataset.modal);
@@ -221,6 +261,5 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  // ── Initial view ─────────────────────────────────────────
   navigate('calendar');
 });
