@@ -90,13 +90,13 @@ service cloud.firestore {
     }
 
     // ── Users ────────────────────────────────────────────────────────────────
-    // IMPORTANT: self-read is checked WITHOUT calling isMaster() to avoid
-    // a circular get() that would deny the read before the role is known.
+    // Any signed-in user can READ the users collection. This is required for:
+    //   • _loadProfile: queries collection to determine first-user master role
+    //   • loadUsers() in admin panel
+    //   • register() checking if any users exist yet
+    // Write rules remain strict: users can only create/update their own doc.
     match /users/{uid} {
-      // Any authenticated user can always read their own profile
-      allow read: if request.auth != null && request.auth.uid == uid;
-      // Master can read all profiles
-      allow read: if isMaster();
+      allow read:   if isSignedIn();
 
       allow create: if request.auth != null && request.auth.uid == uid;
 
