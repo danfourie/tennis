@@ -43,14 +43,39 @@ const Auth = (() => {
   }
 
   // ── Load Firestore user profile ────────────────────────────
+  // If no profile document exists (e.g. Firestore write failed at registration),
+  // we create one automatically. First user in the collection becomes master.
   async function _loadProfile(uid) {
     try {
-      const doc = await firebase.firestore().collection('users').doc(uid).get();
-      _profile = doc.exists ? doc.data() : null;
-      _role    = _profile ? (_profile.role || 'user') : 'user';
-      console.log('[Auth] profile loaded — uid:', uid, '| role:', _role, '| exists:', doc.exists);
+      const db  = firebase.firestore();
+      const ref = db.collection('users').doc(uid);
+      const doc = await ref.get();
+
+      if (doc.exists) {
+        _profile = doc.data();
+        _role    = _profile.role || 'user';
+        console.log('[Auth] profile loaded — uid:', uid, '| role:', _role);
+      } else {
+        // Profile missing — create it now (happens when Firestore rules blocked
+        // the write during registration, or when the DB was empty at first run).
+        console.warn('[Auth] No profile found for uid:', uid, '— creating one now');
+        const snap   = await db.collection('users').limit(1).get();
+        const role   = snap.empty ? 'master' : 'user';
+        const fbUser = firebase.auth().currentUser;
+        _profile = {
+          uid,
+          email:       fbUser ? fbUser.email       : '',
+          displayName: fbUser ? (fbUser.displayName || fbUser.email) : '',
+          role,
+          schoolId:    null,
+          createdAt:   new Date().toISOString(),
+        };
+        await ref.set(_profile);
+        _role = role;
+        console.log('[Auth] profile created — role:', _role);
+      }
     } catch (err) {
-      console.warn('[Auth] Could not load user profile (permissions?):', err.code, err.message);
+      console.warn('[Auth] Could not load/create user profile:', err.code, err.message);
       _role = 'user';
     }
   }
