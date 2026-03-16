@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Import Venues — Tennis Court Manager</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 900px; margin: 40px auto; padding: 0 20px; background: #f4f4f4; }
+    h1   { color: #1e3a5f; }
+    .card { background: #fff; border-radius: 8px; padding: 24px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,.1); }
+    table { width: 100%; border-collapse: collapse; font-size: .88rem; }
+    th    { background: #1e3a5f; color: #fff; text-align: left; padding: 8px 10px; }
+    td    { padding: 7px 10px; border-bottom: 1px solid #e5e5e5; vertical-align: top; }
+    tr:nth-child(even) td { background: #f9f9f9; }
+    button { background: #2563eb; color: #fff; border: none; padding: 12px 28px; border-radius: 6px; font-size: 1rem; cursor: pointer; }
+    button:disabled { background: #9ca3af; cursor: not-allowed; }
+    #log  { margin-top: 16px; }
+    .log-item { padding: 6px 10px; margin: 4px 0; border-radius: 4px; font-size: .88rem; }
+    .ok   { background: #d1fae5; color: #065f46; }
+    .err  { background: #fee2e2; color: #991b1b; }
+    .info { background: #dbeafe; color: #1e40af; }
+    #summary { font-weight: bold; font-size: 1.1rem; margin-top: 16px; }
+  </style>
+</head>
+<body>
+
+<div class="card">
+  <h1>🎾 Import Venues</h1>
+  <p>This page imports <strong>25 venues</strong> from the spreadsheet directly into your Firebase Firestore database.</p>
+  <p><strong>Note:</strong> You must be logged in as <em>master</em> on the main app in the same browser session. Venues with duplicate names will be skipped.</p>
+  <button id="importBtn" onclick="runImport()">Import All 25 Venues →</button>
+  <div id="log"></div>
+  <div id="summary"></div>
+</div>
+
+<div class="card">
+  <h2>Preview</h2>
+  <table>
+    <thead><tr><th>#</th><th>Venue Name</th><th>Courts</th><th>Contact</th><th>Email</th><th>Phone</th></tr></thead>
+    <tbody id="preview"></tbody>
+  </table>
+</div>
+
+<!-- Firebase compat SDK -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="js/firebase-config.js"></script>
+
+<script>
+const VENUES = [
+  { name: "H/S Tuine",                       courts: 3, contact: "Ewalt Carstens",                      email: "ewalt.carstens@gmail.com",              phone: "0828869001" },
+  { name: "St Mary's DSG",                    courts: 4, contact: "Esti van Vuuren",                      email: "tennis@stmarys.pta.school.za",           phone: "0843396792" },
+  { name: "Hoërskool Centurion",              courts: 3, contact: "Marianke Pienaar",                     email: "m.pienaar@hscenturion.co.za",            phone: "0726453151" },
+  { name: "Midstream College",                courts: 2, contact: "Eben du Toit",                         email: "ebendutoit@midstreamcollege.co.za",       phone: "0788535750" },
+  { name: "Pinnacle College Copperleaf",      courts: 2, contact: "Deon Rudman",                          email: "drudman@pinnaclecolleges.co.za",          phone: "0725840734" },
+  { name: "Hoërskool Eldoraigne",             courts: 3, contact: "Corlia Fouche",                        email: "vanstadenc@hseldo.co.za",                phone: "0725394476" },
+  { name: "Hoërskool Zwartkop",               courts: 4, contact: "Marthinus Gouws",                      email: "tennis@zwarries.co.za",                  phone: "0824671723" },
+  { name: "Hoërskool Waterkloof",             courts: 2, contact: "Alexandra Dreyer",                     email: "alexandra.dreyer@klofies.co.za",         phone: "0721960540" },
+  { name: "Hoërskool Die Wilgers",            courts: 4, contact: "Lindi Erasmus",                        email: "erasmusl@hswilgers.co.za",               phone: "0723743974" },
+  { name: "Sutherland High School",           courts: 4, contact: "Daniella Truter",                      email: "daniella.truter@sutherlandhs.co.za",     phone: "0782972125" },
+  { name: "Woodhill College",                 courts: 4, contact: "Vejanthi (Jen) Padayachy",             email: "vejanthi.p@curro.co.za",                 phone: "0842501609" },
+  { name: "Rietondale High School",           courts: 4, contact: "Elodie Jansen",                        email: "ejansen@rietondalehs.co.za",             phone: "0733143239" },
+  { name: "Hatfield Christian School",        courts: 2, contact: "Demi Neuper",                          email: "dneuper@hatfieldcs.co.za",               phone: "0844402350" },
+  { name: "Hoërskool Monument",               courts: 2, contact: "Bianca Avenant",                       email: "bianca.avenant01@gmail.com",             phone: "0621894463" },
+  { name: "Hoërskool Gerrit Maritz",          courts: 1, contact: "Thuli Modisane",                       email: "honeymodisane@gmail.com",                phone: "0783713147" },
+  { name: "Eduplex",                          courts: 2, contact: "Melindi Williams",                     email: "melindi.williams@eduplex.co.za",         phone: "0746272600" },
+  { name: "Hoërskool Garsfontein",            courts: 2, contact: "Mia Cilliers",                         email: "mia@garsies.co.za",                      phone: "0713355773" },
+  { name: "Die Hoërskool Menlopark",          courts: 3, contact: "Elne Coertzen",                        email: "elne.coertzen@menlopark.co.za",          phone: "0824599483" },
+  { name: "Hoërskool Noorheuwel",             courts: 3, contact: "Ciska Nice",                           email: "ciska.nice@nories.co.za",                phone: "0728043346" },
+  { name: "Cornwall Hill College",            courts: 4, contact: "Jason Pieters",                        email: "jay.pieters@cornwallhill.org",            phone: "0818254498" },
+  { name: "AHMP",                             courts: 2, contact: "JP van der Merwe",                     email: "tennis@ahmp.co.za",                      phone: "0827867364" },
+  { name: "Hoërskool Hartbeespoort",          courts: 1, contact: "Daniella Erasmus / Tharien Coetzer",   email: "sport@hsharties.co.za",                  phone: "0781623676 / 0746320827" },
+  { name: "Montana",                          courts: 4, contact: "Lara Ras",                             email: "lras@hsmontana.co.za",                   phone: "0823241931" },
+  { name: "Oos-Moot",                         courts: 2, contact: "Willem Smit",                          email: "smitwillem78@gmail.com",                 phone: "0832738968" },
+  { name: "Hoërskool Pretoria Noord",         courts: 2, contact: "Sandrie van Aswegen",                  email: "S.vanaswegen@pnhs.co.za",                phone: "0718923566" },
+];
+
+// Populate preview table
+const tbody = document.getElementById('preview');
+VENUES.forEach((v, i) => {
+  const tr = document.createElement('tr');
+  tr.innerHTML = `<td>${i+1}</td><td>${v.name}</td><td>${v.courts}</td><td>${v.contact}</td><td>${v.email}</td><td>${v.phone}</td>`;
+  tbody.appendChild(tr);
+});
+
+function uid() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
+
+function log(msg, type = 'info') {
+  const div = document.createElement('div');
+  div.className = `log-item ${type}`;
+  div.textContent = msg;
+  document.getElementById('log').appendChild(div);
+}
+
+async function runImport() {
+  const btn = document.getElementById('importBtn');
+  btn.disabled = true;
+  document.getElementById('log').innerHTML = '';
+  document.getElementById('summary').textContent = '';
+
+  if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
+  const db   = firebase.firestore();
+  const auth = firebase.auth();
+
+  const user = auth.currentUser;
+  if (!user) {
+    log('⚠️  Not logged in. Open the main app, log in as master, then come back here.', 'err');
+    btn.disabled = false;
+    return;
+  }
+
+  const profileDoc = await db.collection('users').doc(user.uid).get();
+  if (!profileDoc.exists || profileDoc.data().role !== 'master') {
+    log('⚠️  You must be logged in as master to import venues.', 'err');
+    btn.disabled = false;
+    return;
+  }
+
+  log(`✅ Logged in as master: ${user.email}`, 'ok');
+
+  const existingSnap = await db.collection('venues').get();
+  const existingNames = new Set(existingSnap.docs.map(d => d.data().name?.toLowerCase()));
+  log(`ℹ️  ${existingNames.size} venue(s) already in database — duplicates will be skipped.`, 'info');
+
+  let added = 0, skipped = 0, errors = 0;
+
+  for (const v of VENUES) {
+    if (existingNames.has(v.name.toLowerCase())) {
+      log(`⏭️  Skipped (already exists): ${v.name}`, 'info');
+      skipped++;
+      continue;
+    }
+    try {
+      const id = uid();
+      await db.collection('venues').doc(id).set({
+        id,
+        name:    v.name,
+        address: '',
+        email:   v.email,
+        phone:   v.phone,
+        contact: v.contact,
+        courts:  v.courts,
+      });
+
+      await db.collection('auditLog').add({
+        action:      'venue_imported',
+        category:    'admin',
+        description: `Venue imported: ${v.name} (${v.courts} courts)`,
+        entityId:    id,
+        entityName:  v.name,
+        userId:      user.uid,
+        userName:    user.displayName || user.email,
+        timestamp:   new Date().toISOString(),
+      });
+
+      log(`✅ Imported: ${v.name} — ${v.courts} court${v.courts !== 1 ? 's' : ''}`, 'ok');
+      added++;
+    } catch (err) {
+      log(`❌ Failed: ${v.name} — ${err.message}`, 'err');
+      errors++;
+    }
+  }
+
+  document.getElementById('summary').textContent =
+    `Done — ${added} added, ${skipped} skipped, ${errors} failed.`;
+  btn.disabled = false;
+}
+</script>
+</body>
+</html>
