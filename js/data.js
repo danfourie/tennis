@@ -66,6 +66,7 @@ const DB = {
   addSchool(school) {
     school.id = school.id || uid();
     _cache.schools.push(school);
+    _cache.schools.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
     _doc('schools', school.id).set(school).catch(console.error);
     return school;
   },
@@ -261,7 +262,7 @@ const DB = {
       ]);
 
     _cache.venues      = venues.docs.map(d => d.data());
-    _cache.schools     = schools.docs.map(d => d.data());
+    _cache.schools     = schools.docs.map(d => d.data()).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
     _cache.bookings    = bookings.docs.map(d => d.data());
     _cache.leagues     = leagues.docs.map(d => d.data());
     _cache.tournaments = tournaments.docs.map(d => d.data());
