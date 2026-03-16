@@ -125,6 +125,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     Leagues.init();
     Tournaments.init();
     Admin.init();
+    MySchool.init();
 
   } catch (err) {
     console.error('Firebase init failed:', err);
@@ -140,6 +141,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       const view = btn.dataset.view;
       if (view === 'admin' && !Auth.isAdmin()) return;
       navigate(view);
+      // Trigger render for views that need it on activation
+      if (view === 'myschool') MySchool.refresh();
     });
   });
 
