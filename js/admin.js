@@ -446,6 +446,7 @@ const Admin = (() => {
             <div class="school-teams" style="margin-top:.35rem">${teamsBadges}</div>
           </div>
           <div class="item-actions">
+            <button class="btn btn-xs btn-info" data-school-view="${s.id}">👁 View</button>
             <button class="btn btn-xs btn-secondary" data-school-edit="${s.id}">Edit</button>
             <button class="btn btn-xs btn-danger"    data-school-delete="${s.id}">Del</button>
           </div>
@@ -453,6 +454,9 @@ const Admin = (() => {
       }).join('') +
       `</div>`;
 
+    el.querySelectorAll('[data-school-view]').forEach(btn => {
+      btn.addEventListener('click', () => MySchool.impersonate(btn.dataset.schoolView));
+    });
     el.querySelectorAll('[data-school-edit]').forEach(btn => {
       btn.addEventListener('click', () => openSchoolModal(btn.dataset.schoolEdit));
     });

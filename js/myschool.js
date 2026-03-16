@@ -1,18 +1,18 @@
 /**
- * myschool.js — Personalised "My School" view for school-linked users.
+ * myschool.js — Personalised "My School" view + admin impersonation.
  *
- * Shows:
- *   - School name + home venue
- *   - Each league the school is enrolled in:
- *       ▸ Standing (position + P/W/D/L/Pts)
- *       ▸ Upcoming fixtures with score-entry inputs
- *       ▸ Recent results (W/D/L badge)
+ * Normal mode  : shows the school that is linked to Auth.getProfile().schoolId
+ * Impersonate  : admin calls MySchool.impersonate(schoolId) to view any school
+ *                as if they were a contact for that school.
  *
- * Score submission calls Leagues.saveScore() so standings stay in sync
- * with the main Leagues view.
+ * Banner       : a yellow bar shown while impersonating with an "Exit" button.
+ * Score submit : calls Leagues.saveScore() so standings stay in sync.
  */
 
 const MySchool = (() => {
+
+  // ── state ────────────────────────────────────────────────────
+  let _impersonateSchoolId = null;   // null = normal mode
 
   // ── helpers ─────────────────────────────────────────────────
   /** Backward-compatible participant list for a league. */
@@ -22,41 +22,95 @@ const MySchool = (() => {
       : (league.schoolIds || []).map(id => ({ participantId: id, schoolId: id, teamSuffix: '' }));
   }
 
-  /** Show / hide the My School nav button based on login + schoolId. */
+  /** The school ID currently being displayed (impersonated takes priority). */
+  function _activeSchoolId() {
+    if (_impersonateSchoolId) return _impersonateSchoolId;
+    const profile = Auth.getProfile();
+    return profile ? profile.schoolId : null;
+  }
+
+  // ── banner ───────────────────────────────────────────────────
+  function _updateBanner(school) {
+    const banner = document.getElementById('impersonateBanner');
+    if (!banner) return;
+    if (_impersonateSchoolId && school) {
+      document.getElementById('impersonateSchoolName').textContent = school.name;
+      banner.classList.remove('hidden');
+    } else {
+      banner.classList.add('hidden');
+    }
+  }
+
+  // ── nav button ───────────────────────────────────────────────
   function _syncNav() {
     const btn = document.querySelector('[data-view="myschool"]');
     if (!btn) return;
-    const profile   = Auth.getProfile();
-    const hasSchool = Auth.isLoggedIn() && profile && profile.schoolId;
+    const hasSchool = Auth.isLoggedIn() && (_impersonateSchoolId || _activeSchoolId());
     btn.classList.toggle('hidden', !hasSchool);
-    // If the nav is now hidden but the view is active, fall back to calendar
+    // If the nav button is now hidden but the view is active, fall back to calendar
     if (!hasSchool) {
       const view = document.getElementById('view-myschool');
       if (view && !view.classList.contains('hidden')) {
-        // trigger a switch to calendar via app navigation
         document.querySelector('[data-view="calendar"]')?.click();
       }
     }
   }
 
-  // ── public API ──────────────────────────────────────────────
+  // ── public API ───────────────────────────────────────────────
   function init() {
-    // Nothing to wire at init time; auth calls refresh() after login.
+    // Wire up the "Exit School View" button in the banner
+    const stopBtn = document.getElementById('stopImpersonateBtn');
+    if (stopBtn) stopBtn.addEventListener('click', stopImpersonation);
   }
+
+  /**
+   * Admin activates school-contact view for a given school.
+   * Navigates to the My School tab automatically.
+   */
+  function impersonate(schoolId) {
+    _impersonateSchoolId = schoolId;
+    const school = DB.getSchools().find(s => s.id === schoolId);
+    _updateBanner(school);
+
+    // Make sure the My School nav button is visible before clicking it
+    const navBtn = document.querySelector('[data-view="myschool"]');
+    if (navBtn) {
+      navBtn.classList.remove('hidden');
+      navBtn.click();          // navigate to My School view
+    } else {
+      _render();               // fallback: just re-render in place
+    }
+  }
+
+  /** Exit impersonation and return to the Admin view. */
+  function stopImpersonation() {
+    _impersonateSchoolId = null;
+    _updateBanner(null);
+    _syncNav();
+    // Return to admin if the user is an admin, else calendar
+    if (Auth.isAdmin()) {
+      document.querySelector('[data-view="admin"]')?.click();
+    } else {
+      document.querySelector('[data-view="calendar"]')?.click();
+    }
+  }
+
+  function isImpersonating() { return _impersonateSchoolId !== null; }
 
   function refresh() {
     _syncNav();
+    _updateBanner(_impersonateSchoolId ? DB.getSchools().find(s => s.id === _impersonateSchoolId) : null);
     const view = document.getElementById('view-myschool');
     if (view && !view.classList.contains('hidden')) _render();
   }
 
-  // ── main render ─────────────────────────────────────────────
+  // ── main render ──────────────────────────────────────────────
   function _render() {
     const container = document.getElementById('myschoolContent');
     if (!container) return;
 
-    const profile = Auth.getProfile();
-    if (!profile || !profile.schoolId) {
+    const schoolId = _activeSchoolId();
+    if (!schoolId) {
       container.innerHTML = `<div class="empty-state">
         <div class="empty-icon">🏫</div>
         <p>No school is linked to your account yet.<br>
@@ -65,12 +119,11 @@ const MySchool = (() => {
       return;
     }
 
-    const schoolId = profile.schoolId;
-    const school   = DB.getSchools().find(s => s.id === schoolId);
+    const school = DB.getSchools().find(s => s.id === schoolId);
     if (!school) {
       container.innerHTML = `<div class="empty-state">
         <div class="empty-icon">🏫</div>
-        <p>Your linked school could not be found. Contact an admin.</p>
+        <p>School not found. Contact an admin.</p>
       </div>`;
       return;
     }
@@ -82,19 +135,21 @@ const MySchool = (() => {
     const venue     = school.venueId ? DB.getVenues().find(v => v.id === school.venueId) : null;
     const myLeagues = DB.getLeagues().filter(l => _parts(l).some(p => p.schoolId === schoolId));
 
+    // Show school header
     let html = `<div class="myschool-header">
       <span class="color-dot" style="background:${school.color};width:20px;height:20px;flex-shrink:0"></span>
       <div>
         <div class="myschool-school-name">${esc(school.name)}</div>
         ${school.team  ? `<div class="text-muted">${esc(school.team)}</div>` : ''}
         ${venue        ? `<div class="text-muted">🏟 ${esc(venue.name)}</div>` : ''}
+        ${school.contact ? `<div class="text-muted">👤 ${esc(school.contact)}${school.email ? ' · ' + esc(school.email) : ''}${school.phone ? ' · ' + esc(school.phone) : ''}</div>` : ''}
       </div>
     </div>`;
 
     if (myLeagues.length === 0) {
       html += `<div class="empty-state">
         <div class="empty-icon">🏆</div>
-        <p>Your school is not enrolled in any leagues yet.</p>
+        <p>${_impersonateSchoolId ? 'This school is not enrolled in any leagues yet.' : 'Your school is not enrolled in any leagues yet.'}</p>
       </div>`;
     } else {
       html += myLeagues.map(l => _leagueSection(l, schoolId)).join('');
@@ -102,17 +157,16 @@ const MySchool = (() => {
 
     container.innerHTML = html;
 
-    // Attach score listeners
+    // Attach score-entry listeners
     container.querySelectorAll('.my-score-input').forEach(inp => {
       inp.addEventListener('change', () => {
         Leagues.saveScore(inp.dataset.league, inp.dataset.fixture, inp.dataset.field, inp.value);
-        // Re-render so standing & result badge update
-        _render();
+        _render();   // refresh so standings + W/D/L badge update
       });
     });
   }
 
-  // ── per-league section ──────────────────────────────────────
+  // ── per-league section ───────────────────────────────────────
   function _leagueSection(league, schoolId) {
     const myParts          = _parts(league).filter(p => p.schoolId === schoolId);
     const myParticipantIds = myParts.map(p => p.participantId);
@@ -132,10 +186,10 @@ const MySchool = (() => {
       .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
       .slice(0, 5);
 
-    const myStandings   = (league.standings || []).filter(r => myParticipantIds.includes(r.participantId));
-    const totalTeams    = (league.standings || []).length;
+    const myStandings = (league.standings || []).filter(r => myParticipantIds.includes(r.participantId));
+    const totalTeams  = (league.standings || []).length;
 
-    const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    const DAYS     = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
     const dayLabel = league.playingDay !== undefined ? ` · ${DAYS[league.playingDay]}s` : '';
 
     let html = `<div class="myschool-league card">
@@ -147,12 +201,12 @@ const MySchool = (() => {
       </div>
       <div class="card-body">`;
 
-    // Standings summary
+    // Standing summary
     if (myStandings.length > 0) {
       html += `<div class="myschool-standings">`;
       myStandings.forEach(row => {
-        const pos       = (league.standings || []).findIndex(r => r.participantId === row.participantId) + 1;
-        const posClass  = pos === 1 ? 'badge-green' : pos === 2 ? 'badge-amber' : 'badge-gray';
+        const pos      = (league.standings || []).findIndex(r => r.participantId === row.participantId) + 1;
+        const posClass = pos === 1 ? 'badge-green' : pos === 2 ? 'badge-amber' : 'badge-gray';
         html += `<div class="myschool-standing-row">
           <span class="badge ${posClass}">#${pos} / ${totalTeams}</span>
           <strong>${esc(row.name)}</strong>
@@ -163,13 +217,11 @@ const MySchool = (() => {
       html += `</div>`;
     }
 
-    // Upcoming fixtures
     if (upcoming.length > 0) {
       html += `<div class="myschool-section-label">📅 Upcoming Fixtures</div>`;
       html += upcoming.map(f => _fixtureRow(f, league.id, myParticipantIds, true)).join('');
     }
 
-    // Recent results
     if (recent.length > 0) {
       html += `<div class="myschool-section-label">📊 Recent Results</div>`;
       html += recent.map(f => _fixtureRow(f, league.id, myParticipantIds, false)).join('');
@@ -183,7 +235,7 @@ const MySchool = (() => {
     return html;
   }
 
-  // ── fixture row ─────────────────────────────────────────────
+  // ── fixture row ──────────────────────────────────────────────
   function _fixtureRow(f, leagueId, myParticipantIds, canEdit) {
     const hasScore = f.homeScore !== null && f.homeScore !== undefined;
     const homeKey  = f.homeParticipantId || f.homeSchoolId;
@@ -235,5 +287,5 @@ const MySchool = (() => {
     </div>`;
   }
 
-  return { init, refresh };
+  return { init, refresh, impersonate, stopImpersonation, isImpersonating };
 })();
