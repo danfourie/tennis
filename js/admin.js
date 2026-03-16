@@ -163,7 +163,7 @@ const Admin = (() => {
       users.map(u => {
         const school  = schools.find(s => s.id === u.schoolId);
         const isSelf  = u.uid === currentUid;
-        const roleIcon = u.role === 'master' ? '🔑' : '👤';
+        const roleIcon = u.role === 'master' ? '🔑' : u.role === 'admin' ? '🛡️' : '👤';
 
         return `<div class="admin-list-item">
           <div>
@@ -171,7 +171,7 @@ const Admin = (() => {
             ${isSelf ? '<span class="badge badge-gray" style="font-size:.7rem;margin-left:.3rem">You</span>' : ''}
             <div class="text-muted">${esc(u.email)}</div>
             <div class="text-muted">
-              <span class="role-badge ${u.role === 'master' ? 'master' : 'user'}">${u.role}</span>
+              <span class="role-badge ${u.role === 'master' ? 'master' : u.role === 'admin' ? 'admin' : 'user'}">${u.role}</span>
               ${school ? ` · ${esc(school.name)}` : ''}
               ${u.createdAt ? ` · Joined ${new Date(u.createdAt).toLocaleDateString('en-ZA',{day:'numeric',month:'short',year:'numeric'})}` : ''}
             </div>
@@ -179,6 +179,7 @@ const Admin = (() => {
           <div class="item-actions">
             <select class="role-select" data-user-uid="${u.uid}" data-current-role="${u.role}" style="padding:.2rem .4rem;border-radius:6px;border:1.5px solid var(--border);font-size:.8rem">
               <option value="user"  ${u.role === 'user'   ? 'selected' : ''}>User</option>
+              <option value="admin" ${u.role === 'admin'  ? 'selected' : ''}>Admin</option>
               <option value="master"${u.role === 'master' ? 'selected' : ''}>Master</option>
             </select>
             ${!isSelf ? `<button class="btn btn-xs btn-danger" data-user-delete="${u.uid}">Remove</button>` : ''}

@@ -2,7 +2,8 @@
  * auth.js — Firebase Authentication with role-based access control
  *
  * Roles:
- *   'master' → full admin (add/edit/delete everything, approve bookings, manage users)
+ *   'master' → superuser (first registrant; full control incl. managing other masters)
+ *   'admin'  → same privileges as master — add/edit/delete everything, manage users
  *   'user'   → registered user (request bookings, submit scores, view everything)
  *    null    → anonymous visitor (view only)
  *
@@ -13,10 +14,10 @@
  *   Auth.login(email, pw)                    → { ok, error }
  *   Auth.register(email, pw, name, schoolId) → { ok, role, error }
  *   Auth.logout()
- *   Auth.isAdmin()     → true when role === 'master'  (backward-compat alias)
- *   Auth.isMaster()    → true when role === 'master'
+ *   Auth.isAdmin()     → true when role === 'master' OR 'admin'
+ *   Auth.isMaster()    → true when role === 'master' only
  *   Auth.isLoggedIn()  → true for any authenticated user
- *   Auth.currentRole() → 'master' | 'user' | null
+ *   Auth.currentRole() → 'master' | 'admin' | 'user' | null
  *   Auth.getUser()     → Firebase Auth user object
  *   Auth.getProfile()  → Firestore /users/{uid} document data
  *   Auth.changePassword(pw) → async; throws on failure
@@ -25,7 +26,7 @@
 const Auth = (() => {
   let _user    = null;   // Firebase Auth user
   let _profile = null;   // Firestore user profile document
-  let _role    = null;   // 'master' | 'user' | null
+  let _role    = null;   // 'master' | 'admin' | 'user' | null
 
   // ── Bootstrap ─────────────────────────────────────────────
   function init() {
@@ -138,7 +139,7 @@ const Auth = (() => {
   }
 
   // ── Accessors ─────────────────────────────────────────────
-  function isAdmin()    { return _role === 'master'; }   // backward-compat
+  function isAdmin()    { return _role === 'master' || _role === 'admin'; }
   function isMaster()   { return _role === 'master'; }
   function isLoggedIn() { return _user !== null; }
   function currentRole(){ return _role; }
@@ -147,12 +148,12 @@ const Auth = (() => {
 
   // ── UI sync ───────────────────────────────────────────────
   function _updateUI() {
-    const loggedIn = isLoggedIn();
-    const master   = isMaster();
+    const loggedIn  = isLoggedIn();
+    const adminUser = isAdmin();   // true for both master and admin roles
 
-    // Elements only for master
+    // Elements only for master/admin
     document.querySelectorAll('.admin-only').forEach(el =>
-      el.classList.toggle('hidden', !master)
+      el.classList.toggle('hidden', !adminUser)
     );
     // Elements for any logged-in user
     document.querySelectorAll('.user-only').forEach(el =>
@@ -171,10 +172,10 @@ const Auth = (() => {
     if (badge) {
       badge.classList.toggle('hidden', !loggedIn);
       if (loggedIn) {
-        const name     = _profile
+        const name = _profile
           ? (_profile.displayName || _profile.email)
           : (_user ? _user.email : '');
-        const icon     = master ? '🔑' : '👤';
+        const icon = _role === 'master' ? '🔑' : _role === 'admin' ? '🛡️' : '👤';
         badge.textContent = `${icon} ${name}`;
       }
     }

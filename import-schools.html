@@ -113,20 +113,21 @@ async function runImport() {
   // Check auth
   const user = auth.currentUser;
   if (!user) {
-    log('⚠️  Not logged in. Open the main app, log in as master, then come back here.', 'err');
+    log('⚠️  Not logged in. Open the main app, log in as master or admin, then come back here.', 'err');
     btn.disabled = false;
     return;
   }
 
-  // Check master role
+  // Check master/admin role
   const profileDoc = await db.collection('users').doc(user.uid).get();
-  if (!profileDoc.exists || profileDoc.data().role !== 'master') {
-    log('⚠️  You must be logged in as master to import schools.', 'err');
+  const userRole   = profileDoc.exists ? profileDoc.data().role : null;
+  if (!['master', 'admin'].includes(userRole)) {
+    log('⚠️  You must be logged in as master or admin to import schools.', 'err');
     btn.disabled = false;
     return;
   }
 
-  log(`✅ Logged in as master: ${user.email}`, 'ok');
+  log(`✅ Logged in as ${userRole}: ${user.email}`, 'ok');
 
   // Fetch existing school names to skip duplicates
   const existingSnap = await db.collection('schools').get();
