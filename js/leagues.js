@@ -769,9 +769,9 @@ const Leagues = (() => {
 
         const scoreCell = Auth.isLoggedIn()
           ? `<div class="score-cell">
-              <input class="score-input" type="number" min="0" max="99" value="${hasScore ? f.homeScore : ''}" data-fixture="${f.id}" data-field="homeScore" style="width:40px">
+              <input class="score-input" type="number" min="0" max="99" value="${hasScore ? f.homeScore : ''}" data-fixture="${f.id}" data-field="homeScore" style="width:54px">
               <span style="margin:0 .25rem;color:var(--neutral)">—</span>
-              <input class="score-input" type="number" min="0" max="99" value="${hasScore ? f.awayScore : ''}" data-fixture="${f.id}" data-field="awayScore" style="width:40px">
+              <input class="score-input" type="number" min="0" max="99" value="${hasScore ? f.awayScore : ''}" data-fixture="${f.id}" data-field="awayScore" style="width:54px">
             </div>
             ${_verifyBadge(f, league.id)}`
           : hasScore

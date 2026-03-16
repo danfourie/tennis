@@ -339,12 +339,12 @@ const MySchool = (() => {
         <input class="my-score-input score-input" type="number" min="0" max="99"
           value="${hasScore ? f.homeScore : ''}"
           data-league="${leagueId}" data-fixture="${f.id}" data-field="homeScore"
-          style="width:38px;text-align:center">
+          style="width:54px;text-align:center">
         <span style="color:var(--neutral);margin:0 .2rem">—</span>
         <input class="my-score-input score-input" type="number" min="0" max="99"
           value="${hasScore ? f.awayScore : ''}"
           data-league="${leagueId}" data-fixture="${f.id}" data-field="awayScore"
-          style="width:38px;text-align:center">`;
+          style="width:54px;text-align:center">`;
     } else if (hasScore) {
       const outcome   = isHome
         ? (f.homeScore > f.awayScore ? 'W' : f.homeScore < f.awayScore ? 'L' : 'D')

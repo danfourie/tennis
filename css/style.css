@@ -865,3 +865,11 @@ body {
   padding: .35rem .6rem;
   font-size: .85rem;
 }
+
+/* Score inputs — keep padding tight so digits are never clipped */
+.score-input {
+  padding-left: 4px !important;
+  padding-right: 4px !important;
+  text-align: center;
+  box-sizing: border-box;
+}
