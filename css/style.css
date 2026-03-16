@@ -729,8 +729,8 @@ body {
   margin-bottom: .25rem;
 }
 
-/* League fixture chips are non-interactive (view-only) */
+/* League fixture chips are view-only — cursor shows it's not clickable
+   but pointer-events must stay enabled so the title tooltip shows on hover */
 .slot-chip.league {
   cursor: default;
-  pointer-events: none;
 }
