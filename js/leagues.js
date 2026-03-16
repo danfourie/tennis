@@ -729,5 +729,28 @@ const Leagues = (() => {
     toast('League deleted');
   }
 
-  return { init, refresh, render, renderAdmin, openLeagueModal };
+  /**
+   * Update a single fixture score from any module (e.g. MySchool).
+   * Recalculates standings and persists to DB.
+   */
+  function saveScore(leagueId, fixtureId, field, rawValue) {
+    const league  = DB.getLeagues().find(l => l.id === leagueId);
+    if (!league) return;
+    const fixture = (league.fixtures || []).find(f => f.id === fixtureId);
+    if (!fixture) return;
+    const oldVal  = fixture[field];
+    fixture[field] = parseInt(rawValue) || 0;
+    recalcStandings(league);
+    DB.updateLeague(league);
+    DB.writeAudit(
+      'score_updated', 'league',
+      `Score: ${fixture.homeSchoolName} vs ${fixture.awaySchoolName} — ${field}: ${oldVal ?? 'blank'} → ${fixture[field]}`,
+      leagueId, league.name
+    );
+    toast('Score saved ✓', 'success');
+    // Refresh any open league detail
+    render();
+  }
+
+  return { init, refresh, render, renderAdmin, openLeagueModal, saveScore };
 })();

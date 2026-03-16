@@ -426,6 +426,57 @@ body {
 .role-badge.admin  { background: #fef9c3; color: #854d0e; }
 .role-badge.user   { background: #eff6ff; color: #1d4ed8; }
 
+/* Badge colour variants */
+.badge-amber { background: #fef9c3; color: #854d0e; }
+.badge-red   { background: #fee2e2; color: #b91c1c; }
+
+/* School league badges in admin Schools list */
+.school-teams { display: flex; flex-wrap: wrap; gap: .3rem; align-items: center; }
+.school-league-badge { font-size: .73rem !important; }
+
+/* ===== MY SCHOOL VIEW ===== */
+.myschool-header {
+  display: flex; align-items: center; gap: .75rem;
+  padding: .75rem 0 1rem;
+}
+.myschool-school-name { font-size: 1.15rem; font-weight: 700; }
+
+.myschool-league { margin-bottom: 1.5rem; }
+
+.myschool-standings { display: flex; flex-direction: column; gap: .35rem; margin-bottom: .85rem; }
+.myschool-standing-row {
+  display: flex; align-items: center; gap: .6rem; flex-wrap: wrap;
+  padding: .4rem .6rem; background: var(--neutral-light); border-radius: var(--radius);
+  font-size: .875rem;
+}
+.myschool-pts { font-weight: 700; color: var(--primary); margin-left: auto; }
+
+.myschool-section-label {
+  font-size: .75rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .4px; color: var(--neutral);
+  margin: .85rem 0 .4rem; padding-bottom: .2rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.myschool-fixture {
+  display: flex; flex-direction: column; gap: .2rem;
+  padding: .55rem .65rem; border-radius: 6px; margin-bottom: .4rem;
+  border-left: 4px solid var(--border); background: var(--neutral-light);
+}
+.myschool-fixture.home-fixture { border-left-color: var(--primary); }
+.myschool-fixture.away-fixture { border-left-color: var(--neutral); }
+
+.fixture-meta { display: flex; gap: .75rem; font-size: .78rem; flex-wrap: wrap; }
+.fixture-date { font-weight: 600; color: var(--neutral-dark); }
+
+.fixture-score-row {
+  display: flex; align-items: center; gap: .5rem;
+  font-size: .875rem; flex-wrap: wrap; margin-top: .2rem;
+}
+.fixture-team { flex: 1; min-width: 0; }
+.fixture-team.my-team { font-weight: 700; }
+.fixture-score { white-space: nowrap; display: flex; align-items: center; gap: .1rem; }
+
 /* Admin card spanning full grid width */
 .admin-card-full  { grid-column: 1 / -1; }
 .admin-card-wide  { grid-column: 1 / -1; }

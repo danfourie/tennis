@@ -351,6 +351,16 @@ const Admin = (() => {
   // ════════════════════════════════════════════════════════════
   // SCHOOLS
   // ════════════════════════════════════════════════════════════
+  /** Get all leagues that include a given schoolId (any participant). */
+  function _schoolLeagues(schoolId) {
+    return DB.getLeagues().filter(l => {
+      const parts = l.participants && l.participants.length > 0
+        ? l.participants
+        : (l.schoolIds || []).map(id => ({ participantId: id, schoolId: id, teamSuffix: '' }));
+      return parts.some(p => p.schoolId === schoolId);
+    });
+  }
+
   function renderSchools() {
     const el = document.getElementById('schoolsList');
     const schools = DB.getSchools();
@@ -360,13 +370,34 @@ const Admin = (() => {
     }
     el.innerHTML = `<div class="admin-list">` +
       schools.map(s => {
-        const venue = DB.getVenues().find(v => v.id === s.venueId);
+        const venue   = DB.getVenues().find(v => v.id === s.venueId);
+        const leagues = _schoolLeagues(s.id);
+
+        // For each league, note which team(s) — single vs A/B
+        const teamsBadges = leagues.length > 0
+          ? leagues.map(l => {
+              const myParts = (l.participants && l.participants.length > 0
+                ? l.participants
+                : (l.schoolIds || []).map(id => ({ participantId: id, schoolId: id, teamSuffix: '' }))
+              ).filter(p => p.schoolId === s.id);
+              const suffixes = myParts.map(p => p.teamSuffix).filter(Boolean);
+              const label = esc(l.name)
+                + (l.division ? ` · ${esc(l.division)}` : '')
+                + (suffixes.length ? ` [${suffixes.join('+')}]` : '');
+              return `<span class="badge badge-gray school-league-badge">${label}</span>`;
+            }).join('')
+          : `<span class="text-muted" style="font-size:.78rem">Not linked to any leagues</span>`;
+
         return `<div class="admin-list-item">
-          <div>
-            <span class="color-dot" style="background:${s.color}"></span>
-            <strong>${esc(s.name)}</strong>
-            <div class="text-muted">${venue ? esc(venue.name) : 'No home venue'}${s.team ? ' · ' + esc(s.team) : ''}</div>
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap">
+              <span class="color-dot" style="background:${s.color}"></span>
+              <strong>${esc(s.name)}</strong>
+              ${s.team ? `<span class="text-muted" style="font-size:.82rem">(${esc(s.team)})</span>` : ''}
+            </div>
+            <div class="text-muted">${venue ? esc(venue.name) : 'No home venue'}</div>
             <div class="text-muted">${s.contact ? esc(s.contact) : ''}${s.email ? ' · ' + esc(s.email) : ''}${s.phone ? ' · ' + esc(s.phone) : ''}</div>
+            <div class="school-teams" style="margin-top:.35rem">${teamsBadges}</div>
           </div>
           <div class="item-actions">
             <button class="btn btn-xs btn-secondary" data-school-edit="${s.id}">Edit</button>

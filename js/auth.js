@@ -179,15 +179,23 @@ const Auth = (() => {
         badge.textContent = `${icon} ${name}`;
       }
     }
+
+    // "My School" nav button — visible only when logged in with a school
+    const mySchoolBtn = document.querySelector('[data-view="myschool"]');
+    if (mySchoolBtn) {
+      const hasSchool = loggedIn && _profile && _profile.schoolId;
+      mySchoolBtn.classList.toggle('hidden', !hasSchool);
+    }
   }
 
   function _refreshViews() {
     // Defer so modules are guaranteed to exist
     setTimeout(() => {
-      if (typeof Calendar     !== 'undefined') Calendar.refresh();
-      if (typeof Leagues      !== 'undefined') Leagues.refresh();
-      if (typeof Tournaments  !== 'undefined') Tournaments.refresh();
-      if (typeof Admin        !== 'undefined') Admin.refresh();
+      if (typeof Calendar    !== 'undefined') Calendar.refresh();
+      if (typeof Leagues     !== 'undefined') Leagues.refresh();
+      if (typeof Tournaments !== 'undefined') Tournaments.refresh();
+      if (typeof MySchool    !== 'undefined') MySchool.refresh();
+      if (typeof Admin       !== 'undefined') Admin.refresh();
     }, 0);
   }
 
