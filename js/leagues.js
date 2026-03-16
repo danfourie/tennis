@@ -146,7 +146,8 @@ const Leagues = (() => {
       venues.map(v => `<option value="${v.id}"${l && l.neutralVenueId === v.id ? ' selected' : ''}>${esc(v.name)}</option>`).join('');
 
     const box = document.getElementById('leagueSchoolsCheckboxes');
-    box.innerHTML = schools.map(s =>
+    const sortedSchools = [...schools].sort((a, b) => a.name.localeCompare(b.name));
+    box.innerHTML = sortedSchools.map(s =>
       `<label><input type="checkbox" value="${s.id}" ${l && l.schoolIds && l.schoolIds.includes(s.id) ? 'checked' : ''}>
         <span style="color:${s.color}">●</span> ${esc(s.name)}${s.team ? ` <em style="color:var(--neutral);font-size:.8em">(${esc(s.team)})</em>` : ''}</label>`
     ).join('');
