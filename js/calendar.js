@@ -44,20 +44,23 @@ const Calendar = (() => {
 
   /**
    * Return { fixture, league } if a league fixture occupies this slot.
-   * A match blocks its court for MATCH_MINS (3 hours) from matchTime.
+   * A match blocks COURTS_PER_MATCH courts (starting from the fixture's
+   * base courtIndex) for MATCH_MINS (3 hours) from matchTime.
    */
   function _getLeagueFixtureForSlot(venueId, courtIndex, dateStr, timeStr) {
-    const slotMins   = _timeToMins(timeStr);
-    const MATCH_MINS = 180; // 3 hours
+    const slotMins        = _timeToMins(timeStr);
+    const MATCH_MINS      = 180; // 3 hours
+    const COURTS_PER_MATCH = 3;  // a league fixture blocks 3 courts
 
     for (const league of DB.getLeagues()) {
       for (const f of (league.fixtures || [])) {
         if (!f.venueId || f.venueId !== venueId) continue;
         if (f.date !== dateStr) continue;
-        // court can be specific or "any court" (null/empty)
-        const fCourt = (f.courtIndex !== null && f.courtIndex !== undefined && f.courtIndex !== '')
-          ? parseInt(f.courtIndex) : null;
-        if (fCourt !== null && fCourt !== courtIndex) continue;
+        // Base court: use fixture's courtIndex if set, otherwise default to 0
+        const baseCourt = (f.courtIndex !== null && f.courtIndex !== undefined && f.courtIndex !== '')
+          ? parseInt(f.courtIndex) : 0;
+        // Block baseCourt … baseCourt + COURTS_PER_MATCH - 1
+        if (courtIndex < baseCourt || courtIndex >= baseCourt + COURTS_PER_MATCH) continue;
         const fixtureMins = _timeToMins(f.timeSlot || '14:00');
         if (slotMins >= fixtureMins && slotMins < fixtureMins + MATCH_MINS) {
           return { fixture: f, league };
@@ -222,17 +225,13 @@ const Calendar = (() => {
       return `<button class="slot-chip ${cls}" data-slot="1" data-venue="${venue.id}" data-court="${ci}" data-date="${dStr}" data-slot-time="${slot}" title="${label}${badge} @ ${slot}">${label}${badge}<span class="slot-time">${slot}</span></button>`;
     }
 
-    // ── League fixture blocking (3-hour window) ──────────────
+    // ── League fixture blocking (3-hour window, 3 courts) ────
     const leagueSlot = _getLeagueFixtureForSlot(venue.id, ci, dStr, slot);
     if (leagueSlot) {
       const { fixture: f, league } = leagueSlot;
-      const isStart = _timeToMins(slot) === _timeToMins(f.timeSlot || '14:00');
-      const label   = `${f.homeSchoolName} vs ${f.awaySchoolName}`;
-      // First slot: show team names; continuation slots: show arrow + abbreviated label
-      const display = isStart
-        ? esc(label)
-        : `↳ ${esc(f.homeSchoolName)} vs ${esc(f.awaySchoolName)}`;
-      return `<span class="slot-chip league league-fixture" title="${esc(label)} @ ${f.timeSlot || '14:00'} — ${esc(league.name)}">${display}<span class="slot-time">${slot}</span></span>`;
+      const tooltip = `${f.homeSchoolName} vs ${f.awaySchoolName} @ ${f.timeSlot || '14:00'} — ${league.name}`;
+      // Show only the time (same width/height as any other chip) — details in tooltip
+      return `<span class="slot-chip league" title="${esc(tooltip)}">${slot}</span>`;
     }
 
     // ── Available ────────────────────────────────────────────

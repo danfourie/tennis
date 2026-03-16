@@ -729,10 +729,8 @@ body {
   margin-bottom: .25rem;
 }
 
-/* League fixture chip continuation rows */
-.slot-chip.league-fixture {
-  font-size: .7rem;
-  opacity: .85;
+/* League fixture chips are non-interactive (view-only) */
+.slot-chip.league {
   cursor: default;
   pointer-events: none;
 }
