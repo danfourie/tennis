@@ -231,6 +231,7 @@ const Admin = (() => {
           <div>
             <strong>${esc(v.name)}</strong>
             <div class="text-muted">${v.courts || 0} courts · ${esc(v.address || '')}</div>
+            <div class="text-muted">${v.email ? esc(v.email) : ''}${v.email && v.phone ? ' · ' : ''}${v.phone ? esc(v.phone) : ''}</div>
           </div>
           <div class="item-actions">
             <button class="btn btn-xs btn-secondary" data-venue-edit="${v.id}">Edit</button>
@@ -252,19 +253,27 @@ const Admin = (() => {
     document.getElementById('venueModalTitle').textContent = v ? 'Edit Venue' : 'Add Venue';
     document.getElementById('venueName').value             = v ? v.name : '';
     document.getElementById('venueAddress').value          = v ? (v.address || '') : '';
+    document.getElementById('venueEmail').value            = v ? (v.email  || '') : '';
+    document.getElementById('venuePhone').value            = v ? (v.phone  || '') : '';
     document.getElementById('venueCourtCount').value       = v ? (v.courts || 4) : 4;
     document.getElementById('venueEditId').value           = v ? v.id : '';
     Modal.open('venueModal');
   }
 
   function saveVenue() {
-    const name = document.getElementById('venueName').value.trim();
+    const name  = document.getElementById('venueName').value.trim();
+    const phone = document.getElementById('venuePhone').value.trim();
     if (!name) { toast('Venue name required', 'error'); return; }
+    if (phone && !/^0\d{9}$/.test(phone)) {
+      toast('Phone must be 10 digits starting with 0', 'error'); return;
+    }
     const id = document.getElementById('venueEditId').value;
     const venue = {
       id: id || uid(),
       name,
       address: document.getElementById('venueAddress').value.trim(),
+      email:   document.getElementById('venueEmail').value.trim(),
+      phone,
       courts:  parseInt(document.getElementById('venueCourtCount').value) || 4,
     };
     if (id) {
