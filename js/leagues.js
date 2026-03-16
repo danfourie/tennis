@@ -506,7 +506,13 @@ const Leagues = (() => {
         const venue     = venueId ? DB.getVenues().find(v => v.id === venueId) : null;
         const venueName  = venue ? venue.name : 'TBA';
         const venueCourts = venue ? (venue.courts || 0) : 0;
-        const baseSlots  = Math.floor(venueCourts / COURTS_PER_MATCH);
+        // Always allow at least 1 match-slot for any venue that has courts,
+        // even if it has fewer than COURTS_PER_MATCH courts.  Without this,
+        // baseSlots=0 causes the venue tracker to be skipped entirely, which
+        // lets two fixtures land on the same date+court at the same venue.
+        const baseSlots  = venueCourts > 0
+          ? Math.max(Math.floor(venueCourts / COURTS_PER_MATCH), 1)
+          : 0;
 
         // If this venue hosts two teams from the same school, allow both home
         // games on the same day only when the venue has ≥ 4 courts.
@@ -614,8 +620,7 @@ const Leagues = (() => {
           const newVenue = DB.getVenues().find(v => v.id === newHomePart.venueId);
           if (!newVenue || newVenue.id === orig.venueId) continue; // same venue — swap won't help
           const newVenueCourts = newVenue.courts || 0;
-          const newBaseSlots   = Math.floor(newVenueCourts / COURTS_PER_MATCH);
-          if (newBaseSlots === 0) continue; // new venue has no courts
+          if (newVenueCourts === 0) continue; // new venue has no courts at all
 
           // Find first free court at the new venue on the same date
           const taken = [...(_takenCourts(newVenue.id, orig.date))];
