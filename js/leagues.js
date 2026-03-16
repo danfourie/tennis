@@ -777,7 +777,12 @@ const Leagues = (() => {
     // Recalculate fixtures — admin only (buttons appear in fixtures tab AND balance tab)
     body.querySelectorAll('.recalc-fixtures-btn').forEach(btn => {
       btn.addEventListener('click', () => {
-        if (!confirm('Recalculate all fixtures?\n\nThe scheduler will try to avoid venue clashes by spreading fixtures across different weeks when needed. Existing scores and manual edits will be lost.')) return;
+        const leagueStarted = (league.fixtures || []).some(f => f.homeScore !== null && f.homeScore !== undefined);
+        if (leagueStarted) {
+          toast('Cannot recalculate — scores have already been entered for this league. Edit individual fixtures manually.', 'error');
+          return;
+        }
+        if (!confirm('Recalculate all fixtures?\n\nThe scheduler will try to avoid venue clashes by spreading fixtures across different weeks when needed. Existing manual edits will be lost.')) return;
         const parts      = _getParticipants(league);
         league.fixtures  = generateFixtures(parts, league.homeMatches || 1, league.startDate, league.neutralVenueId, league.playingDay, league.matchTime, league.id);
         league.standings = generateStandings(parts);
@@ -828,14 +833,22 @@ const Leagues = (() => {
       return f && !f.clashOkayed;
     });
 
+    const leagueStarted = fixtures.some(f => f.homeScore !== null && f.homeScore !== undefined);
+
     let html = '';
     if (unresolved.length > 0) {
-      const clashCount = unresolved.length / 2;   // each clash involves 2 fixtures
+      const clashCount = unresolved.length / 2;
+      let recalcBtn = '';
+      if (Auth.isAdmin()) {
+        recalcBtn = leagueStarted
+          ? `<span class="text-muted" style="font-size:.78rem;margin-left:auto">League in progress — edit fixtures manually.</span>`
+          : `<button class="btn btn-xs btn-warning recalc-fixtures-btn" style="margin-left:auto">🔄 Recalculate Fixtures</button>`;
+      } else {
+        recalcBtn = `Contact an admin to resolve the clash${clashCount > 1 ? 'es' : ''}.`;
+      }
       html += `<div class="fixture-clash-badge" style="margin-bottom:1rem;border-radius:var(--radius)">
         ⚠️ ${Math.ceil(clashCount)} venue clash${clashCount > 1 ? 'es' : ''} detected in this league's fixtures.
-        ${Auth.isAdmin()
-          ? `<button class="btn btn-xs btn-warning recalc-fixtures-btn" style="margin-left:auto">🔄 Recalculate Fixtures</button>`
-          : `Contact an admin to recalculate or okay the clash${clashCount > 1 ? 'es' : ''}.`}
+        ${recalcBtn}
       </div>`;
     }
 
@@ -915,13 +928,19 @@ const Leagues = (() => {
     });
 
     const rows = Object.values(counts);
-    const anyImbalance = rows.some(r => Math.abs(r.home - r.away) > 1);
+    const anyImbalance   = rows.some(r => Math.abs(r.home - r.away) > 1);
+    const leagueStarted  = (league.fixtures || []).some(f => f.homeScore !== null && f.homeScore !== undefined);
 
     let html = `<div style="margin-bottom:.75rem">`;
     if (anyImbalance) {
+      const recalcBtn = Auth.isAdmin()
+        ? (leagueStarted
+            ? `<span class="text-muted" style="font-size:.78rem;margin-left:auto">League in progress — edit fixtures manually.</span>`
+            : `<button class="btn btn-xs btn-warning recalc-fixtures-btn">🔄 Recalculate Fixtures</button>`)
+        : '';
       html += `<div class="fixture-clash-badge" style="margin-bottom:.75rem">
         ⚠️ One or more teams have an unbalanced schedule (home/away difference > 1).
-        ${Auth.isAdmin() ? `<button class="btn btn-xs btn-warning recalc-fixtures-btn">🔄 Recalculate Fixtures</button>` : ''}
+        ${recalcBtn}
       </div>`;
     } else {
       html += `<div class="clash-okayed-badge" style="margin-bottom:.75rem">✓ Home/Away schedule is balanced.</div>`;
