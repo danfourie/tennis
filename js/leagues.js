@@ -408,6 +408,23 @@ const Leagues = (() => {
 
     if (teams.length < 2) return [];
 
+    // ── Same-school double-team venues ───────────────────────────
+    // Identify venues where ONE school has 2+ teams in this league.
+    // Those venues are allowed to host both home games on the same day
+    // ONLY if the venue has at least 4 courts; otherwise the second
+    // home game must be pushed to a different week.
+    const _schoolVenueCount = {};
+    teams.forEach(t => {
+      if (!t.venueId) return;
+      const key = `${t.schoolId}|${t.venueId}`;
+      _schoolVenueCount[key] = (_schoolVenueCount[key] || 0) + 1;
+    });
+    const sameSchoolVenues = new Set(
+      Object.keys(_schoolVenueCount)
+        .filter(k => _schoolVenueCount[k] > 1)
+        .map(k => k.split('|')[1])
+    );
+
     const targetDay = (playingDay !== undefined && playingDay !== null) ? parseInt(playingDay) : 5;
 
     // ── Berger (circle) round-robin pairings ─────────────────────
@@ -487,20 +504,28 @@ const Leagues = (() => {
         const hasHome   = homeVenue && (homeVenue.courts || 0) > 0;
         const venueId   = hasHome ? homeVenue.id : (neutralVenueId || null);
         const venue     = venueId ? DB.getVenues().find(v => v.id === venueId) : null;
-        const venueName = venue ? venue.name : 'TBA';
-        const maxSlots  = venue ? Math.floor((venue.courts || 0) / COURTS_PER_MATCH) : 0;
+        const venueName  = venue ? venue.name : 'TBA';
+        const venueCourts = venue ? (venue.courts || 0) : 0;
+        const baseSlots  = Math.floor(venueCourts / COURTS_PER_MATCH);
+
+        // If this venue hosts two teams from the same school, allow both home
+        // games on the same day only when the venue has ≥ 4 courts.
+        // (With < 4 courts the second home game is pushed to the next week.)
+        const effectiveMaxSlots = sameSchoolVenues.has(venueId) && venueCourts >= 4
+          ? Math.max(baseSlots, 2)
+          : baseSlots;
 
         let assignedDate  = toDateStr(addDays(baseDate, roundIdx * 7));
         let assignedCourt = 0;
 
-        if (venueId && maxSlots > 0) {
+        if (venueId && effectiveMaxSlots > 0) {
           let placed = false;
           // Try the ideal date first, then push out week-by-week (up to 52 weeks)
           for (let attempt = 0; attempt < 52 && !placed; attempt++) {
             const tryDate = toDateStr(addDays(baseDate, roundIdx * 7 + attempt * 7));
             const taken   = _takenCourts(venueId, tryDate);
 
-            if (taken.length < maxSlots) {
+            if (taken.length < effectiveMaxSlots) {
               // Find the first free court block (multiples of COURTS_PER_MATCH)
               let court = 0;
               while (taken.includes(court)) court += COURTS_PER_MATCH;
@@ -515,7 +540,7 @@ const Leagues = (() => {
             // No feasible slot found — schedule on preferred date with a forced clash.
             // The master must "okay" it; the school can request an alternate venue.
             assignedDate  = toDateStr(addDays(baseDate, roundIdx * 7));
-            assignedCourt = maxSlots * COURTS_PER_MATCH; // beyond capacity → clash flagged
+            assignedCourt = effectiveMaxSlots * COURTS_PER_MATCH; // beyond capacity → clash flagged
             _claim(venueId, assignedDate, assignedCourt);
           }
         }
