@@ -1,4 +1,4 @@
-# Firebase Setup Guide — Tennis Court Manager
+# Firebase Setup Guide — Court Campus
 
 This branch replaces `localStorage` with **Firebase Firestore** (database) and
 **Firebase Authentication** (master-user login).  Follow the steps below once
@@ -64,7 +64,7 @@ The master (admin) user is a regular Firebase Auth account.
 2. Click **Get started**, then enable **Email/Password** provider.
 3. Go to the **Users** tab and click **Add user**.
 4. Enter the admin email and a strong password (minimum 6 characters).
-5. That email + password is what you use to log in on the Tennis Court Manager.
+5. That email + password is what you use to log in on the Court Campus.
 
 ---
 

@@ -1,6 +1,6 @@
 /**
  * firebase-config.js
- * Tennis Court Manager — Firebase project configuration.
+ * Court Campus — Firebase project configuration.
  * Used by app.js: firebase.initializeApp(FIREBASE_CONFIG)
  */
 const FIREBASE_CONFIG = {
