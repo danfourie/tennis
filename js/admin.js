@@ -310,7 +310,8 @@ const Admin = (() => {
           <div>
             <span class="color-dot" style="background:${s.color}"></span>
             <strong>${esc(s.name)}</strong>
-            <div class="text-muted">${venue ? esc(venue.name) : 'No home venue'} · ${esc(s.contact || '')}</div>
+            <div class="text-muted">${venue ? esc(venue.name) : 'No home venue'}${s.team ? ' · ' + esc(s.team) : ''}</div>
+            <div class="text-muted">${s.contact ? esc(s.contact) : ''}${s.email ? ' · ' + esc(s.email) : ''}${s.phone ? ' · ' + esc(s.phone) : ''}</div>
           </div>
           <div class="item-actions">
             <button class="btn btn-xs btn-secondary" data-school-edit="${s.id}">Edit</button>
@@ -333,8 +334,11 @@ const Admin = (() => {
     const venues = DB.getVenues();
     document.getElementById('schoolModalTitle').textContent = s ? 'Edit School' : 'Add School';
     document.getElementById('schoolName').value             = s ? s.name : '';
+    document.getElementById('schoolTeam').value             = s ? (s.team    || '') : '';
     document.getElementById('schoolContact').value          = s ? (s.contact || '') : '';
-    document.getElementById('schoolColor').value            = s ? (s.color || '#3b82f6') : '#3b82f6';
+    document.getElementById('schoolEmail').value            = s ? (s.email   || '') : '';
+    document.getElementById('schoolPhone').value            = s ? (s.phone   || '') : '';
+    document.getElementById('schoolColor').value            = s ? (s.color   || '#3b82f6') : '#3b82f6';
     document.getElementById('schoolEditId').value           = s ? s.id : '';
     const vSel = document.getElementById('schoolVenue');
     vSel.innerHTML = `<option value="">No home venue</option>` +
@@ -343,14 +347,21 @@ const Admin = (() => {
   }
 
   function saveSchool() {
-    const name = document.getElementById('schoolName').value.trim();
+    const name  = document.getElementById('schoolName').value.trim();
+    const phone = document.getElementById('schoolPhone').value.trim();
     if (!name) { toast('School name required', 'error'); return; }
+    if (phone && !/^0\d{9}$/.test(phone)) {
+      toast('Phone must be 10 digits starting with 0', 'error'); return;
+    }
     const id = document.getElementById('schoolEditId').value;
     const school = {
-      id: id || uid(),
+      id:      id || uid(),
       name,
+      team:    document.getElementById('schoolTeam').value.trim(),
       venueId: document.getElementById('schoolVenue').value || null,
       contact: document.getElementById('schoolContact').value.trim(),
+      email:   document.getElementById('schoolEmail').value.trim(),
+      phone,
       color:   document.getElementById('schoolColor').value,
     };
     if (id) {
