@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Import Leagues — Tennis Court Manager</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 1100px; margin: 40px auto; padding: 0 20px; background: #f4f4f4; }
+    h1   { color: #1e3a5f; }
+    .card { background: #fff; border-radius: 8px; padding: 24px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,.1); }
+    .bulk-row { display: flex; flex-wrap: wrap; gap: 1rem; align-items: flex-end; margin-bottom: 1.25rem; }
+    .bulk-row .fg { display: flex; flex-direction: column; gap: .3rem; font-size: .85rem; font-weight: 600; }
+    .bulk-row input, .bulk-row select { padding: .35rem .6rem; border: 1.5px solid #ccc; border-radius: 5px; font-size: .85rem; }
+    .bulk-row button { padding: .4rem .9rem; background: #64748b; color: #fff; border: none; border-radius: 5px; cursor: pointer; font-size: .85rem; }
+    table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+    th    { background: #1e3a5f; color: #fff; text-align: left; padding: 7px 8px; white-space: nowrap; }
+    td    { padding: 5px 6px; border-bottom: 1px solid #e5e5e5; vertical-align: middle; }
+    tr:nth-child(even) td { background: #f9f9f9; }
+    td input, td select { width: 100%; padding: .25rem .4rem; border: 1px solid #ccc; border-radius: 4px; font-size: .8rem; box-sizing: border-box; }
+    td input[type="date"]  { min-width: 120px; }
+    td input[type="time"]  { min-width: 80px; }
+    .skip-cb { width: auto !important; cursor: pointer; }
+    .skipped td { opacity: .35; text-decoration: line-through; }
+    .btn-import { background: #2563eb; color: #fff; border: none; padding: 12px 28px; border-radius: 6px; font-size: 1rem; cursor: pointer; }
+    .btn-import:disabled { background: #9ca3af; cursor: not-allowed; }
+    #log  { margin-top: 16px; }
+    .log-item { padding: 6px 10px; margin: 4px 0; border-radius: 4px; font-size: .85rem; }
+    .ok   { background: #d1fae5; color: #065f46; }
+    .err  { background: #fee2e2; color: #991b1b; }
+    .info { background: #dbeafe; color: #1e40af; }
+    #summary { font-weight: bold; font-size: 1.05rem; margin-top: 12px; }
+    .division-header td { background: #e0e7ef !important; font-weight: 700; font-size: .8rem; text-transform: uppercase; letter-spacing: .4px; color: #1e3a5f; }
+  </style>
+</head>
+<body>
+
+<div class="card">
+  <h1>🏆 Import Leagues</h1>
+  <p>Review and edit the <strong>30 leagues</strong> below before importing into Firebase. Leagues will be created with no schools or fixtures — add schools to each league from <strong>Admin → Leagues</strong> afterwards.</p>
+  <p><strong>Note:</strong> You must be logged in as <em>master</em> on the main app in the same browser session. Leagues with the same name <em>and</em> division will be skipped.</p>
+
+  <!-- Bulk-edit row -->
+  <div class="card" style="background:#f0f7ff;border:1.5px solid #bfdbfe;margin-bottom:0">
+    <strong style="display:block;margin-bottom:.75rem">Bulk-edit defaults — change values then click Apply to All</strong>
+    <div class="bulk-row">
+      <div class="fg"><label>Season Start</label><input type="date" id="bulkStart" value="2026-04-24"></div>
+      <div class="fg"><label>Season End</label><input type="date" id="bulkEnd" value="2026-07-24"></div>
+      <div class="fg"><label>Playing Day</label>
+        <select id="bulkDay">
+          <option value="1">Monday</option><option value="2">Tuesday</option>
+          <option value="3">Wednesday</option><option value="4">Thursday</option>
+          <option value="5" selected>Friday</option><option value="6">Saturday</option>
+          <option value="0">Sunday</option>
+        </select>
+      </div>
+      <div class="fg"><label>Match Time</label><input type="time" id="bulkTime" value="14:00"></div>
+      <button onclick="applyBulk()">Apply to All</button>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <table id="leagueTable">
+    <thead>
+      <tr>
+        <th style="width:30px"><input type="checkbox" id="selectAll" checked title="Select/deselect all" onchange="toggleAll(this)"></th>
+        <th>#</th>
+        <th>League Name</th>
+        <th>Division</th>
+        <th>Season Start</th>
+        <th>Season End</th>
+        <th>Playing Day</th>
+        <th>Match Time</th>
+      </tr>
+    </thead>
+    <tbody id="leagueBody"></tbody>
+  </table>
+</div>
+
+<div class="card">
+  <button class="btn-import" id="importBtn" onclick="runImport()">Import Selected Leagues →</button>
+  <div id="log"></div>
+  <div id="summary"></div>
+</div>
+
+<!-- Firebase compat SDK -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="js/firebase-config.js"></script>
+
+<script>
+const DAY_MAP = { Monday:1, Tuesday:2, Wednesday:3, Thursday:4, Friday:5, Saturday:6, Sunday:0 };
+const DAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+
+const RAW = [
+  { name:'A1 - 2026', division:'Junior Boys',   start:'2026-04-24', end:'2026-07-24', day:'Friday', time:'14:00' },
+  { name:'A2 - 2026', division:'Junior Boys',   start:'2026-04-24', end:'2026-07-24', day:'Friday', time:'14:00' },
+  { name:'B1 - 2026', division:'Junior Boys',   start:'2026-04-24', end:'2026-07-24', day:'Friday', time:'14:00' },
+  { name:'B2 - 2026', division:'Junior Boys',   start:'2026-04-24', end:'2026-07-24', day:'Friday', time:'14:00' },
+  { name:'B3 - 2026', division:'Junior Boys',   start:'2026-04-24', end:'2026-07-24', day:'Friday', time:'14:00' },
+  { name:'C1 - 2026', division:'Junior Boys',   start:'2026-04-24', end:'2026-07-24', day:'Friday', time:'14:00' },
+  { name:'C2 - 2026', division:'Junior Boys',   start:'2026-04-24', end:'2026-07-24', day:'Friday', time:'14:00' },
+  { name:'A1 - 2026', division:'Junior Girls',  start:'2026-04-24', end:'2026-07-24', day:'Friday', time:'14:00' },
+  { name:'A2 - 2026', division:'Junior Girls',  start:'2026-04-24', end:'2026-07-24', day:'Friday', time:'14:00' },
+  { name:'B1 - 2026', division:'Junior Girls',  start:'2026-04-24', end:'2026-07-24', day:'Friday', time:'14:00' },
+  { name:'B2 - 2026', division:'Junior Girls',  start:'2026-04-24', end:'2026-07-24', day:'Friday', time:'14:00' },
+  { name:'B3 - 2026', division:'Junior Girls',  start:'2026-04-24', end:'2026-07-24', day:'Friday', time:'14:00' },
+  { name:'C1 - 2026', division:'Junior Girls',  start:'2026-04-24', end:'2026-07-24', day:'Friday', time:'14:00' },
+  { name:'C3 - 2026', division:'Junior Girls',  start:'2026-04-24', end:'2026-07-24', day:'Friday', time:'14:00' },
+  { name:'A1 - 2026', division:'Senior Boys',   start:'2026-04-24', end:'2026-08-07', day:'Friday', time:'14:00' },
+  { name:'A2 - 2026', division:'Senior Boys',   start:'2026-04-24', end:'2026-08-07', day:'Friday', time:'14:00' },
+  { name:'B1 - 2026', division:'Senior Boys',   start:'2026-04-24', end:'2026-08-07', day:'Friday', time:'14:00' },
+  { name:'B2 - 2026', division:'Senior Boys',   start:'2026-04-24', end:'2026-08-07', day:'Friday', time:'14:00' },
+  { name:'B3 - 2026', division:'Senior Boys',   start:'2026-04-24', end:'2026-08-07', day:'Friday', time:'14:00' },
+  { name:'B4 - 2026', division:'Senior Boys',   start:'2026-04-24', end:'2026-08-07', day:'Friday', time:'14:00' },
+  { name:'C1 - 2026', division:'Senior Boys',   start:'2026-04-24', end:'2026-08-07', day:'Friday', time:'14:00' },
+  { name:'C2 - 2026', division:'Senior Boys',   start:'2026-04-24', end:'2026-08-07', day:'Friday', time:'14:00' },
+  { name:'A1 - 2026', division:'Senior Girls',  start:'2026-04-24', end:'2026-07-24', day:'Friday', time:'14:00' },
+  { name:'A2 - 2026', division:'Senior Girls',  start:'2026-04-24', end:'2026-07-24', day:'Friday', time:'14:00' },
+  { name:'B1 - 2026', division:'Senior Girls',  start:'2026-04-24', end:'2026-07-24', day:'Friday', time:'14:00' },
+  { name:'B2 - 2026', division:'Senior Girls',  start:'2026-04-24', end:'2026-07-24', day:'Friday', time:'14:00' },
+  { name:'B3 - 2026', division:'Senior Girls',  start:'2026-04-24', end:'2026-07-24', day:'Friday', time:'14:00' },
+  { name:'B4 - 2026', division:'Senior Girls',  start:'2026-04-24', end:'2026-07-24', day:'Friday', time:'14:00' },
+  { name:'C1 - 2026', division:'Senior Girls',  start:'2026-04-24', end:'2026-07-24', day:'Friday', time:'14:00' },
+  { name:'C2 - 2026', division:'Senior Girls',  start:'2026-04-24', end:'2026-07-24', day:'Friday', time:'14:00' },
+];
+
+function dayOptions(selected) {
+  return [['1','Monday'],['2','Tuesday'],['3','Wednesday'],['4','Thursday'],
+          ['5','Friday'],['6','Saturday'],['0','Sunday']]
+    .map(([v,l]) => `<option value="${v}"${v == selected ? ' selected' : ''}>${l}</option>`)
+    .join('');
+}
+
+function buildTable() {
+  const tbody = document.getElementById('leagueBody');
+  let rows = '', lastDiv = '';
+  RAW.forEach((r, i) => {
+    if (r.division !== lastDiv) {
+      rows += `<tr class="division-header"><td colspan="8">📂 ${r.division}</td></tr>`;
+      lastDiv = r.division;
+    }
+    const dayVal = DAY_MAP[r.day] !== undefined ? DAY_MAP[r.day] : 5;
+    rows += `<tr id="row-${i}">
+      <td><input type="checkbox" class="skip-cb" data-idx="${i}" checked></td>
+      <td style="text-align:center;color:#666">${i+1}</td>
+      <td><input type="text"   id="n-${i}"  value="${r.name}"></td>
+      <td><input type="text"   id="d-${i}"  value="${r.division}"></td>
+      <td><input type="date"   id="s-${i}"  value="${r.start}"></td>
+      <td><input type="date"   id="e-${i}"  value="${r.end}"></td>
+      <td><select id="p-${i}">${dayOptions(dayVal)}</select></td>
+      <td><input type="time"   id="t-${i}"  value="${r.time}"></td>
+    </tr>`;
+  });
+  tbody.innerHTML = rows;
+
+  document.querySelectorAll('.skip-cb').forEach(cb => {
+    cb.addEventListener('change', () => {
+      document.getElementById(`row-${cb.dataset.idx}`).classList.toggle('skipped', !cb.checked);
+    });
+  });
+}
+
+function applyBulk() {
+  const s = document.getElementById('bulkStart').value;
+  const e = document.getElementById('bulkEnd').value;
+  const p = document.getElementById('bulkDay').value;
+  const t = document.getElementById('bulkTime').value;
+  RAW.forEach((_, i) => {
+    const cb = document.querySelector(`.skip-cb[data-idx="${i}"]`);
+    if (!cb || !cb.checked) return; // skip unchecked rows
+    if (s) document.getElementById(`s-${i}`).value = s;
+    if (e) document.getElementById(`e-${i}`).value = e;
+    document.getElementById(`p-${i}`).value = p;
+    if (t) document.getElementById(`t-${i}`).value = t;
+  });
+}
+
+function toggleAll(master) {
+  document.querySelectorAll('.skip-cb').forEach(cb => {
+    cb.checked = master.checked;
+    document.getElementById(`row-${cb.dataset.idx}`).classList.toggle('skipped', !master.checked);
+  });
+}
+
+function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
+
+function log(msg, type='info') {
+  const d = document.createElement('div');
+  d.className = `log-item ${type}`;
+  d.textContent = msg;
+  document.getElementById('log').appendChild(d);
+}
+
+async function runImport() {
+  const btn = document.getElementById('importBtn');
+  btn.disabled = true;
+  document.getElementById('log').innerHTML = '';
+  document.getElementById('summary').textContent = '';
+
+  if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
+  const db   = firebase.firestore();
+  const auth = firebase.auth();
+
+  const user = auth.currentUser;
+  if (!user) {
+    log('⚠️  Not logged in. Open the main app, log in as master, then come back here.', 'err');
+    btn.disabled = false; return;
+  }
+
+  const profileDoc = await db.collection('users').doc(user.uid).get();
+  if (!profileDoc.exists || profileDoc.data().role !== 'master') {
+    log('⚠️  You must be logged in as master to import leagues.', 'err');
+    btn.disabled = false; return;
+  }
+
+  log(`✅ Logged in as master: ${user.email}`, 'ok');
+
+  // Fetch existing leagues to detect duplicates
+  const existingSnap = await db.collection('leagues').get();
+  const existingKeys = new Set(
+    existingSnap.docs.map(d => `${(d.data().name||'').toLowerCase()}||${(d.data().division||'').toLowerCase()}`)
+  );
+  log(`ℹ️  ${existingSnap.size} league(s) already in database — duplicates (same name + division) will be skipped.`, 'info');
+
+  let added = 0, skipped = 0, errors = 0;
+
+  for (let i = 0; i < RAW.length; i++) {
+    // Skip unchecked rows
+    const cb = document.querySelector(`.skip-cb[data-idx="${i}"]`);
+    if (!cb || !cb.checked) { skipped++; continue; }
+
+    const name      = document.getElementById(`n-${i}`).value.trim();
+    const division  = document.getElementById(`d-${i}`).value.trim();
+    const startDate = document.getElementById(`s-${i}`).value;
+    const endDate   = document.getElementById(`e-${i}`).value;
+    const playingDay= parseInt(document.getElementById(`p-${i}`).value);
+    const matchTime = document.getElementById(`t-${i}`).value;
+
+    const key = `${name.toLowerCase()}||${division.toLowerCase()}`;
+    if (existingKeys.has(key)) {
+      log(`⏭️  Skipped (already exists): ${name} — ${division}`, 'info');
+      skipped++; continue;
+    }
+
+    try {
+      const id = uid();
+      await db.collection('leagues').doc(id).set({
+        id,
+        name,
+        division,
+        startDate,
+        endDate,
+        playingDay,
+        matchTime,
+        schoolIds:    [],
+        homeMatches:  1,
+        neutralVenueId: null,
+        fixtures:     [],
+        standings:    [],
+      });
+
+      await db.collection('auditLog').add({
+        action:      'league_imported',
+        category:    'league',
+        description: `League imported: ${name} (${division})`,
+        entityId:    id,
+        entityName:  name,
+        userId:      user.uid,
+        userName:    user.displayName || user.email,
+        timestamp:   new Date().toISOString(),
+      });
+
+      existingKeys.add(key); // prevent duplicate within same import run
+      log(`✅ Imported: ${name} — ${division} (${DAY_NAMES[playingDay]}, ${matchTime}, ${startDate} → ${endDate})`, 'ok');
+      added++;
+    } catch (err) {
+      log(`❌ Failed: ${name} — ${division}: ${err.message}`, 'err');
+      errors++;
+    }
+  }
+
+  document.getElementById('summary').textContent =
+    `Done — ${added} added, ${skipped} skipped, ${errors} failed.`;
+  btn.disabled = false;
+}
+
+buildTable();
+</script>
+</body>
+</html>
