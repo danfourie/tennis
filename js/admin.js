@@ -8,6 +8,13 @@ const Admin = (() => {
   // ── Active sub-tab tracking ───────────────────────────────────
   let _activeTab = 'overview';
 
+  // Validate a phone field that may contain multiple numbers separated by / or ,
+  // Each individual number (stripped of spaces) must be 10 digits starting with 0.
+  function _validPhone(val) {
+    if (!val) return true; // empty is fine
+    return val.split(/[\/,]/).every(part => /^0\d{9}$/.test(part.trim()));
+  }
+
   function init() {
     // Sub-tab click handlers
     document.querySelectorAll('.admin-subtab').forEach(btn => {
@@ -302,8 +309,8 @@ const Admin = (() => {
     const name  = document.getElementById('venueName').value.trim();
     const phone = document.getElementById('venuePhone').value.trim();
     if (!name) { toast('Venue name required', 'error'); return; }
-    if (phone && !/^0\d{9}$/.test(phone)) {
-      toast('Phone must be 10 digits starting with 0', 'error'); return;
+    if (!_validPhone(phone)) {
+      toast('Each phone number must be 10 digits starting with 0 (separate multiple numbers with /)', 'error'); return;
     }
     const id = document.getElementById('venueEditId').value;
     const venue = {
@@ -397,8 +404,8 @@ const Admin = (() => {
     const name  = document.getElementById('schoolName').value.trim();
     const phone = document.getElementById('schoolPhone').value.trim();
     if (!name) { toast('School name required', 'error'); return; }
-    if (phone && !/^0\d{9}$/.test(phone)) {
-      toast('Phone must be 10 digits starting with 0', 'error'); return;
+    if (!_validPhone(phone)) {
+      toast('Each phone number must be 10 digits starting with 0 (separate multiple numbers with /)', 'error'); return;
     }
     const id = document.getElementById('schoolEditId').value;
     const school = {
