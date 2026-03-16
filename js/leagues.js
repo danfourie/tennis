@@ -566,6 +566,94 @@ const Leagues = (() => {
       });
     });
 
+    // ── Post-generation: swap home/away to reduce clashes ────────
+    // For every fixture that is involved in a venue clash, try reversing
+    // home and away (which moves the match to the away team's home venue).
+    // Accept the swap if total clashes across the whole fixture list (including
+    // cross-league fixtures) decreases.  Repeat until no improvement or 40 passes.
+    {
+      // Cross-league fixtures already known — used for clash counting
+      const xLeague = [];
+      DB.getLeagues().forEach(l => {
+        if (l.id === leagueId) return;
+        (l.fixtures || []).forEach(f => { if (f.venueId && f.date) xLeague.push(f); });
+      });
+
+      const _clash = (a, b) => {
+        if (!a.venueId || !b.venueId || a.venueId !== b.venueId || a.date !== b.date) return false;
+        const aBase = a.courtIndex || 0, bBase = b.courtIndex || 0;
+        if (aBase + COURTS_PER_MATCH <= bBase || bBase + COURTS_PER_MATCH <= aBase) return false;
+        const aT = timeToMins(a.timeSlot || '14:00'), bT = timeToMins(b.timeSlot || '14:00');
+        return aT + MATCH_MINS > bT && bT + MATCH_MINS > aT;
+      };
+
+      const _totalClashes = fxArr =>
+        fxArr.reduce((n, f, i) => {
+          for (let j = i + 1; j < fxArr.length; j++) if (_clash(f, fxArr[j])) n++;
+          for (const cf of xLeague) if (_clash(f, cf)) n++;
+          return n;
+        }, 0);
+
+      for (let iter = 0; iter < 40; iter++) {
+        const baseline = _totalClashes(fixtures);
+        if (baseline === 0) break;
+
+        let swapped = false;
+        for (let i = 0; i < fixtures.length && !swapped; i++) {
+          const orig = fixtures[i];
+
+          // Skip if this fixture is not part of any clash
+          const isClashing =
+            fixtures.some((g, j) => j !== i && _clash(orig, g)) ||
+            xLeague.some(cf => _clash(orig, cf));
+          if (!isClashing) continue;
+
+          // Candidate swap: old away team becomes the new home team → match moves to their venue
+          const newHomePart = teams.find(t => t.participantId === orig.awayParticipantId);
+          if (!newHomePart || !newHomePart.venueId) continue;
+          const newVenue = DB.getVenues().find(v => v.id === newHomePart.venueId);
+          if (!newVenue || newVenue.id === orig.venueId) continue; // same venue — swap won't help
+          const newVenueCourts = newVenue.courts || 0;
+          const newBaseSlots   = Math.floor(newVenueCourts / COURTS_PER_MATCH);
+          if (newBaseSlots === 0) continue; // new venue has no courts
+
+          // Find first free court at the new venue on the same date
+          const taken = [...(_takenCourts(newVenue.id, orig.date))];
+          let court = 0;
+          while (taken.includes(court)) court += COURTS_PER_MATCH;
+
+          const candidate = {
+            ...orig,
+            homeParticipantId: orig.awayParticipantId,
+            awayParticipantId: orig.homeParticipantId,
+            homeSchoolId:      orig.awaySchoolId,
+            homeSchoolName:    orig.awaySchoolName,
+            awaySchoolId:      orig.homeSchoolId,
+            awaySchoolName:    orig.homeSchoolName,
+            venueId:           newVenue.id,
+            venueName:         newVenue.name,
+            isNeutral:         false,
+            courtIndex:        court,
+          };
+
+          // Accept only if this reduces total clashes
+          const testArr = fixtures.map((f, k) => k === i ? candidate : f);
+          if (_totalClashes(testArr) < baseline) {
+            // Update venue tracker: release old slot, claim new
+            const oldBucket = (venueUsage[orig.venueId] || {})[orig.date];
+            if (oldBucket) {
+              const ci = oldBucket.indexOf(orig.courtIndex);
+              if (ci !== -1) oldBucket.splice(ci, 1);
+            }
+            _claim(newVenue.id, orig.date, court);
+            fixtures[i] = candidate;
+            swapped = true;
+          }
+        }
+        if (!swapped) break; // no improvement found — stop
+      }
+    }
+
     return fixtures;
   }
 
