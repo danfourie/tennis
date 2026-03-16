@@ -59,7 +59,6 @@
     <section id="view-leagues" class="view hidden">
       <div class="view-header">
         <h2>School Leagues</h2>
-        <button class="btn btn-primary admin-only hidden" id="addLeagueBtn">+ Add League</button>
       </div>
       <div id="leaguesList" class="cards-grid"></div>
     </section>
@@ -68,7 +67,6 @@
     <section id="view-tournaments" class="view hidden">
       <div class="view-header">
         <h2>Tournaments</h2>
-        <button class="btn btn-primary admin-only hidden" id="addTournamentBtn">+ Add Tournament</button>
       </div>
       <div id="tournamentsList" class="cards-grid"></div>
     </section>
@@ -78,48 +76,92 @@
       <div class="view-header">
         <h2>Administration</h2>
       </div>
-      <div class="admin-grid">
-        <!-- Pending Requests — full width -->
-        <div class="admin-card admin-card-wide">
-          <h3>⏳ Pending Booking Requests</h3>
-          <div id="pendingList"></div>
-        </div>
-        <!-- Users -->
-        <div class="admin-card">
-          <h3>👥 Users</h3>
-          <div id="usersList"></div>
-        </div>
-        <!-- Venues -->
-        <div class="admin-card">
-          <h3>Venues &amp; Courts</h3>
-          <div id="venuesList"></div>
-          <button class="btn btn-primary" id="addVenueBtn">+ Add Venue</button>
-        </div>
-        <!-- Schools -->
-        <div class="admin-card">
-          <h3>Schools</h3>
-          <div id="schoolsList"></div>
-          <button class="btn btn-primary" id="addSchoolBtn">+ Add School</button>
-        </div>
-        <!-- Closures -->
-        <div class="admin-card">
-          <h3>Court Closures</h3>
-          <div id="closuresList"></div>
-          <button class="btn btn-primary" id="addClosureBtn">+ Add Closure</button>
-        </div>
-        <!-- Settings -->
-        <div class="admin-card">
-          <h3>Settings</h3>
-          <div class="settings-form">
-            <label>Change Password</label>
-            <input type="password" id="newPassword" placeholder="New password">
-            <button class="btn btn-secondary" id="changePasswordBtn">Update</button>
+
+      <!-- Admin Sub-tab Navigation -->
+      <div class="admin-subtabs">
+        <button class="admin-subtab active" data-subtab="overview">⏳ Overview</button>
+        <button class="admin-subtab" data-subtab="leagues">🏆 Leagues</button>
+        <button class="admin-subtab" data-subtab="tournaments">🏅 Tournaments</button>
+        <button class="admin-subtab" data-subtab="venues">🏟 Venues</button>
+        <button class="admin-subtab" data-subtab="schools">🏫 Schools</button>
+        <button class="admin-subtab" data-subtab="users">👥 Users</button>
+        <button class="admin-subtab" data-subtab="settings">⚙️ Settings</button>
+      </div>
+
+      <!-- Overview Tab -->
+      <div class="admin-tab-panel active" id="subtab-overview">
+        <div class="admin-grid">
+          <div class="admin-card admin-card-full">
+            <h3>⏳ Pending Booking Requests</h3>
+            <div id="pendingList"></div>
           </div>
         </div>
-        <!-- Audit Log — full width -->
-        <div class="admin-card admin-card-full">
-          <h3>📋 Audit Log</h3>
-          <div id="auditList"></div>
+      </div>
+
+      <!-- Leagues Tab -->
+      <div class="admin-tab-panel hidden" id="subtab-leagues">
+        <div class="admin-panel-header">
+          <h3>🏆 Leagues</h3>
+          <button class="btn btn-primary" id="addLeagueBtnAdmin">+ Create League</button>
+        </div>
+        <div id="adminLeaguesList" class="admin-module-list"></div>
+      </div>
+
+      <!-- Tournaments Tab -->
+      <div class="admin-tab-panel hidden" id="subtab-tournaments">
+        <div class="admin-panel-header">
+          <h3>🏅 Tournaments</h3>
+          <button class="btn btn-primary" id="addTournamentBtnAdmin">+ Create Tournament</button>
+        </div>
+        <div id="adminTournamentsList" class="admin-module-list"></div>
+      </div>
+
+      <!-- Venues Tab -->
+      <div class="admin-tab-panel hidden" id="subtab-venues">
+        <div class="admin-panel-header">
+          <h3>🏟 Venues &amp; Courts</h3>
+          <button class="btn btn-primary" id="addVenueBtn">+ Add Venue</button>
+        </div>
+        <div id="venuesList"></div>
+      </div>
+
+      <!-- Schools Tab -->
+      <div class="admin-tab-panel hidden" id="subtab-schools">
+        <div class="admin-panel-header">
+          <h3>🏫 Schools</h3>
+          <button class="btn btn-primary" id="addSchoolBtn">+ Add School</button>
+        </div>
+        <div id="schoolsList"></div>
+      </div>
+
+      <!-- Users Tab -->
+      <div class="admin-tab-panel hidden" id="subtab-users">
+        <div class="admin-panel-header">
+          <h3>👥 Users</h3>
+        </div>
+        <div id="usersList"></div>
+      </div>
+
+      <!-- Settings Tab -->
+      <div class="admin-tab-panel hidden" id="subtab-settings">
+        <div class="admin-grid">
+          <div class="admin-card">
+            <h3>🚫 Court Closures</h3>
+            <div id="closuresList"></div>
+            <button class="btn btn-primary" style="margin-top:.75rem" id="addClosureBtn">+ Add Closure</button>
+          </div>
+          <div class="admin-card">
+            <h3>⚙️ Account Settings</h3>
+            <div class="settings-form">
+              <label>Change Password</label>
+              <input type="password" id="newPassword" placeholder="New password">
+              <button class="btn btn-secondary" id="changePasswordBtn">Update</button>
+            </div>
+          </div>
+          <div class="admin-card admin-card-full">
+            <h3>📋 Audit Log</h3>
+            <div id="auditList"></div>
+          </div>
         </div>
       </div>
     </section>
@@ -324,6 +366,24 @@
         </div>
         <div class="form-row">
           <div class="form-group">
+            <label>Playing Day</label>
+            <select id="leaguePlayingDay">
+              <option value="1">Monday</option>
+              <option value="2">Tuesday</option>
+              <option value="3">Wednesday</option>
+              <option value="4">Thursday</option>
+              <option value="5" selected>Friday</option>
+              <option value="6">Saturday</option>
+              <option value="0">Sunday</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Match Time</label>
+            <input type="time" id="leagueMatchTime" value="14:00">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
             <label>Matches per school (home)</label>
             <input type="number" id="leagueHomeMatches" min="1" value="1">
           </div>
@@ -449,6 +509,45 @@
       <div class="modal-footer">
         <button class="btn btn-secondary" data-modal="playersModal">Close</button>
         <button class="btn btn-primary" id="playersSubmitBtn">Save &amp; Regenerate Draw</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Fixture Edit Modal (master only) -->
+  <div class="modal-overlay hidden" id="fixtureEditModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Edit Fixture</h3>
+        <button class="modal-close" data-modal="fixtureEditModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="fixtureEditInfo" class="fixture-edit-info"></div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Date</label>
+            <input type="date" id="fixtureEditDate">
+          </div>
+          <div class="form-group">
+            <label>Time</label>
+            <input type="time" id="fixtureEditTime">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Venue</label>
+          <select id="fixtureEditVenue"></select>
+        </div>
+        <div class="form-group">
+          <label>Court</label>
+          <select id="fixtureEditCourt">
+            <option value="">Any court</option>
+          </select>
+        </div>
+        <input type="hidden" id="fixtureEditLeagueId">
+        <input type="hidden" id="fixtureEditId">
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-modal="fixtureEditModal">Cancel</button>
+        <button class="btn btn-primary" id="fixtureEditSaveBtn">Save Changes</button>
       </div>
     </div>
   </div>

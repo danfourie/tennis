@@ -1,23 +1,58 @@
 /**
- * admin.js — Admin panel: venues, schools, closures, users, pending requests, audit log
+ * admin.js — Administration panel with sub-tab navigation.
+ * Sub-tabs: Overview · Leagues · Tournaments · Venues · Schools · Users · Settings
  */
 
 const Admin = (() => {
 
+  // ── Active sub-tab tracking ───────────────────────────────────
+  let _activeTab = 'overview';
+
   function init() {
+    // Sub-tab click handlers
+    document.querySelectorAll('.admin-subtab').forEach(btn => {
+      btn.addEventListener('click', () => _switchTab(btn.dataset.subtab));
+    });
+
+    // Venue buttons
     document.getElementById('addVenueBtn').addEventListener('click', () => openVenueModal());
     document.getElementById('venueSubmitBtn').addEventListener('click', saveVenue);
 
+    // School buttons
     document.getElementById('addSchoolBtn').addEventListener('click', () => openSchoolModal());
     document.getElementById('schoolSubmitBtn').addEventListener('click', saveSchool);
 
+    // Closure buttons
     document.getElementById('addClosureBtn').addEventListener('click', () => openClosureModal());
     document.getElementById('closureSubmitBtn').addEventListener('click', saveClosure);
     document.getElementById('closureVenue').addEventListener('change', updateClosureCourtList);
 
+    // League admin buttons (in admin tab — different IDs from public view)
+    document.getElementById('addLeagueBtnAdmin').addEventListener('click', () => Leagues.openLeagueModal());
+
+    // Tournament admin buttons
+    document.getElementById('addTournamentBtnAdmin').addEventListener('click', () => Tournaments.openTournamentModal());
+
+    // Password change
     document.getElementById('changePasswordBtn').addEventListener('click', changePassword);
 
     render();
+  }
+
+  function _switchTab(tab) {
+    _activeTab = tab;
+    document.querySelectorAll('.admin-subtab').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.subtab === tab);
+    });
+    document.querySelectorAll('.admin-tab-panel').forEach(panel => {
+      panel.classList.toggle('hidden', panel.id !== `subtab-${tab}`);
+      panel.classList.toggle('active', panel.id === `subtab-${tab}`);
+    });
+    // Lazy-render heavy tabs when first opened
+    if (tab === 'leagues')     Leagues.renderAdmin();
+    if (tab === 'tournaments') Tournaments.renderAdmin();
+    if (tab === 'users')       renderUsers();
+    if (tab === 'settings')    renderAuditLog();
   }
 
   function refresh() { render(); }
@@ -27,8 +62,11 @@ const Admin = (() => {
     renderSchools();
     renderClosures();
     renderPendingBookings();
-    renderUsers();       // async
-    renderAuditLog();    // async
+    // Only re-render active heavy tabs to avoid unnecessary work
+    if (_activeTab === 'leagues')     Leagues.renderAdmin();
+    if (_activeTab === 'tournaments') Tournaments.renderAdmin();
+    if (_activeTab === 'users')       renderUsers();
+    if (_activeTab === 'settings')    renderAuditLog();
   }
 
   // ════════════════════════════════════════════════════════════
@@ -230,8 +268,8 @@ const Admin = (() => {
         <div class="admin-list-item">
           <div>
             <strong>${esc(v.name)}</strong>
-            <div class="text-muted">${v.courts || 0} courts · ${esc(v.address || '')}</div>
-            <div class="text-muted">${v.email ? esc(v.email) : ''}${v.email && v.phone ? ' · ' : ''}${v.phone ? esc(v.phone) : ''}</div>
+            <div class="text-muted">${v.courts || 0} courts${v.address ? ' · ' + esc(v.address) : ''}</div>
+            <div class="text-muted">${v.contact ? esc(v.contact) : ''}${v.contact && v.email ? ' · ' : ''}${v.email ? esc(v.email) : ''}${v.phone ? ' · ' + esc(v.phone) : ''}</div>
           </div>
           <div class="item-actions">
             <button class="btn btn-xs btn-secondary" data-venue-edit="${v.id}">Edit</button>
@@ -475,8 +513,7 @@ const Admin = (() => {
     DB.addClosure({
       venueId,
       courtIndex: courtVal !== '' ? parseInt(courtVal) : null,
-      startDate,
-      endDate,
+      startDate, endDate,
       timeStart: document.getElementById('closureTimeStart').value || null,
       timeEnd:   document.getElementById('closureTimeEnd').value   || null,
       reason,

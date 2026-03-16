@@ -6,7 +6,9 @@
 const Tournaments = (() => {
 
   function init() {
-    document.getElementById('addTournamentBtn').addEventListener('click', () => openTournamentModal());
+    // addTournamentBtn may not exist in new layout (moved to admin sub-tab)
+    const addBtn = document.getElementById('addTournamentBtn');
+    if (addBtn) addBtn.addEventListener('click', () => openTournamentModal());
     document.getElementById('tournamentSubmitBtn').addEventListener('click', saveTournament);
     document.getElementById('drawAddPlayersBtn').addEventListener('click', openPlayersModal);
     document.getElementById('playersSubmitBtn').addEventListener('click', savePlayers);
@@ -17,6 +19,9 @@ const Tournaments = (() => {
   function refresh() {
     populateVenueSelects();
     render();
+    // If admin tournaments tab is visible, refresh it too
+    const adminPanel = document.getElementById('subtab-tournaments');
+    if (adminPanel && !adminPanel.classList.contains('hidden')) renderAdmin();
   }
 
   function populateVenueSelects() {
@@ -808,8 +813,61 @@ const Tournaments = (() => {
     DB.writeAudit('tournament_deleted', 'tournament', `Deleted tournament: ${t ? t.name : id}`, id, t ? t.name : null);
     DB.deleteTournament(id);
     render();
+    renderAdmin();
     toast('Tournament deleted');
   }
 
-  return { init, refresh };
+  // ════════════════════════════════════════════════════════════
+  // ADMIN VIEW  (subtab-tournaments inside Admin)
+  // ════════════════════════════════════════════════════════════
+  function renderAdmin() {
+    const container = document.getElementById('adminTournamentsList');
+    if (!container) return;
+    const tournaments = DB.getTournaments();
+    if (tournaments.length === 0) {
+      container.innerHTML = `<div class="empty-state"><div class="empty-icon">🏅</div><p>No tournaments yet. Click <strong>+ Create Tournament</strong> to get started.</p></div>`;
+      return;
+    }
+
+    const drawTypeLabel = { knockout: 'Knockout', roundrobin: 'Round Robin', spider: 'Spider Draw', doubleknockout: 'Double Elim.' };
+
+    container.innerHTML = tournaments.map(t => {
+      const venue   = DB.getVenues().find(v => v.id === t.venueId);
+      const players = t.players || [];
+      const entered = players.filter(p => p.name).length;
+
+      return `<div class="admin-module-item">
+        <div class="module-info">
+          <div class="module-title">${esc(t.name)}</div>
+          <div class="module-meta">
+            ${esc(t.category || 'No category')}
+            · <span class="badge badge-blue" style="font-size:.72rem">${drawTypeLabel[t.drawType] || t.drawType}</span>
+          </div>
+          <div class="module-meta">
+            ${t.date ? formatDate(t.date) : '?'}
+            · ${venue ? esc(venue.name) : 'No venue'}
+            · ${t.numPlayers} players · ${t.courtsAvailable} courts · ${t.matchDuration}min
+          </div>
+          <div class="module-meta">${entered} / ${t.numPlayers} players entered</div>
+        </div>
+        <div class="module-actions">
+          <button class="btn btn-sm btn-secondary" data-admin-draw="${t.id}">🎾 View Draw</button>
+          <button class="btn btn-sm btn-secondary" data-admin-t-edit="${t.id}">✏️ Edit</button>
+          <button class="btn btn-sm btn-danger"    data-admin-t-del="${t.id}">Delete</button>
+        </div>
+      </div>`;
+    }).join('');
+
+    container.querySelectorAll('[data-admin-draw]').forEach(btn => {
+      btn.addEventListener('click', () => openDrawModal(btn.dataset.adminDraw));
+    });
+    container.querySelectorAll('[data-admin-t-edit]').forEach(btn => {
+      btn.addEventListener('click', () => openTournamentModal(btn.dataset.adminTEdit));
+    });
+    container.querySelectorAll('[data-admin-t-del]').forEach(btn => {
+      btn.addEventListener('click', () => deleteTournament(btn.dataset.adminTDel));
+    });
+  }
+
+  return { init, refresh, renderAdmin, openTournamentModal };
 })();
