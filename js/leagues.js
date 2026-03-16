@@ -347,7 +347,7 @@ const Leagues = (() => {
       neutralVenueId,
       playingDay,
       matchTime,
-      fixtures:  generateFixtures(participants, homeMatches, startDate, neutralVenueId, playingDay, matchTime),
+      fixtures:  generateFixtures(participants, homeMatches, startDate, neutralVenueId, playingDay, matchTime, id || null),
       standings: generateStandings(participants),
     };
 
@@ -372,12 +372,27 @@ const Leagues = (() => {
   // ════════════════════════════════════════════════════════════
 
   /**
-   * @param {Array} participants  [{participantId, schoolId, teamSuffix}]
+   * Generate round-robin fixtures with clash-aware date/court scheduling.
+   *
+   * @param {Array}  participants        [{participantId, schoolId, teamSuffix}]
+   * @param {number} homeMatchesPerPair  home legs per pair (1 = single RR, 2 = double)
+   * @param {string} startDateStr        YYYY-MM-DD start date
+   * @param {string} neutralVenueId      fallback venue when home team has none
+   * @param {number} playingDay          0=Sun … 6=Sat
+   * @param {string} matchTime           HH:MM match start time
+   * @param {string} [leagueId]          ID of the league being (re)generated — excluded
+   *                                     from cross-league clash checks so we don't
+   *                                     block against our own old fixtures
    */
-  function generateFixtures(participants, homeMatchesPerPair, startDateStr, neutralVenueId, playingDay, matchTime) {
+  function generateFixtures(participants, homeMatchesPerPair, startDateStr, neutralVenueId, playingDay, matchTime, leagueId) {
     if (!participants || participants.length < 2) return [];
 
-    // Resolve each participant to a team object
+    const COURTS_PER_MATCH = 3;
+    const MATCH_MINS       = 180;
+    const fixStart = timeToMins(matchTime || '14:00');
+    const fixEnd   = fixStart + MATCH_MINS;
+
+    // ── Resolve participants to team objects ─────────────────────
     const teams = participants.map(p => {
       const school = DB.getSchools().find(s => s.id === p.schoolId);
       if (!school) return null;
@@ -395,15 +410,14 @@ const Leagues = (() => {
 
     const targetDay = (playingDay !== undefined && playingDay !== null) ? parseInt(playingDay) : 5;
 
-    // Build rounds using Berger (circle) method
+    // ── Berger (circle) round-robin pairings ─────────────────────
     const pool = [...teams];
-    if (pool.length % 2 === 1) pool.push(null); // bye slot for odd count
+    if (pool.length % 2 === 1) pool.push(null);          // bye for odd count
     const numTeams  = pool.length;
     const numRounds = numTeams - 1;
 
     const singleRRRounds = [];
     const circle = [...pool];
-
     for (let r = 0; r < numRounds; r++) {
       const matches = [];
       for (let i = 0; i < numTeams / 2; i++) {
@@ -412,12 +426,11 @@ const Leagues = (() => {
         if (home && away) matches.push({ home, away });
       }
       singleRRRounds.push(matches);
-      // Rotate: keep circle[0] fixed, rotate the rest clockwise
       const last = circle.splice(numTeams - 1, 1)[0];
       circle.splice(1, 0, last);
     }
 
-    // Build full set of rounds: home + reverse (double round-robin per homeMatchesPerPair)
+    // Double (or more) round-robin
     const allRounds = [];
     for (let rep = 0; rep < homeMatchesPerPair; rep++) {
       singleRRRounds.forEach(round => {
@@ -426,24 +439,86 @@ const Leagues = (() => {
       });
     }
 
-    // Find first occurrence of targetDay on or after startDate
+    // First playing day on or after startDate
     let baseDate = startDateStr ? parseDate(startDateStr) : new Date();
     const daysAhead = (targetDay - baseDate.getDay() + 7) % 7;
     baseDate = addDays(baseDate, daysAhead);
 
-    const fixtures = [];
-    allRounds.forEach((round, roundIdx) => {
-      const roundDate = addDays(baseDate, roundIdx * 7);
+    // ── Venue slot tracker ───────────────────────────────────────
+    // venueUsage[venueId][date] = [ courtStart, … ] of already-claimed blocks
+    const venueUsage = {};
 
+    function _claim(venueId, date, courtStart) {
+      if (!venueUsage[venueId])        venueUsage[venueId] = {};
+      if (!venueUsage[venueId][date])  venueUsage[venueId][date] = [];
+      venueUsage[venueId][date].push(courtStart);
+    }
+
+    // Returns array of courtStart values already booked at (venueId, date)
+    // overlapping the fixture time window.  For same-league fixtures every
+    // fixture uses the same matchTime so all overlap → just count all.
+    // For cross-league we check the stored time window.
+    function _takenCourts(venueId, date) {
+      return (venueUsage[venueId] || {})[date] || [];
+    }
+
+    // Pre-populate from OTHER leagues (cross-league clash awareness)
+    DB.getLeagues().forEach(l => {
+      if (l.id === leagueId) return;   // skip self (we're replacing these)
+      (l.fixtures || []).forEach(f => {
+        if (!f.venueId || !f.date) return;
+        const otherStart = timeToMins(f.timeSlot || '14:00');
+        const otherEnd   = otherStart + MATCH_MINS;
+        // Only count if the time windows actually overlap
+        if (otherStart < fixEnd && otherEnd > fixStart) {
+          _claim(f.venueId, f.date, f.courtIndex || 0);
+        }
+      });
+    });
+
+    // ── Assign dates + courts greedily ───────────────────────────
+    const fixtures = [];
+
+    allRounds.forEach((round, roundIdx) => {
       round.forEach(match => {
         const homeVenue = match.home.venueId
           ? DB.getVenues().find(v => v.id === match.home.venueId)
           : null;
-        const hasHome = homeVenue && (homeVenue.courts || 0) > 0;
-        const venueId   = hasHome ? homeVenue.id  : (neutralVenueId || null);
-        const venueName = venueId
-          ? ((DB.getVenues().find(v => v.id === venueId) || {}).name || 'TBA')
-          : 'TBA';
+        const hasHome   = homeVenue && (homeVenue.courts || 0) > 0;
+        const venueId   = hasHome ? homeVenue.id : (neutralVenueId || null);
+        const venue     = venueId ? DB.getVenues().find(v => v.id === venueId) : null;
+        const venueName = venue ? venue.name : 'TBA';
+        const maxSlots  = venue ? Math.floor((venue.courts || 0) / COURTS_PER_MATCH) : 0;
+
+        let assignedDate  = toDateStr(addDays(baseDate, roundIdx * 7));
+        let assignedCourt = 0;
+
+        if (venueId && maxSlots > 0) {
+          let placed = false;
+          // Try the ideal date first, then push out week-by-week (up to 52 weeks)
+          for (let attempt = 0; attempt < 52 && !placed; attempt++) {
+            const tryDate = toDateStr(addDays(baseDate, roundIdx * 7 + attempt * 7));
+            const taken   = _takenCourts(venueId, tryDate);
+
+            if (taken.length < maxSlots) {
+              // Find the first free court block (multiples of COURTS_PER_MATCH)
+              let court = 0;
+              while (taken.includes(court)) court += COURTS_PER_MATCH;
+              assignedDate  = tryDate;
+              assignedCourt = court;
+              _claim(venueId, tryDate, court);
+              placed = true;
+            }
+          }
+
+          if (!placed) {
+            // No feasible slot found — schedule on preferred date with a forced clash.
+            // The master must "okay" it; the school can request an alternate venue.
+            assignedDate  = toDateStr(addDays(baseDate, roundIdx * 7));
+            assignedCourt = maxSlots * COURTS_PER_MATCH; // beyond capacity → clash flagged
+            _claim(venueId, assignedDate, assignedCourt);
+          }
+        }
 
         fixtures.push({
           id:                uid(),
@@ -456,9 +531,9 @@ const Leagues = (() => {
           venueId,
           venueName,
           isNeutral:  !hasHome,
-          date:       toDateStr(roundDate),
+          date:       assignedDate,
           timeSlot:   matchTime || '14:00',
-          courtIndex: 0,
+          courtIndex: assignedCourt,
           homeScore:  null,
           awayScore:  null,
           round:      roundIdx + 1,
@@ -699,21 +774,26 @@ const Leagues = (() => {
       btn.addEventListener('click', () => verifyScore(btn.dataset.lid, btn.dataset.fid, btn.dataset.as, id, isAdmin));
     });
 
-    // Recalculate fixtures (balance tab) — admin only
-    const recalcBtn = body.querySelector('#recalcFixturesBtn');
-    if (recalcBtn) {
-      recalcBtn.addEventListener('click', () => {
-        if (!confirm('Recalculate all fixtures? Existing scores and manual edits will be lost.')) return;
-        const parts    = _getParticipants(league);
-        league.fixtures  = generateFixtures(parts, league.homeMatches || 1, league.startDate, league.neutralVenueId, league.playingDay, league.matchTime);
+    // Recalculate fixtures — admin only (buttons appear in fixtures tab AND balance tab)
+    body.querySelectorAll('.recalc-fixtures-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (!confirm('Recalculate all fixtures?\n\nThe scheduler will try to avoid venue clashes by spreading fixtures across different weeks when needed. Existing scores and manual edits will be lost.')) return;
+        const parts      = _getParticipants(league);
+        league.fixtures  = generateFixtures(parts, league.homeMatches || 1, league.startDate, league.neutralVenueId, league.playingDay, league.matchTime, league.id);
         league.standings = generateStandings(parts);
         DB.updateLeague(league);
-        DB.writeAudit('fixtures_recalculated', 'league', `Fixtures recalculated for ${league.name}`, league.id, league.name);
-        toast('Fixtures recalculated ✓', 'success');
+        DB.writeAudit('fixtures_recalculated', 'league', `Fixtures recalculated (clash-aware) for ${league.name}`, league.id, league.name);
+        // Check if any forced clashes remain
+        const remaining = DB.detectFixtureClashes().filter(({ a, b }) => a.leagueId === league.id || b.leagueId === league.id);
+        if (remaining.length > 0) {
+          toast(`⚠️ ${remaining.length} clash${remaining.length > 1 ? 'es' : ''} could not be resolved automatically — please okay or arrange alternate venues.`, 'error');
+        } else {
+          toast('Fixtures recalculated — no clashes ✓', 'success');
+        }
         openLeagueDetail(id, isAdmin);
         Calendar.refresh();
       });
-    }
+    });
 
     const footer = document.getElementById('leagueDetailFooter');
     footer.innerHTML = `<button class="btn btn-secondary" data-modal="leagueDetailModal">Close</button>`;
@@ -742,7 +822,23 @@ const Leagues = (() => {
       byRound[r].push(f);
     });
 
+    // Count unresolved clashes involving this league's fixtures
+    const unresolved = [...clashedIds].filter(fid => {
+      const f = fixtures.find(x => x.id === fid);
+      return f && !f.clashOkayed;
+    });
+
     let html = '';
+    if (unresolved.length > 0) {
+      const clashCount = unresolved.length / 2;   // each clash involves 2 fixtures
+      html += `<div class="fixture-clash-badge" style="margin-bottom:1rem;border-radius:var(--radius)">
+        ⚠️ ${Math.ceil(clashCount)} venue clash${clashCount > 1 ? 'es' : ''} detected in this league's fixtures.
+        ${Auth.isAdmin()
+          ? `<button class="btn btn-xs btn-warning recalc-fixtures-btn" style="margin-left:auto">🔄 Recalculate Fixtures</button>`
+          : `Contact an admin to recalculate or okay the clash${clashCount > 1 ? 'es' : ''}.`}
+      </div>`;
+    }
+
     Object.keys(byRound).sort((a, b) => a - b).forEach(r => {
       html += `<div style="margin-bottom:1.25rem">
         <div class="round-label">Round ${r}</div>
@@ -825,7 +921,7 @@ const Leagues = (() => {
     if (anyImbalance) {
       html += `<div class="fixture-clash-badge" style="margin-bottom:.75rem">
         ⚠️ One or more teams have an unbalanced schedule (home/away difference > 1).
-        ${Auth.isAdmin() ? `<button class="btn btn-xs btn-warning" id="recalcFixturesBtn">Recalculate Fixtures</button>` : ''}
+        ${Auth.isAdmin() ? `<button class="btn btn-xs btn-warning recalc-fixtures-btn">🔄 Recalculate Fixtures</button>` : ''}
       </div>`;
     } else {
       html += `<div class="clash-okayed-badge" style="margin-bottom:.75rem">✓ Home/Away schedule is balanced.</div>`;
