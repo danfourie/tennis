@@ -962,7 +962,8 @@ const Leagues = (() => {
 
   /**
    * Update a single fixture score from any module (e.g. MySchool).
-   * Auto-sets verification flags: entering team verified = true, other team reset.
+   * Always resets all verification flags so the process starts fresh.
+   * The entering team's own flag is then set (they've seen the current score).
    * Recalculates standings and persists to DB.
    */
   function saveScore(leagueId, fixtureId, field, rawValue) {
@@ -973,23 +974,20 @@ const Leagues = (() => {
     const oldVal  = fixture[field];
     fixture[field] = parseInt(rawValue) || 0;
 
-    // Auto-set verification flags based on who entered the score
+    // Any score change resets all verification — the process starts fresh.
+    fixture.masterVerified   = false;
+    fixture.homeTeamVerified = false;
+    fixture.awayTeamVerified = false;
+
+    // The entering team implicitly verifies their own side (they entered the score).
+    // Admin entries do NOT auto-verify; they must use Master ✓ explicitly.
     const profile    = Auth.getProfile();
     const mySchoolId = profile ? profile.schoolId : null;
-    if (Auth.isAdmin()) {
-      // Admin entering score counts as master verified
-      fixture.masterVerified    = true;
-      fixture.homeTeamVerified  = true;
-      fixture.awayTeamVerified  = true;
-    } else if (mySchoolId) {
+    if (mySchoolId && !Auth.isAdmin()) {
       if (mySchoolId === fixture.homeSchoolId) {
         fixture.homeTeamVerified = true;
-        fixture.awayTeamVerified = false;
-        fixture.masterVerified   = false;
       } else if (mySchoolId === fixture.awaySchoolId) {
         fixture.awayTeamVerified = true;
-        fixture.homeTeamVerified = false;
-        fixture.masterVerified   = false;
       }
     }
 
