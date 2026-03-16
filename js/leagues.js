@@ -2,6 +2,13 @@
  * leagues.js — School league management.
  *   Public view  : render()       → #leaguesList        (read-only / score entry)
  *   Admin view   : renderAdmin()  → #adminLeaguesList   (full CRUD + fixture editing)
+ *
+ * Data model (league doc):
+ *   participants: [{ participantId, schoolId, teamSuffix }]
+ *     - single team : participantId = schoolId,       teamSuffix = ""
+ *     - two teams   : participantId = schoolId+"_A/B", teamSuffix = "A"|"B"
+ *   schoolIds: derived array of unique school IDs (kept for backward compat)
+ *   fixtures / standings reference participantId (homeParticipantId, awayParticipantId)
  */
 
 const Leagues = (() => {
@@ -22,6 +29,23 @@ const Leagues = (() => {
   }
 
   // ════════════════════════════════════════════════════════════
+  // HELPERS
+  // ════════════════════════════════════════════════════════════
+
+  /** Return the participants array, falling back to old schoolIds format. */
+  function _getParticipants(league) {
+    if (league.participants && league.participants.length > 0) return league.participants;
+    return (league.schoolIds || []).map(id => ({ participantId: id, schoolId: id, teamSuffix: '' }));
+  }
+
+  /** Resolve a participant to its display name (school name + optional suffix). */
+  function _participantName(p) {
+    const s = DB.getSchools().find(x => x.id === p.schoolId);
+    if (!s) return p.participantId;
+    return s.name + (p.teamSuffix ? ' ' + p.teamSuffix : '');
+  }
+
+  // ════════════════════════════════════════════════════════════
   // PUBLIC VIEW  (view-leagues)
   // ════════════════════════════════════════════════════════════
   function render() {
@@ -39,7 +63,14 @@ const Leagues = (() => {
   }
 
   function _leagueCard(l) {
-    const schools = (l.schoolIds || []).map(id => DB.getSchools().find(s => s.id === id)).filter(Boolean);
+    const parts = _getParticipants(l);
+    const badges = parts.map(p => {
+      const s = DB.getSchools().find(x => x.id === p.schoolId);
+      if (!s) return '';
+      const label = s.name + (p.teamSuffix ? ' ' + p.teamSuffix : '');
+      return `<span class="badge" style="background:${s.color}22;color:${s.color};border:1px solid ${s.color}44">${esc(label)}</span>`;
+    }).join('');
+
     const totalFixtures = l.fixtures ? l.fixtures.length : 0;
     const played = l.fixtures ? l.fixtures.filter(f => f.homeScore !== null && f.homeScore !== undefined).length : 0;
     const statusBadge = played === totalFixtures && totalFixtures > 0
@@ -59,9 +90,7 @@ const Leagues = (() => {
         ${statusBadge}
       </div>
       <div class="card-body">
-        <div style="display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:.5rem">
-          ${schools.map(s => `<span class="badge" style="background:${s.color}22;color:${s.color};border:1px solid ${s.color}44">${esc(s.name)}</span>`).join('')}
-        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:.5rem">${badges}</div>
         <div class="text-muted">${l.startDate ? formatDate(l.startDate) : '—'} → ${l.endDate ? formatDate(l.endDate) : '—'}</div>
         <div class="text-muted mt-1">${totalFixtures} fixtures · ${played} played</div>
       </div>
@@ -86,10 +115,17 @@ const Leagues = (() => {
     const DAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 
     container.innerHTML = leagues.map(l => {
-      const schools       = (l.schoolIds || []).map(id => DB.getSchools().find(s => s.id === id)).filter(Boolean);
+      const parts         = _getParticipants(l);
       const totalFixtures = (l.fixtures || []).length;
       const played        = (l.fixtures || []).filter(f => f.homeScore !== null && f.homeScore !== undefined).length;
       const dayLabel      = l.playingDay !== undefined ? DAYS[l.playingDay] + 's' : 'Fridays';
+
+      const teamBadges = parts.map(p => {
+        const s = DB.getSchools().find(x => x.id === p.schoolId);
+        if (!s) return '';
+        const label = s.name + (p.teamSuffix ? ' ' + p.teamSuffix : '');
+        return `<span style="color:${s.color};margin-right:.4rem">● ${esc(label)}</span>`;
+      }).join('');
 
       return `<div class="admin-module-item" data-league-id="${l.id}">
         <div class="module-info">
@@ -99,9 +135,7 @@ const Leagues = (() => {
             · ${l.startDate ? formatDate(l.startDate) : '?'} → ${l.endDate ? formatDate(l.endDate) : '?'}
             · ${dayLabel} · ${esc(l.matchTime || '14:00')}
           </div>
-          <div class="module-meta" style="margin-top:.25rem">
-            ${schools.map(s => `<span style="color:${s.color};margin-right:.4rem">● ${esc(s.name)}</span>`).join('')}
-          </div>
+          <div class="module-meta" style="margin-top:.25rem">${teamBadges}</div>
           <div class="module-meta">${totalFixtures} fixtures · ${played} played · ${totalFixtures - played} remaining</div>
         </div>
         <div class="module-actions">
@@ -145,12 +179,80 @@ const Leagues = (() => {
     neutralSel.innerHTML = `<option value="">None</option>` +
       venues.map(v => `<option value="${v.id}"${l && l.neutralVenueId === v.id ? ' selected' : ''}>${esc(v.name)}</option>`).join('');
 
-    const box = document.getElementById('leagueSchoolsCheckboxes');
+    // Build map of existing participants: schoolId → team count (for editing)
+    const existingMap = new Map(); // schoolId → count
+    if (l) {
+      _getParticipants(l).forEach(p => {
+        existingMap.set(p.schoolId, (existingMap.get(p.schoolId) || 0) + 1);
+      });
+    }
+
     const sortedSchools = [...schools].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-    box.innerHTML = sortedSchools.map(s =>
-      `<label><input type="checkbox" value="${s.id}" ${l && l.schoolIds && l.schoolIds.includes(s.id) ? 'checked' : ''}>
-        <span style="color:${s.color}">●</span> ${esc(s.name)}${s.team ? ` <em style="color:var(--neutral);font-size:.8em">(${esc(s.team)})</em>` : ''}</label>`
-    ).join('');
+
+    const box = document.getElementById('leagueSchoolsCheckboxes');
+    box.classList.add('checkbox-grid--teams');
+    box.innerHTML = sortedSchools.map(s => {
+      const count     = existingMap.get(s.id) || 0;
+      const isChecked = count > 0;
+      const teams     = count > 0 ? count : 1;
+      return `<label class="school-select-row">
+        <span class="school-check-area">
+          <input type="checkbox" class="school-cb" value="${s.id}" ${isChecked ? 'checked' : ''}>
+          <span style="color:${s.color}">●</span> ${esc(s.name)}${s.team ? ` <em style="color:var(--neutral);font-size:.8em">(${esc(s.team)})</em>` : ''}
+        </span>
+        <span class="team-stepper"${isChecked ? '' : ' style="display:none"'}>
+          <button type="button" class="stepper-btn stepper-dec" title="Remove team">−</button>
+          <span class="team-count-val">${teams}</span>
+          <button type="button" class="stepper-btn stepper-inc" title="Add 2nd team">+</button>
+          <span class="stepper-label">${teams > 1 ? 'teams' : 'team'}</span>
+        </span>
+      </label>`;
+    }).join('');
+
+    // Show / hide stepper when checkbox toggled
+    box.querySelectorAll('.school-cb').forEach(cb => {
+      const stepper = cb.closest('.school-select-row').querySelector('.team-stepper');
+      cb.addEventListener('change', () => {
+        stepper.style.display = cb.checked ? '' : 'none';
+        if (cb.checked) {
+          stepper.querySelector('.team-count-val').textContent = '1';
+          stepper.querySelector('.stepper-label').textContent  = 'team';
+        }
+      });
+    });
+
+    // Decrement — goes from 2→1, then 1 unchecks the school
+    box.querySelectorAll('.stepper-dec').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.preventDefault();
+        const row     = btn.closest('.school-select-row');
+        const valSpan = row.querySelector('.team-count-val');
+        const lbl     = row.querySelector('.stepper-label');
+        const val     = parseInt(valSpan.textContent);
+        if (val > 1) {
+          valSpan.textContent = val - 1;
+          lbl.textContent = 'team';
+        } else {
+          row.querySelector('.school-cb').checked = false;
+          row.querySelector('.team-stepper').style.display = 'none';
+        }
+      });
+    });
+
+    // Increment — max 2 teams per school per league
+    box.querySelectorAll('.stepper-inc').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.preventDefault();
+        const row     = btn.closest('.school-select-row');
+        const valSpan = row.querySelector('.team-count-val');
+        const lbl     = row.querySelector('.stepper-label');
+        const val     = parseInt(valSpan.textContent);
+        if (val < 2) {
+          valSpan.textContent = val + 1;
+          lbl.textContent = 'teams';
+        }
+      });
+    });
 
     Modal.open('leagueModal');
   }
@@ -159,8 +261,25 @@ const Leagues = (() => {
     const name = document.getElementById('leagueName').value.trim();
     if (!name) { toast('League name required', 'error'); return; }
 
-    const schoolIds = [...document.querySelectorAll('#leagueSchoolsCheckboxes input:checked')].map(i => i.value);
-    if (schoolIds.length < 2) { toast('At least 2 schools required', 'error'); return; }
+    // Build participants from checked schools + team counts
+    const box          = document.getElementById('leagueSchoolsCheckboxes');
+    const participants = [];
+    box.querySelectorAll('.school-cb:checked').forEach(cb => {
+      const schoolId  = cb.value;
+      const countSpan = cb.closest('.school-select-row').querySelector('.team-count-val');
+      const count     = countSpan ? parseInt(countSpan.textContent) : 1;
+      if (count === 1) {
+        participants.push({ participantId: schoolId, schoolId, teamSuffix: '' });
+      } else {
+        participants.push({ participantId: schoolId + '_A', schoolId, teamSuffix: 'A' });
+        participants.push({ participantId: schoolId + '_B', schoolId, teamSuffix: 'B' });
+      }
+    });
+
+    if (participants.length < 2) { toast('At least 2 teams required', 'error'); return; }
+
+    // Derived schoolIds (unique) kept for backward compat
+    const schoolIds = [...new Set(participants.map(p => p.schoolId))];
 
     const id           = document.getElementById('leagueEditId').value;
     const homeMatches  = parseInt(document.getElementById('leagueHomeMatches').value) || 1;
@@ -177,12 +296,13 @@ const Leagues = (() => {
       startDate,
       endDate,
       schoolIds,
+      participants,
       homeMatches,
       neutralVenueId,
       playingDay,
       matchTime,
-      fixtures:  generateFixtures(schoolIds, homeMatches, startDate, neutralVenueId, playingDay, matchTime),
-      standings: generateStandings(schoolIds),
+      fixtures:  generateFixtures(participants, homeMatches, startDate, neutralVenueId, playingDay, matchTime),
+      standings: generateStandings(participants),
     };
 
     if (id) {
@@ -204,40 +324,59 @@ const Leagues = (() => {
   // ════════════════════════════════════════════════════════════
   // FIXTURE GENERATION — round-robin with playing day scheduling
   // ════════════════════════════════════════════════════════════
-  function generateFixtures(schoolIds, homeMatchesPerPair, startDateStr, neutralVenueId, playingDay, matchTime) {
-    const schools = schoolIds.map(id => DB.getSchools().find(s => s.id === id)).filter(Boolean);
-    if (schools.length < 2) return [];
 
-    const targetDay = (playingDay !== undefined && playingDay !== null) ? parseInt(playingDay) : 5; // default Friday
+  /**
+   * @param {Array} participants  [{participantId, schoolId, teamSuffix}]
+   */
+  function generateFixtures(participants, homeMatchesPerPair, startDateStr, neutralVenueId, playingDay, matchTime) {
+    if (!participants || participants.length < 2) return [];
 
-    // Build rounds using circle (Berger) method
-    const teams = [...schools];
-    if (teams.length % 2 === 1) teams.push(null); // bye slot for odd numbers
-    const numTeams  = teams.length;
+    // Resolve each participant to a team object
+    const teams = participants.map(p => {
+      const school = DB.getSchools().find(s => s.id === p.schoolId);
+      if (!school) return null;
+      return {
+        participantId: p.participantId,
+        schoolId:      p.schoolId,
+        teamSuffix:    p.teamSuffix,
+        name:          school.name + (p.teamSuffix ? ' ' + p.teamSuffix : ''),
+        venueId:       school.venueId || null,
+        color:         school.color,
+      };
+    }).filter(Boolean);
+
+    if (teams.length < 2) return [];
+
+    const targetDay = (playingDay !== undefined && playingDay !== null) ? parseInt(playingDay) : 5;
+
+    // Build rounds using Berger (circle) method
+    const pool = [...teams];
+    if (pool.length % 2 === 1) pool.push(null); // bye slot for odd count
+    const numTeams  = pool.length;
     const numRounds = numTeams - 1;
 
     const singleRRRounds = [];
-    const pool = [...teams];
+    const circle = [...pool];
 
     for (let r = 0; r < numRounds; r++) {
       const matches = [];
       for (let i = 0; i < numTeams / 2; i++) {
-        const home = pool[i];
-        const away = pool[numTeams - 1 - i];
+        const home = circle[i];
+        const away = circle[numTeams - 1 - i];
         if (home && away) matches.push({ home, away });
       }
       singleRRRounds.push(matches);
-      // Rotate: keep pool[0] fixed, rotate the rest clockwise
-      const last = pool.splice(numTeams - 1, 1)[0];
-      pool.splice(1, 0, last);
+      // Rotate: keep circle[0] fixed, rotate the rest clockwise
+      const last = circle.splice(numTeams - 1, 1)[0];
+      circle.splice(1, 0, last);
     }
 
-    // Build full set of rounds: home + away (double round-robin)
+    // Build full set of rounds: home + reverse (double round-robin per homeMatchesPerPair)
     const allRounds = [];
     for (let rep = 0; rep < homeMatchesPerPair; rep++) {
       singleRRRounds.forEach(round => {
-        allRounds.push(round);                                       // original
-        allRounds.push(round.map(m => ({ home: m.away, away: m.home }))); // reversed
+        allRounds.push(round);
+        allRounds.push(round.map(m => ({ home: m.away, away: m.home })));
       });
     }
 
@@ -261,11 +400,13 @@ const Leagues = (() => {
           : 'TBA';
 
         fixtures.push({
-          id:             uid(),
-          homeSchoolId:   match.home.id,
-          homeSchoolName: match.home.name,
-          awaySchoolId:   match.away.id,
-          awaySchoolName: match.away.name,
+          id:                uid(),
+          homeParticipantId: match.home.participantId,
+          awayParticipantId: match.away.participantId,
+          homeSchoolId:      match.home.schoolId,
+          homeSchoolName:    match.home.name,
+          awaySchoolId:      match.away.schoolId,
+          awaySchoolName:    match.away.name,
           venueId,
           venueName,
           isNeutral:  !hasHome,
@@ -282,34 +423,50 @@ const Leagues = (() => {
     return fixtures;
   }
 
-  function generateStandings(schoolIds) {
-    return schoolIds.map(id => {
-      const s = DB.getSchools().find(x => x.id === id);
-      return { schoolId: id, name: s ? s.name : id, played: 0, won: 0, lost: 0, drawn: 0, points: 0 };
-    });
+  function generateStandings(participants) {
+    return participants.map(p => ({
+      participantId: p.participantId,
+      schoolId:      p.schoolId,
+      name:          _participantName(p),
+      played: 0, won: 0, lost: 0, drawn: 0, points: 0,
+    }));
   }
 
   function recalcStandings(league) {
+    const parts = _getParticipants(league);
+
     const standings = {};
-    league.schoolIds.forEach(id => {
-      standings[id] = { schoolId: id, played: 0, won: 0, lost: 0, drawn: 0, points: 0 };
+    parts.forEach(p => {
+      standings[p.participantId] = {
+        participantId: p.participantId,
+        schoolId:      p.schoolId,
+        name:          _participantName(p),
+        played: 0, won: 0, lost: 0, drawn: 0, points: 0,
+      };
     });
+
     (league.fixtures || []).forEach(f => {
       if (f.homeScore === null || f.homeScore === undefined) return;
-      const h = f.homeScore, a = f.awayScore;
-      standings[f.homeSchoolId].played++;
-      standings[f.awaySchoolId].played++;
+      const h       = f.homeScore, a = f.awayScore;
+      // Use participantId if present, fall back to schoolId (old fixtures)
+      const homeKey = f.homeParticipantId || f.homeSchoolId;
+      const awayKey = f.awayParticipantId || f.awaySchoolId;
+      if (!standings[homeKey] || !standings[awayKey]) return;
+
+      standings[homeKey].played++;
+      standings[awayKey].played++;
       if (h > a) {
-        standings[f.homeSchoolId].won++;  standings[f.homeSchoolId].points += 3;
-        standings[f.awaySchoolId].lost++;
+        standings[homeKey].won++;  standings[homeKey].points += 3;
+        standings[awayKey].lost++;
       } else if (a > h) {
-        standings[f.awaySchoolId].won++;  standings[f.awaySchoolId].points += 3;
-        standings[f.homeSchoolId].lost++;
+        standings[awayKey].won++;  standings[awayKey].points += 3;
+        standings[homeKey].lost++;
       } else {
-        standings[f.homeSchoolId].drawn++; standings[f.homeSchoolId].points++;
-        standings[f.awaySchoolId].drawn++; standings[f.awaySchoolId].points++;
+        standings[homeKey].drawn++; standings[homeKey].points++;
+        standings[awayKey].drawn++; standings[awayKey].points++;
       }
     });
+
     league.standings = Object.values(standings).sort((a, b) => b.points - a.points || b.won - a.won);
     return league;
   }
@@ -418,6 +575,7 @@ const Leagues = (() => {
           <tbody>`;
 
       byRound[r].forEach(f => {
+        // Colour comes from the school, regardless of team suffix
         const homeSchool = schools.find(s => s.id === f.homeSchoolId);
         const awaySchool = schools.find(s => s.id === f.awaySchoolId);
         const homeColor  = homeSchool ? homeSchool.color : '#666';
@@ -466,7 +624,7 @@ const Leagues = (() => {
     let html = `<table class="standings-table">
       <thead><tr>
         <th class="school-color"></th>
-        <th>#</th><th>School</th><th>P</th><th>W</th><th>D</th><th>L</th><th>Pts</th>
+        <th>#</th><th>Team</th><th>P</th><th>W</th><th>D</th><th>L</th><th>Pts</th>
       </tr></thead><tbody>`;
 
     standings.forEach((row, i) => {

@@ -571,6 +571,36 @@ body {
 .admin-card-wide { grid-column: 1 / -1; }
 .admin-card-full { grid-column: 1 / -1; }
 
+/* Two-team stepper inside league modal school selector */
+.checkbox-grid.checkbox-grid--teams {
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+}
+.school-select-row {
+  display: flex !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+  gap: .3rem !important;
+}
+.school-check-area {
+  display: flex; align-items: center; gap: .4rem;
+  flex: 1; min-width: 0; overflow: hidden;
+}
+.team-stepper {
+  display: flex; align-items: center; gap: .2rem; flex-shrink: 0;
+}
+.stepper-btn {
+  width: 20px; height: 20px; border: 1px solid var(--border);
+  background: white; border-radius: 3px; cursor: pointer;
+  font-size: .9rem; line-height: 1; padding: 0;
+  color: var(--neutral-dark); font-weight: 700;
+}
+.stepper-btn:hover { background: var(--primary); color: white; border-color: var(--primary); }
+.team-count-val {
+  min-width: 14px; text-align: center; font-weight: 700;
+  font-size: .82rem; color: var(--primary);
+}
+.stepper-label { font-size: .72rem; color: var(--neutral); }
+
 /* Round label in fixture tables */
 .round-label {
   font-weight: 700;
