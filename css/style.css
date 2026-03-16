@@ -717,3 +717,22 @@ body {
   transition: background .15s;
 }
 .btn-exit-impersonate:hover { background: rgba(255,255,255,.4); }
+
+/* Organiser booking hint */
+.organiser-hint {
+  background: #f0fdf4;
+  border: 1px solid #86efac;
+  color: #15803d;
+  padding: .45rem .75rem;
+  border-radius: var(--radius);
+  font-size: .85rem;
+  margin-bottom: .25rem;
+}
+
+/* League fixture chip continuation rows */
+.slot-chip.league-fixture {
+  font-size: .7rem;
+  opacity: .85;
+  cursor: default;
+  pointer-events: none;
+}
