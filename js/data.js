@@ -236,6 +236,47 @@ const DB = {
     }
   },
 
+  // ── Fixture clash detection ───────────────────────────────
+  /**
+   * Returns an array of { a, b } pairs where a and b are
+   * { fixture, league, leagueId } objects whose fixtures collide:
+   *   same venue + same date + overlapping courts + overlapping time window.
+   * Only fixtures that have a venueId and date are considered.
+   */
+  detectFixtureClashes() {
+    const COURTS    = 3;   // courts per match (must match calendar.js constant)
+    const MATCH_MINS = 180; // 3-hour match window
+
+    const all = [];
+    for (const league of _cache.leagues) {
+      for (const f of (league.fixtures || [])) {
+        if (f.venueId && f.date) all.push({ fixture: f, league, leagueId: league.id });
+      }
+    }
+
+    const clashes = [];
+    for (let i = 0; i < all.length; i++) {
+      for (let j = i + 1; j < all.length; j++) {
+        const a = all[i], b = all[j];
+        if (a.fixture.venueId !== b.fixture.venueId) continue;
+        if (a.fixture.date    !== b.fixture.date)    continue;
+
+        // Court-range overlap
+        const aBase = parseInt(a.fixture.courtIndex ?? 0);
+        const bBase = parseInt(b.fixture.courtIndex ?? 0);
+        if (aBase + COURTS <= bBase || bBase + COURTS <= aBase) continue;
+
+        // Time-window overlap
+        const aTime = timeToMins(a.fixture.timeSlot || '14:00');
+        const bTime = timeToMins(b.fixture.timeSlot || '14:00');
+        if (aTime + MATCH_MINS <= bTime || bTime + MATCH_MINS <= aTime) continue;
+
+        clashes.push({ a, b });
+      }
+    }
+    return clashes;
+  },
+
   // ── Password (legacy stub) ────────────────────────────────
   getPassword() { return null; },
   setPassword()  { /* handled by Auth.changePassword() */ },
@@ -377,4 +418,10 @@ function slotEndTime(timeStr, durationMins) {
   m += durationMins;
   h += Math.floor(m / 60); m = m % 60;
   return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+}
+
+/** Convert "HH:MM" to total minutes. */
+function timeToMins(t) {
+  const [h, m] = (t || '00:00').split(':').map(Number);
+  return h * 60 + m;
 }

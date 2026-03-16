@@ -520,6 +520,67 @@ const Leagues = (() => {
   // ════════════════════════════════════════════════════════════
   // LEAGUE DETAIL MODAL  (fixtures + standings)
   // ════════════════════════════════════════════════════════════
+  // ── Score verification helpers ───────────────────────────
+  function _isVerified(f) {
+    return !!(f.masterVerified || (f.homeTeamVerified && f.awayTeamVerified));
+  }
+
+  /** HTML badge showing verification state. */
+  function _verifyBadge(f, leagueId) {
+    if (f.homeScore === null || f.homeScore === undefined) return '';
+    if (_isVerified(f)) return `<div class="score-verified">✓ Verified</div>`;
+
+    const profile     = Auth.getProfile();
+    const mySchoolId  = profile ? profile.schoolId : null;
+    const isHomeUser  = mySchoolId === f.homeSchoolId;
+    const isAwayUser  = mySchoolId === f.awaySchoolId;
+
+    let status = '';
+    if (f.homeTeamVerified)  status = '⏳ Awaiting away team';
+    else if (f.awayTeamVerified) status = '⏳ Awaiting home team';
+    else status = '⚠️ Unverified';
+
+    let btn = '';
+    if (!f.awayTeamVerified && isAwayUser) {
+      btn = `<button class="btn btn-xs btn-primary verify-btn" data-lid="${leagueId}" data-fid="${f.id}" data-as="away">Verify ✓</button>`;
+    } else if (!f.homeTeamVerified && isHomeUser) {
+      btn = `<button class="btn btn-xs btn-primary verify-btn" data-lid="${leagueId}" data-fid="${f.id}" data-as="home">Verify ✓</button>`;
+    }
+    if (Auth.isAdmin()) {
+      btn += `<button class="btn btn-xs btn-secondary verify-btn" data-lid="${leagueId}" data-fid="${f.id}" data-as="master" title="Master verify on behalf of both teams">Master ✓</button>`;
+    }
+    return `<div class="score-unverified"><span class="score-unverified-badge">${status}</span>${btn}</div>`;
+  }
+
+  /** Clash badge for a fixture. */
+  function _clashBadge(f, leagueId, clashedIds) {
+    if (!clashedIds.has(f.id)) return '';
+    if (f.clashOkayed) {
+      return `<div class="clash-okayed-badge" title="Reason: ${esc(f.clashReason || '')}">✓ Clash okayed${f.clashReason ? ': ' + esc(f.clashReason) : ''}</div>`;
+    }
+    const okayBtn = Auth.isAdmin()
+      ? `<button class="btn btn-xs btn-warning okay-clash-btn" data-lid="${leagueId}" data-fid="${f.id}">Okay Clash</button>`
+      : '';
+    return `<div class="fixture-clash-badge">⚠️ Venue clash ${okayBtn}</div>`;
+  }
+
+  /** Change-request badge shown in admin fixtures tab. */
+  function _changeRequestBadge(f, leagueId) {
+    if (!f.changeRequest) return '';
+    const cr = f.changeRequest;
+    const vName = cr.requestedVenueId ? (DB.getVenues().find(v => v.id === cr.requestedVenueId) || {}).name : null;
+    const detail = cr.type === 'venue'
+      ? `Alt. venue: ${vName || cr.requestedVenueId}`
+      : `Reschedule: ${cr.requestedDate || '?'} ${cr.requestedTime || ''}`;
+    return `<div class="change-request-badge">
+      📨 ${esc(cr.requestedByName || 'School')}: ${detail}
+      ${cr.note ? `<em style="color:var(--neutral)"> — ${esc(cr.note)}</em>` : ''}
+      ${Auth.isAdmin() ? `
+        <button class="btn btn-xs btn-primary apply-cr-btn" data-lid="${leagueId}" data-fid="${f.id}">Apply</button>
+        <button class="btn btn-xs btn-danger  reject-cr-btn" data-lid="${leagueId}" data-fid="${f.id}">Dismiss</button>` : ''}
+    </div>`;
+  }
+
   function openLeagueDetail(id, isAdmin = false) {
     const league = DB.getLeagues().find(l => l.id === id);
     if (!league) return;
@@ -535,9 +596,11 @@ const Leagues = (() => {
       <div class="modal-tabs">
         <button class="modal-tab active" data-tab="fixtures">Fixtures</button>
         <button class="modal-tab" data-tab="standings">Standings</button>
+        <button class="modal-tab" data-tab="balance">H/A Balance</button>
       </div>
       <div id="tab-fixtures">${_fixturesTab(league, schools, isAdmin)}</div>
       <div id="tab-standings" class="hidden">${_standingsTab(league, schools)}</div>
+      <div id="tab-balance"   class="hidden">${_balanceTab(league)}</div>
     `;
 
     body.querySelectorAll('.modal-tab').forEach(tab => {
@@ -553,24 +616,13 @@ const Leagues = (() => {
     if (Auth.isLoggedIn()) {
       body.querySelectorAll('.score-input').forEach(inp => {
         inp.addEventListener('change', () => {
-          const fixture = league.fixtures.find(f => f.id === inp.dataset.fixture);
-          if (fixture) {
-            const oldVal = fixture[inp.dataset.field];
-            fixture[inp.dataset.field] = parseInt(inp.value) || 0;
-            recalcStandings(league);
-            DB.updateLeague(league);
-            DB.writeAudit(
-              'score_updated', 'league',
-              `Score: ${fixture.homeSchoolName} vs ${fixture.awaySchoolName} — ${inp.dataset.field}: ${oldVal ?? 'blank'} → ${fixture[inp.dataset.field]}`,
-              league.id, league.name
-            );
-            toast('Score saved', 'success');
-          }
+          saveScore(league.id, inp.dataset.fixture, inp.dataset.field, inp.value);
+          openLeagueDetail(id, isAdmin);
         });
       });
     }
 
-    // Venue assignment — master only
+    // Venue assignment — admin only
     if (Auth.isAdmin()) {
       body.querySelectorAll('.fixture-venue-sel').forEach(sel => {
         sel.addEventListener('change', () => {
@@ -585,9 +637,81 @@ const Leagues = (() => {
         });
       });
 
-      // Fixture edit buttons (admin only)
       body.querySelectorAll('[data-fixture-edit]').forEach(btn => {
         btn.addEventListener('click', () => openFixtureEdit(league.id, btn.dataset.fixtureEdit));
+      });
+
+      // Okay-clash buttons
+      body.querySelectorAll('.okay-clash-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const reason = prompt('Reason for okaying this clash (e.g. venue has enough courts, or alternate venue will be arranged):');
+          if (reason === null) return; // cancelled
+          const fixture = (league.fixtures || []).find(f => f.id === btn.dataset.fid);
+          if (fixture) {
+            const profile = Auth.getProfile();
+            fixture.clashOkayed   = true;
+            fixture.clashReason   = reason.trim();
+            fixture.clashOkayedBy = profile ? (profile.displayName || profile.email) : 'Admin';
+            DB.updateLeague(league);
+            DB.writeAudit('clash_okayed', 'league',
+              `Clash okayed for ${fixture.homeSchoolName} vs ${fixture.awaySchoolName}: ${reason}`,
+              league.id, league.name);
+            toast('Clash acknowledged ✓', 'success');
+            openLeagueDetail(id, isAdmin);
+          }
+        });
+      });
+
+      // Apply / dismiss change requests
+      body.querySelectorAll('.apply-cr-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const fixture = (league.fixtures || []).find(f => f.id === btn.dataset.fid);
+          if (!fixture || !fixture.changeRequest) return;
+          const cr = fixture.changeRequest;
+          if (cr.requestedDate)    fixture.date      = cr.requestedDate;
+          if (cr.requestedTime)    fixture.timeSlot  = cr.requestedTime;
+          if (cr.requestedVenueId) {
+            fixture.venueId   = cr.requestedVenueId;
+            const v = DB.getVenues().find(v => v.id === cr.requestedVenueId);
+            fixture.venueName = v ? v.name : 'TBA';
+          }
+          fixture.clashOkayed   = false;
+          fixture.clashReason   = null;
+          delete fixture.changeRequest;
+          DB.updateLeague(league);
+          toast('Change request applied ✓', 'success');
+          openLeagueDetail(id, isAdmin);
+          Calendar.refresh();
+        });
+      });
+      body.querySelectorAll('.reject-cr-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const fixture = (league.fixtures || []).find(f => f.id === btn.dataset.fid);
+          if (fixture) { delete fixture.changeRequest; DB.updateLeague(league); }
+          toast('Request dismissed');
+          openLeagueDetail(id, isAdmin);
+        });
+      });
+    }
+
+    // Verify score buttons — any logged-in user (restricted by role inside verifyScore)
+    body.querySelectorAll('.verify-btn').forEach(btn => {
+      btn.addEventListener('click', () => verifyScore(btn.dataset.lid, btn.dataset.fid, btn.dataset.as, id, isAdmin));
+    });
+
+    // Recalculate fixtures (balance tab) — admin only
+    const recalcBtn = body.querySelector('#recalcFixturesBtn');
+    if (recalcBtn) {
+      recalcBtn.addEventListener('click', () => {
+        if (!confirm('Recalculate all fixtures? Existing scores and manual edits will be lost.')) return;
+        const parts    = _getParticipants(league);
+        league.fixtures  = generateFixtures(parts, league.homeMatches || 1, league.startDate, league.neutralVenueId, league.playingDay, league.matchTime);
+        league.standings = generateStandings(parts);
+        DB.updateLeague(league);
+        DB.writeAudit('fixtures_recalculated', 'league', `Fixtures recalculated for ${league.name}`, league.id, league.name);
+        toast('Fixtures recalculated ✓', 'success');
+        openLeagueDetail(id, isAdmin);
+        Calendar.refresh();
       });
     }
 
@@ -598,9 +722,18 @@ const Leagues = (() => {
   }
 
   function _fixturesTab(league, schools, isAdmin) {
-    const venues   = DB.getVenues();
-    const fixtures = league.fixtures || [];
+    const venues     = DB.getVenues();
+    const fixtures   = league.fixtures || [];
     if (fixtures.length === 0) return `<p class="text-muted text-center" style="padding:1.5rem">No fixtures generated.</p>`;
+
+    // Pre-compute clashed fixture IDs for this render
+    const clashedIds = new Set();
+    for (const { a, b } of DB.detectFixtureClashes()) {
+      if (a.leagueId === league.id || b.leagueId === league.id) {
+        clashedIds.add(a.fixture.id);
+        clashedIds.add(b.fixture.id);
+      }
+    }
 
     const byRound = {};
     fixtures.forEach(f => {
@@ -621,7 +754,6 @@ const Leagues = (() => {
           <tbody>`;
 
       byRound[r].forEach(f => {
-        // Colour comes from the school, regardless of team suffix
         const homeSchool = schools.find(s => s.id === f.homeSchoolId);
         const awaySchool = schools.find(s => s.id === f.awaySchoolId);
         const homeColor  = homeSchool ? homeSchool.color : '#666';
@@ -640,14 +772,20 @@ const Leagues = (() => {
               <input class="score-input" type="number" min="0" max="99" value="${hasScore ? f.homeScore : ''}" data-fixture="${f.id}" data-field="homeScore" style="width:40px">
               <span style="margin:0 .25rem;color:var(--neutral)">—</span>
               <input class="score-input" type="number" min="0" max="99" value="${hasScore ? f.awayScore : ''}" data-fixture="${f.id}" data-field="awayScore" style="width:40px">
-            </div>`
-          : hasScore ? `<strong>${f.homeScore} — ${f.awayScore}</strong>` : `<span class="text-muted">vs</span>`;
+            </div>
+            ${_verifyBadge(f, league.id)}`
+          : hasScore
+            ? `<strong>${f.homeScore} — ${f.awayScore}</strong>${_verifyBadge(f, league.id)}`
+            : `<span class="text-muted">vs</span>`;
+
+        const clashRow      = _clashBadge(f, league.id, clashedIds);
+        const changeReqRow  = _changeRequestBadge(f, league.id);
 
         const editBtn = isAdmin
           ? `<td><button class="btn btn-xs btn-secondary" data-fixture-edit="${f.id}" title="Edit fixture">✏️</button></td>`
           : '';
 
-        html += `<tr>
+        html += `<tr class="${clashedIds.has(f.id) && !f.clashOkayed ? 'fixture-row-clash' : ''}">
           <td style="white-space:nowrap">${f.date ? formatDate(f.date) : '—'}</td>
           <td style="white-space:nowrap">${f.timeSlot || '—'}</td>
           <td><span style="color:${homeColor}">●</span> ${esc(f.homeSchoolName)}</td>
@@ -655,11 +793,58 @@ const Leagues = (() => {
           <td><span style="color:${awayColor}">●</span> ${esc(f.awaySchoolName)}</td>
           <td style="font-size:.78rem">${f.isNeutral ? '<span class="badge badge-gray">Neutral</span> ' : ''}${venueCell}</td>
           ${editBtn}
-        </tr>`;
+        </tr>
+        ${clashRow    ? `<tr class="fixture-sub-row"><td colspan="${isAdmin ? 7 : 6}">${clashRow}</td></tr>` : ''}
+        ${changeReqRow ? `<tr class="fixture-sub-row"><td colspan="${isAdmin ? 7 : 6}">${changeReqRow}</td></tr>` : ''}`;
       });
 
       html += `</tbody></table></div>`;
     });
+    return html;
+  }
+
+  /** Home/Away balance tab — shows counts per team and flags imbalance > 1. */
+  function _balanceTab(league) {
+    const parts = _getParticipants(league);
+    if (parts.length === 0) return `<p class="text-muted text-center" style="padding:1.5rem">No teams in this league.</p>`;
+
+    const counts = {};
+    parts.forEach(p => { counts[p.participantId] = { name: _participantName(p), home: 0, away: 0 }; });
+
+    (league.fixtures || []).forEach(f => {
+      const hk = f.homeParticipantId || f.homeSchoolId;
+      const ak = f.awayParticipantId || f.awaySchoolId;
+      if (counts[hk]) counts[hk].home++;
+      if (counts[ak]) counts[ak].away++;
+    });
+
+    const rows = Object.values(counts);
+    const anyImbalance = rows.some(r => Math.abs(r.home - r.away) > 1);
+
+    let html = `<div style="margin-bottom:.75rem">`;
+    if (anyImbalance) {
+      html += `<div class="fixture-clash-badge" style="margin-bottom:.75rem">
+        ⚠️ One or more teams have an unbalanced schedule (home/away difference > 1).
+        ${Auth.isAdmin() ? `<button class="btn btn-xs btn-warning" id="recalcFixturesBtn">Recalculate Fixtures</button>` : ''}
+      </div>`;
+    } else {
+      html += `<div class="clash-okayed-badge" style="margin-bottom:.75rem">✓ Home/Away schedule is balanced.</div>`;
+    }
+    html += `<table class="standings-table">
+      <thead><tr><th>Team</th><th>Home</th><th>Away</th><th>Total</th><th>Balance</th></tr></thead>
+      <tbody>`;
+    rows.forEach(r => {
+      const diff = Math.abs(r.home - r.away);
+      const cls  = diff > 1 ? 'style="background:#fff7ed"' : '';
+      html += `<tr ${cls}>
+        <td>${esc(r.name)}</td>
+        <td style="text-align:center">${r.home}</td>
+        <td style="text-align:center">${r.away}</td>
+        <td style="text-align:center">${r.home + r.away}</td>
+        <td style="text-align:center">${diff > 1 ? `<span class="score-unverified-badge">⚠️ Diff ${diff}</span>` : '<span class="score-verified">✓</span>'}</td>
+      </tr>`;
+    });
+    html += `</tbody></table></div>`;
     return html;
   }
 
@@ -777,6 +962,7 @@ const Leagues = (() => {
 
   /**
    * Update a single fixture score from any module (e.g. MySchool).
+   * Auto-sets verification flags: entering team verified = true, other team reset.
    * Recalculates standings and persists to DB.
    */
   function saveScore(leagueId, fixtureId, field, rawValue) {
@@ -786,6 +972,27 @@ const Leagues = (() => {
     if (!fixture) return;
     const oldVal  = fixture[field];
     fixture[field] = parseInt(rawValue) || 0;
+
+    // Auto-set verification flags based on who entered the score
+    const profile    = Auth.getProfile();
+    const mySchoolId = profile ? profile.schoolId : null;
+    if (Auth.isAdmin()) {
+      // Admin entering score counts as master verified
+      fixture.masterVerified    = true;
+      fixture.homeTeamVerified  = true;
+      fixture.awayTeamVerified  = true;
+    } else if (mySchoolId) {
+      if (mySchoolId === fixture.homeSchoolId) {
+        fixture.homeTeamVerified = true;
+        fixture.awayTeamVerified = false;
+        fixture.masterVerified   = false;
+      } else if (mySchoolId === fixture.awaySchoolId) {
+        fixture.awayTeamVerified = true;
+        fixture.homeTeamVerified = false;
+        fixture.masterVerified   = false;
+      }
+    }
+
     recalcStandings(league);
     DB.updateLeague(league);
     DB.writeAudit(
@@ -794,9 +1001,52 @@ const Leagues = (() => {
       leagueId, league.name
     );
     toast('Score saved ✓', 'success');
-    // Refresh any open league detail
     render();
   }
 
-  return { init, refresh, render, renderAdmin, openLeagueModal, saveScore };
+  /**
+   * Verify a score on behalf of a team or as master.
+   * @param {string} leagueId
+   * @param {string} fixtureId
+   * @param {string} as        'home' | 'away' | 'master'
+   * @param {string} reopenId  league id to reopen detail modal (same as leagueId)
+   * @param {boolean} isAdmin  whether detail was opened in admin mode
+   */
+  function verifyScore(leagueId, fixtureId, as, reopenId, isAdmin) {
+    const league  = DB.getLeagues().find(l => l.id === leagueId);
+    if (!league) return;
+    const fixture = (league.fixtures || []).find(f => f.id === fixtureId);
+    if (!fixture) return;
+
+    // Permission guards
+    if (as === 'master' && !Auth.isAdmin()) { toast('Only admin can master-verify', 'error'); return; }
+    if (as === 'home' || as === 'away') {
+      // Only the school contact for that side can verify
+      const profile    = Auth.getProfile();
+      const mySchoolId = profile ? profile.schoolId : null;
+      if (as === 'home' && mySchoolId !== fixture.homeSchoolId) { toast('Only the home team can verify here', 'error'); return; }
+      if (as === 'away' && mySchoolId !== fixture.awaySchoolId) { toast('Only the away team can verify here', 'error'); return; }
+    }
+
+    if (as === 'master') {
+      fixture.masterVerified   = true;
+      fixture.homeTeamVerified = true;
+      fixture.awayTeamVerified = true;
+    } else if (as === 'home') {
+      fixture.homeTeamVerified = true;
+    } else if (as === 'away') {
+      fixture.awayTeamVerified = true;
+    }
+
+    DB.updateLeague(league);
+    DB.writeAudit(
+      'score_verified', 'league',
+      `Score verified (${as}): ${fixture.homeSchoolName} vs ${fixture.awaySchoolName} — ${fixture.homeScore}–${fixture.awayScore}`,
+      leagueId, league.name
+    );
+    toast('Score verified ✓', 'success');
+    openLeagueDetail(reopenId || leagueId, isAdmin);
+  }
+
+  return { init, refresh, render, renderAdmin, openLeagueModal, saveScore, verifyScore };
 })();

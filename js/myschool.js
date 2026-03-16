@@ -157,13 +157,73 @@ const MySchool = (() => {
 
     container.innerHTML = html;
 
-    // Attach score-entry listeners
+    // Score-entry listeners
     container.querySelectorAll('.my-score-input').forEach(inp => {
       inp.addEventListener('change', () => {
         Leagues.saveScore(inp.dataset.league, inp.dataset.fixture, inp.dataset.field, inp.value);
-        _render();   // refresh so standings + W/D/L badge update
+        _render();
       });
     });
+
+    // Verify score listeners
+    container.querySelectorAll('.ms-verify-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        Leagues.verifyScore(btn.dataset.lid, btn.dataset.fid, btn.dataset.as, null, false);
+        _render();
+      });
+    });
+
+    // Request reschedule
+    container.querySelectorAll('.ms-reschedule-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const newDate = prompt('Enter requested new date (YYYY-MM-DD):');
+        if (!newDate) return;
+        const newTime = prompt('Enter requested new time (HH:MM) or leave blank to keep current:') || '';
+        const note    = prompt('Optional note for admin:') || '';
+        _submitChangeRequest(btn.dataset.lid, btn.dataset.fid, 'reschedule',
+          { requestedDate: newDate, requestedTime: newTime, note });
+      });
+    });
+
+    // Request alternate venue
+    container.querySelectorAll('.ms-altvenue-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const venues    = DB.getVenues();
+        const venueList = venues.map((v, i) => `${i + 1}. ${v.name}`).join('\n');
+        const pick      = prompt(`Select alternate venue:\n${venueList}\n\nEnter number:`);
+        if (!pick) return;
+        const idx = parseInt(pick) - 1;
+        if (isNaN(idx) || !venues[idx]) { toast('Invalid selection', 'error'); return; }
+        const note = prompt('Optional note for admin:') || '';
+        _submitChangeRequest(btn.dataset.lid, btn.dataset.fid, 'venue',
+          { requestedVenueId: venues[idx].id, note });
+      });
+    });
+  }
+
+  /** Submit a fixture change request (reschedule or alt-venue) on behalf of the school. */
+  function _submitChangeRequest(leagueId, fixtureId, type, data) {
+    const league  = DB.getLeagues().find(l => l.id === leagueId);
+    if (!league) return;
+    const fixture = (league.fixtures || []).find(f => f.id === fixtureId);
+    if (!fixture) return;
+    const profile = Auth.getProfile();
+    fixture.changeRequest = {
+      type,
+      requestedDate:    data.requestedDate    || null,
+      requestedTime:    data.requestedTime    || null,
+      requestedVenueId: data.requestedVenueId || null,
+      note:             data.note             || '',
+      requestedBy:      profile ? profile.uid  : null,
+      requestedByName:  profile ? (profile.displayName || profile.email) : 'School',
+      requestedAt:      new Date().toISOString(),
+    };
+    DB.updateLeague(league);
+    DB.writeAudit('change_requested', 'league',
+      `Change request (${type}) submitted for ${fixture.homeSchoolName} vs ${fixture.awaySchoolName}`,
+      leagueId, league.name);
+    toast('Change request submitted ✓', 'success');
+    _render();
   }
 
   // ── per-league section ───────────────────────────────────────
@@ -177,6 +237,15 @@ const MySchool = (() => {
       return myParticipantIds.includes(hk) || myParticipantIds.includes(ak);
     });
 
+    // Pre-compute clash IDs for this render
+    const clashedIds = new Set();
+    for (const { a, b } of DB.detectFixtureClashes()) {
+      if (a.leagueId === league.id || b.leagueId === league.id) {
+        clashedIds.add(a.fixture.id);
+        clashedIds.add(b.fixture.id);
+      }
+    }
+
     const upcoming = myFixtures
       .filter(f => f.homeScore === null || f.homeScore === undefined)
       .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
@@ -188,6 +257,16 @@ const MySchool = (() => {
 
     const myStandings = (league.standings || []).filter(r => myParticipantIds.includes(r.participantId));
     const totalTeams  = (league.standings || []).length;
+
+    // Home/Away counts per participant across all my fixtures
+    const haCounts = {};
+    myParticipantIds.forEach(id => { haCounts[id] = { home: 0, away: 0 }; });
+    myFixtures.forEach(f => {
+      const hk = f.homeParticipantId || f.homeSchoolId;
+      const ak = f.awayParticipantId || f.awaySchoolId;
+      if (haCounts[hk] !== undefined) haCounts[hk].home++;
+      if (haCounts[ak] !== undefined) haCounts[ak].away++;
+    });
 
     const DAYS     = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
     const dayLabel = league.playingDay !== undefined ? ` · ${DAYS[league.playingDay]}s` : '';
@@ -201,17 +280,23 @@ const MySchool = (() => {
       </div>
       <div class="card-body">`;
 
-    // Standing summary
+    // Standings + H/A balance summary
     if (myStandings.length > 0) {
       html += `<div class="myschool-standings">`;
       myStandings.forEach(row => {
         const pos      = (league.standings || []).findIndex(r => r.participantId === row.participantId) + 1;
         const posClass = pos === 1 ? 'badge-green' : pos === 2 ? 'badge-amber' : 'badge-gray';
+        const ha       = haCounts[row.participantId] || { home: 0, away: 0 };
+        const diff     = Math.abs(ha.home - ha.away);
+        const haBadge  = diff > 1
+          ? `<span class="score-unverified-badge" title="Home/away imbalance — contact admin to recalculate">🏠${ha.home} ✈️${ha.away} ⚠️</span>`
+          : `<span class="text-muted" style="font-size:.78rem" title="Home / Away games">🏠${ha.home} ✈️${ha.away}</span>`;
         html += `<div class="myschool-standing-row">
           <span class="badge ${posClass}">#${pos} / ${totalTeams}</span>
           <strong>${esc(row.name)}</strong>
           <span class="text-muted">${row.played}P · ${row.won}W · ${row.drawn}D · ${row.lost}L</span>
           <span class="myschool-pts">${row.points} pts</span>
+          ${haBadge}
         </div>`;
       });
       html += `</div>`;
@@ -219,12 +304,12 @@ const MySchool = (() => {
 
     if (upcoming.length > 0) {
       html += `<div class="myschool-section-label">📅 Upcoming Fixtures</div>`;
-      html += upcoming.map(f => _fixtureRow(f, league.id, myParticipantIds, true)).join('');
+      html += upcoming.map(f => _fixtureRow(f, league.id, myParticipantIds, true, clashedIds)).join('');
     }
 
     if (recent.length > 0) {
       html += `<div class="myschool-section-label">📊 Recent Results</div>`;
-      html += recent.map(f => _fixtureRow(f, league.id, myParticipantIds, false)).join('');
+      html += recent.map(f => _fixtureRow(f, league.id, myParticipantIds, false, clashedIds)).join('');
     }
 
     if (upcoming.length === 0 && recent.length === 0) {
@@ -236,7 +321,7 @@ const MySchool = (() => {
   }
 
   // ── fixture row ──────────────────────────────────────────────
-  function _fixtureRow(f, leagueId, myParticipantIds, canEdit) {
+  function _fixtureRow(f, leagueId, myParticipantIds, canEdit, clashedIds) {
     const hasScore = f.homeScore !== null && f.homeScore !== undefined;
     const homeKey  = f.homeParticipantId || f.homeSchoolId;
     const isHome   = myParticipantIds.includes(homeKey);
@@ -247,6 +332,7 @@ const MySchool = (() => {
     const hColor     = homeSchool ? homeSchool.color : '#666';
     const aColor     = awaySchool ? awaySchool.color : '#666';
 
+    // ── Score ──
     let scoreHtml;
     if (canEdit && Auth.isLoggedIn()) {
       scoreHtml = `
@@ -269,7 +355,67 @@ const MySchool = (() => {
       scoreHtml = `<span class="text-muted">vs</span>`;
     }
 
-    return `<div class="myschool-fixture ${isHome ? 'home-fixture' : 'away-fixture'}">
+    // ── Verification badge ──
+    let verifyHtml = '';
+    if (hasScore) {
+      const verified = !!(f.masterVerified || (f.homeTeamVerified && f.awayTeamVerified));
+      if (verified) {
+        verifyHtml = `<div class="score-verified">✓ Score Verified</div>`;
+      } else {
+        let status = '⚠️ Unverified';
+        if (f.homeTeamVerified)  status = '⏳ Awaiting away team';
+        if (f.awayTeamVerified)  status = '⏳ Awaiting home team';
+        let verifyBtn = '';
+        if (Auth.isLoggedIn()) {
+          if (isHome && !f.homeTeamVerified) {
+            verifyBtn = `<button class="btn btn-xs btn-primary ms-verify-btn"
+              data-lid="${leagueId}" data-fid="${f.id}" data-as="home">Verify ✓</button>`;
+          } else if (!isHome && !f.awayTeamVerified) {
+            verifyBtn = `<button class="btn btn-xs btn-primary ms-verify-btn"
+              data-lid="${leagueId}" data-fid="${f.id}" data-as="away">Verify ✓</button>`;
+          }
+        }
+        if (Auth.isAdmin()) {
+          verifyBtn += `<button class="btn btn-xs btn-secondary ms-verify-btn"
+            data-lid="${leagueId}" data-fid="${f.id}" data-as="master" title="Verify on behalf of both teams">Master ✓</button>`;
+        }
+        verifyHtml = `<div class="score-unverified"><span class="score-unverified-badge">${status}</span>${verifyBtn}</div>`;
+      }
+    }
+
+    // ── Clash / change-request badge ──
+    let clashHtml = '';
+    const isClash = clashedIds && clashedIds.has(f.id);
+    if (isClash) {
+      if (f.clashOkayed) {
+        clashHtml = `<div class="clash-okayed-badge">✓ Clash acknowledged${f.clashReason ? ': ' + esc(f.clashReason) : ''}</div>`;
+      } else {
+        const hasRequest = !!f.changeRequest;
+        let requestBtns = '';
+        if (!hasRequest && Auth.isLoggedIn()) {
+          requestBtns = `<button class="btn btn-xs btn-secondary ms-reschedule-btn"
+            data-lid="${leagueId}" data-fid="${f.id}">📅 Request Reschedule</button>
+            <button class="btn btn-xs btn-secondary ms-altvenue-btn"
+            data-lid="${leagueId}" data-fid="${f.id}">🏟 Alt. Venue</button>`;
+        }
+        clashHtml = `<div class="fixture-clash-badge">⚠️ Venue clash on this day ${requestBtns}</div>`;
+        if (hasRequest) {
+          const cr    = f.changeRequest;
+          const vName = cr.requestedVenueId
+            ? ((DB.getVenues().find(v => v.id === cr.requestedVenueId) || {}).name || cr.requestedVenueId)
+            : null;
+          const detail = cr.type === 'venue'
+            ? `Alt. venue: ${vName}`
+            : `Reschedule: ${cr.requestedDate || '?'}${cr.requestedTime ? ' ' + cr.requestedTime : ''}`;
+          clashHtml += `<div class="change-request-badge">
+            📨 Your request: ${detail}${cr.note ? ` — <em>${esc(cr.note)}</em>` : ''}
+            <span class="text-muted">(awaiting admin approval)</span>
+          </div>`;
+        }
+      }
+    }
+
+    return `<div class="myschool-fixture ${isHome ? 'home-fixture' : 'away-fixture'}${isClash && !f.clashOkayed ? ' ms-fixture-clash' : ''}">
       <div class="fixture-meta">
         <span class="fixture-date">${f.date ? formatDate(f.date) : '—'}</span>
         ${f.timeSlot ? `<span class="text-muted">${f.timeSlot}</span>` : ''}
@@ -284,6 +430,8 @@ const MySchool = (() => {
           <span style="color:${aColor}">●</span> ${esc(f.awaySchoolName)}
         </span>
       </div>
+      ${verifyHtml}
+      ${clashHtml}
     </div>`;
   }
 

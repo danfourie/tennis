@@ -734,3 +734,134 @@ body {
 .slot-chip.league {
   cursor: default;
 }
+
+/* ===== SCORE VERIFICATION ===== */
+.score-verified {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  font-size: .78rem;
+  font-weight: 600;
+  color: #15803d;
+  background: #dcfce7;
+  border: 1px solid #86efac;
+  border-radius: 999px;
+  padding: .15rem .55rem;
+  margin-top: .3rem;
+}
+.score-unverified {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .35rem;
+  margin-top: .3rem;
+}
+.score-unverified-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: .78rem;
+  font-weight: 600;
+  color: #92400e;
+  background: #fef3c7;
+  border: 1px solid #fcd34d;
+  border-radius: 999px;
+  padding: .15rem .55rem;
+}
+
+/* ===== FIXTURE CLASH BADGE ===== */
+.fixture-clash-badge {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .35rem;
+  font-size: .8rem;
+  font-weight: 600;
+  color: #9a3412;
+  background: #fff7ed;
+  border: 1.5px dashed #f97316;
+  border-radius: var(--radius);
+  padding: .35rem .65rem;
+  margin-top: .3rem;
+}
+.fixture-clash-badge .btn { margin-left: auto; }
+
+/* Clashed row highlight in fixtures table */
+.fixture-row-clash { background: #fff7ed; }
+.fixture-row-clash td { border-bottom-color: #fed7aa; }
+
+/* Sub-row under a fixture row (clash/change-request content) */
+.fixture-sub-row td {
+  padding: .25rem .75rem .5rem;
+  background: #fafafa;
+}
+
+/* Clash acknowledged badge */
+.clash-okayed-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  font-size: .78rem;
+  color: #6b7280;
+  background: #f3f4f6;
+  border: 1px solid #d1d5db;
+  border-radius: 999px;
+  padding: .15rem .55rem;
+  margin-top: .3rem;
+}
+
+/* Change request badge */
+.change-request-badge {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .35rem;
+  font-size: .8rem;
+  color: #1e40af;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: var(--radius);
+  padding: .35rem .65rem;
+  margin-top: .25rem;
+}
+
+/* My School fixture clash highlight */
+.myschool-fixture.ms-fixture-clash {
+  border-left: 3px solid #f97316;
+  background: #fff7ed;
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+
+/* ===== MODAL TABS ===== */
+.modal-tabs {
+  display: flex;
+  gap: .25rem;
+  border-bottom: 2px solid var(--border);
+  margin-bottom: 1rem;
+}
+.modal-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  padding: .5rem .85rem;
+  cursor: pointer;
+  font-size: .88rem;
+  color: var(--neutral);
+  font-weight: 500;
+  transition: color .15s, border-color .15s;
+}
+.modal-tab:hover { color: var(--primary); }
+.modal-tab.active {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+  font-weight: 700;
+}
+
+/* ===== ADMIN CARD FULL WIDTH ===== */
+.admin-card-full { grid-column: 1 / -1; }
+
+/* ===== H/A BALANCE TABLE ===== */
+.home-away-balance th, .home-away-balance td {
+  padding: .35rem .6rem;
+  font-size: .85rem;
+}
