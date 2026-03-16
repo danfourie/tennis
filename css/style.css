@@ -132,6 +132,22 @@ body {
 .view-header h2 { font-size: 1.4rem; font-weight: 700; color: var(--neutral-dark); }
 .view-controls { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
 
+/* ===== SEARCH INPUTS ===== */
+.search-input {
+  padding: .38rem .8rem;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius);
+  font-size: .875rem;
+  width: 220px;
+  background: white;
+  transition: border-color .15s;
+}
+.search-input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(16,185,129,.12);
+}
+
 /* ===== CARDS GRID ===== */
 .cards-grid {
   display: grid;
@@ -587,8 +603,14 @@ body {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 1.25rem;
+  flex-wrap: wrap;
+  gap: .6rem;
 }
 .admin-panel-header h3 { margin: 0; font-size: 1.05rem; }
+/* Right-side group: search + action button */
+.panel-header-right {
+  display: flex; align-items: center; gap: .6rem; flex-wrap: wrap;
+}
 
 /* Admin module list (leagues/tournaments in admin) */
 .admin-module-list { display: flex; flex-direction: column; gap: .75rem; }

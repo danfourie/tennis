@@ -30,11 +30,36 @@ const Tournaments = (() => {
     document.getElementById('tournamentVenue').innerHTML = opts || '<option value="">No venues</option>';
   }
 
+  /** Sort tournaments newest-first (by date desc). */
+  function _sortTournaments(ts) {
+    return [...ts].sort((a, b) => {
+      const da = a.date || '', db = b.date || '';
+      if (!da && !db) return 0;
+      if (!da) return 1;
+      if (!db) return -1;
+      return db.localeCompare(da);
+    });
+  }
+
+  /** Wire up a cards-grid search input (once). */
+  function _initCardSearch(inputId, containerSelector) {
+    const inp = document.getElementById(inputId);
+    if (!inp || inp.dataset.searchBound) return;
+    inp.dataset.searchBound = '1';
+    inp.addEventListener('input', () => {
+      const q = inp.value.toLowerCase().trim();
+      document.querySelectorAll(`${containerSelector} .card`).forEach(el => {
+        el.style.display = !q || el.textContent.toLowerCase().includes(q) ? '' : 'none';
+      });
+    });
+  }
+
   function render() {
     const container = document.getElementById('tournamentsList');
-    const tournaments = DB.getTournaments();
+    const tournaments = _sortTournaments(DB.getTournaments());
     if (tournaments.length === 0) {
       container.innerHTML = `<div class="empty-state"><div class="empty-icon">🏅</div><p>No tournaments yet. Create one!</p></div>`;
+      _initCardSearch('tournamentsSearch', '#tournamentsList');
       return;
     }
     container.innerHTML = tournaments.map(t => _tournamentCard(t)).join('');
@@ -47,6 +72,15 @@ const Tournaments = (() => {
     container.querySelectorAll('[data-t-delete]').forEach(btn => {
       btn.addEventListener('click', () => deleteTournament(btn.dataset.tDelete));
     });
+    _initCardSearch('tournamentsSearch', '#tournamentsList');
+    // Re-apply active search filter
+    const inp = document.getElementById('tournamentsSearch');
+    if (inp) {
+      const q = inp.value.toLowerCase().trim();
+      if (q) container.querySelectorAll('.card').forEach(el => {
+        el.style.display = el.textContent.toLowerCase().includes(q) ? '' : 'none';
+      });
+    }
   }
 
   function _tournamentCard(t) {
@@ -823,7 +857,7 @@ const Tournaments = (() => {
   function renderAdmin() {
     const container = document.getElementById('adminTournamentsList');
     if (!container) return;
-    const tournaments = DB.getTournaments();
+    const tournaments = _sortTournaments(DB.getTournaments());
     if (tournaments.length === 0) {
       container.innerHTML = `<div class="empty-state"><div class="empty-icon">🏅</div><p>No tournaments yet. Click <strong>+ Create Tournament</strong> to get started.</p></div>`;
       return;
@@ -867,6 +901,14 @@ const Tournaments = (() => {
     container.querySelectorAll('[data-admin-t-del]').forEach(btn => {
       btn.addEventListener('click', () => deleteTournament(btn.dataset.adminTDel));
     });
+    // Re-apply active search filter
+    const inp = document.getElementById('adminTournamentsSearch');
+    if (inp) {
+      const q = inp.value.toLowerCase().trim();
+      if (q) container.querySelectorAll('.admin-module-item').forEach(el => {
+        el.style.display = el.textContent.toLowerCase().includes(q) ? '' : 'none';
+      });
+    }
   }
 
   return { init, refresh, renderAdmin, openTournamentModal };

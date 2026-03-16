@@ -60,6 +60,7 @@
     <section id="view-leagues" class="view hidden">
       <div class="view-header">
         <h2>School Leagues</h2>
+        <input type="search" id="leaguesSearch" class="search-input" placeholder="🔍 Search leagues…">
       </div>
       <div id="leaguesList" class="cards-grid"></div>
     </section>
@@ -68,6 +69,7 @@
     <section id="view-tournaments" class="view hidden">
       <div class="view-header">
         <h2>Tournaments</h2>
+        <input type="search" id="tournamentsSearch" class="search-input" placeholder="🔍 Search tournaments…">
       </div>
       <div id="tournamentsList" class="cards-grid"></div>
     </section>
@@ -111,7 +113,10 @@
       <div class="admin-tab-panel hidden" id="subtab-leagues">
         <div class="admin-panel-header">
           <h3>🏆 Leagues</h3>
-          <button class="btn btn-primary" id="addLeagueBtnAdmin">+ Create League</button>
+          <div class="panel-header-right">
+            <input type="search" id="adminLeaguesSearch" class="search-input" placeholder="🔍 Search…">
+            <button class="btn btn-primary" id="addLeagueBtnAdmin">+ Create League</button>
+          </div>
         </div>
         <div id="adminLeaguesList" class="admin-module-list"></div>
       </div>
@@ -120,7 +125,10 @@
       <div class="admin-tab-panel hidden" id="subtab-tournaments">
         <div class="admin-panel-header">
           <h3>🏅 Tournaments</h3>
-          <button class="btn btn-primary" id="addTournamentBtnAdmin">+ Create Tournament</button>
+          <div class="panel-header-right">
+            <input type="search" id="adminTournamentsSearch" class="search-input" placeholder="🔍 Search…">
+            <button class="btn btn-primary" id="addTournamentBtnAdmin">+ Create Tournament</button>
+          </div>
         </div>
         <div id="adminTournamentsList" class="admin-module-list"></div>
       </div>
@@ -129,7 +137,10 @@
       <div class="admin-tab-panel hidden" id="subtab-venues">
         <div class="admin-panel-header">
           <h3>🏟 Venues &amp; Courts</h3>
-          <button class="btn btn-primary" id="addVenueBtn">+ Add Venue</button>
+          <div class="panel-header-right">
+            <input type="search" id="venuesSearch" class="search-input" placeholder="🔍 Search…">
+            <button class="btn btn-primary" id="addVenueBtn">+ Add Venue</button>
+          </div>
         </div>
         <div id="venuesList"></div>
       </div>
@@ -138,7 +149,10 @@
       <div class="admin-tab-panel hidden" id="subtab-schools">
         <div class="admin-panel-header">
           <h3>🏫 Schools</h3>
-          <button class="btn btn-primary" id="addSchoolBtn">+ Add School</button>
+          <div class="panel-header-right">
+            <input type="search" id="schoolsSearch" class="search-input" placeholder="🔍 Search…">
+            <button class="btn btn-primary" id="addSchoolBtn">+ Add School</button>
+          </div>
         </div>
         <div id="schoolsList"></div>
       </div>
@@ -147,6 +161,7 @@
       <div class="admin-tab-panel hidden" id="subtab-users">
         <div class="admin-panel-header">
           <h3>👥 Users</h3>
+          <input type="search" id="usersSearch" class="search-input" placeholder="🔍 Search users…">
         </div>
         <div id="usersList"></div>
       </div>

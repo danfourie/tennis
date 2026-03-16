@@ -15,6 +15,34 @@ const Admin = (() => {
     return val.split(/[\/,]/).every(part => /^0\d{9}$/.test(part.trim()));
   }
 
+  // ── Search helper ─────────────────────────────────────────────
+  /**
+   * Wire up a search input (once) to filter a list container.
+   * itemSelector: CSS selector for filterable items within the container.
+   */
+  function _initSearch(inputId, listSelector, itemSelector) {
+    const inp = document.getElementById(inputId);
+    if (!inp || inp.dataset.searchBound) return;
+    inp.dataset.searchBound = '1';
+    inp.addEventListener('input', () => {
+      const q = inp.value.toLowerCase().trim();
+      document.querySelectorAll(`${listSelector} ${itemSelector}`).forEach(el => {
+        el.style.display = !q || el.textContent.toLowerCase().includes(q) ? '' : 'none';
+      });
+    });
+  }
+
+  /** Re-apply current search value after a re-render (so filter stays active). */
+  function _applySearch(inputId, listSelector, itemSelector) {
+    const inp = document.getElementById(inputId);
+    if (!inp) return;
+    const q = inp.value.toLowerCase().trim();
+    if (!q) return;
+    document.querySelectorAll(`${listSelector} ${itemSelector}`).forEach(el => {
+      el.style.display = el.textContent.toLowerCase().includes(q) ? '' : 'none';
+    });
+  }
+
   function init() {
     // Sub-tab click handlers
     document.querySelectorAll('.admin-subtab').forEach(btn => {
@@ -42,6 +70,13 @@ const Admin = (() => {
 
     // Password change
     document.getElementById('changePasswordBtn').addEventListener('click', changePassword);
+
+    // Wire up static search inputs (once; survives re-renders)
+    _initSearch('venuesSearch',          '#venuesList',            '.admin-list-item');
+    _initSearch('schoolsSearch',         '#schoolsList',           '.admin-list-item');
+    _initSearch('usersSearch',           '#usersList',             '.admin-list-item');
+    _initSearch('adminLeaguesSearch',    '#adminLeaguesList',      '.admin-module-item');
+    _initSearch('adminTournamentsSearch','#adminTournamentsList',  '.admin-module-item');
 
     render();
   }
@@ -149,7 +184,14 @@ const Admin = (() => {
     if (!el) return;
 
     el.innerHTML = `<p class="text-muted">Loading users…</p>`;
-    const users = await DB.loadUsers();
+    const rawUsers = await DB.loadUsers();
+    // Sort: master first, then admin, then user; A-Z within each group
+    const roleOrder = { master: 0, admin: 1, user: 2 };
+    const users = [...rawUsers].sort((a, b) => {
+      const ro = (roleOrder[a.role] ?? 9) - (roleOrder[b.role] ?? 9);
+      if (ro !== 0) return ro;
+      return (a.displayName || a.email || '').localeCompare(b.displayName || b.email || '');
+    });
 
     if (users.length === 0) {
       el.innerHTML = `<p class="text-muted">No registered users yet.</p>`;
@@ -222,6 +264,9 @@ const Admin = (() => {
         renderUsers();
       });
     });
+
+    // Re-apply active search filter after re-render
+    _applySearch('usersSearch', '#usersList', '.admin-list-item');
   }
 
   // ════════════════════════════════════════════════════════════
@@ -266,7 +311,7 @@ const Admin = (() => {
   // ════════════════════════════════════════════════════════════
   function renderVenues() {
     const el = document.getElementById('venuesList');
-    const venues = DB.getVenues();
+    const venues = [...DB.getVenues()].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
     if (venues.length === 0) {
       el.innerHTML = `<p class="text-muted">No venues yet.</p>`;
       return;
@@ -292,6 +337,7 @@ const Admin = (() => {
     el.querySelectorAll('[data-venue-delete]').forEach(btn => {
       btn.addEventListener('click', () => deleteVenue(btn.dataset.venueDelete));
     });
+    _applySearch('venuesSearch', '#venuesList', '.admin-list-item');
   }
 
   function openVenueModal(id) {
@@ -363,7 +409,7 @@ const Admin = (() => {
 
   function renderSchools() {
     const el = document.getElementById('schoolsList');
-    const schools = DB.getSchools();
+    const schools = [...DB.getSchools()].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
     if (schools.length === 0) {
       el.innerHTML = `<p class="text-muted">No schools yet.</p>`;
       return;
@@ -413,6 +459,7 @@ const Admin = (() => {
     el.querySelectorAll('[data-school-delete]').forEach(btn => {
       btn.addEventListener('click', () => deleteSchool(btn.dataset.schoolDelete));
     });
+    _applySearch('schoolsSearch', '#schoolsList', '.admin-list-item');
   }
 
   function openSchoolModal(id) {

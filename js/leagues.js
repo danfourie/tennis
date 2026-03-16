@@ -48,18 +48,56 @@ const Leagues = (() => {
   // ════════════════════════════════════════════════════════════
   // PUBLIC VIEW  (view-leagues)
   // ════════════════════════════════════════════════════════════
+  /** Sort leagues newest-first (by startDate desc). */
+  function _sortLeagues(leagues) {
+    return [...leagues].sort((a, b) => {
+      const da = a.startDate || '', db = b.startDate || '';
+      if (!da && !db) return 0;
+      if (!da) return 1;
+      if (!db) return -1;
+      return db.localeCompare(da);
+    });
+  }
+
+  /** Apply the current search box value to a cards grid after render. */
+  function _applyCardSearch(inputId, containerSelector) {
+    const inp = document.getElementById(inputId);
+    if (!inp) return;
+    const q = inp.value.toLowerCase().trim();
+    if (!q) return;
+    document.querySelectorAll(`${containerSelector} .card`).forEach(el => {
+      el.style.display = el.textContent.toLowerCase().includes(q) ? '' : 'none';
+    });
+  }
+
+  /** Wire up a card-grid search input (once). */
+  function _initCardSearch(inputId, containerSelector) {
+    const inp = document.getElementById(inputId);
+    if (!inp || inp.dataset.searchBound) return;
+    inp.dataset.searchBound = '1';
+    inp.addEventListener('input', () => {
+      const q = inp.value.toLowerCase().trim();
+      document.querySelectorAll(`${containerSelector} .card`).forEach(el => {
+        el.style.display = !q || el.textContent.toLowerCase().includes(q) ? '' : 'none';
+      });
+    });
+  }
+
   function render() {
     const container = document.getElementById('leaguesList');
     if (!container) return;
-    const leagues = DB.getLeagues();
+    const leagues = _sortLeagues(DB.getLeagues());
     if (leagues.length === 0) {
       container.innerHTML = `<div class="empty-state"><div class="empty-icon">🏆</div><p>No leagues yet.</p></div>`;
+      _initCardSearch('leaguesSearch', '#leaguesList');
       return;
     }
     container.innerHTML = leagues.map(l => _leagueCard(l)).join('');
     container.querySelectorAll('[data-league-view]').forEach(btn => {
       btn.addEventListener('click', () => openLeagueDetail(btn.dataset.leagueView));
     });
+    _initCardSearch('leaguesSearch', '#leaguesList');
+    _applyCardSearch('leaguesSearch', '#leaguesList');
   }
 
   function _leagueCard(l) {
@@ -106,7 +144,7 @@ const Leagues = (() => {
   function renderAdmin() {
     const container = document.getElementById('adminLeaguesList');
     if (!container) return;
-    const leagues = DB.getLeagues();
+    const leagues = _sortLeagues(DB.getLeagues());
     if (leagues.length === 0) {
       container.innerHTML = `<div class="empty-state"><div class="empty-icon">🏆</div><p>No leagues yet. Click <strong>+ Create League</strong> to get started.</p></div>`;
       return;
@@ -155,6 +193,14 @@ const Leagues = (() => {
     container.querySelectorAll('[data-admin-league-del]').forEach(btn => {
       btn.addEventListener('click', () => deleteLeague(btn.dataset.adminLeagueDel));
     });
+    // Re-apply active admin search filter
+    const inp = document.getElementById('adminLeaguesSearch');
+    if (inp) {
+      const q = inp.value.toLowerCase().trim();
+      if (q) container.querySelectorAll('.admin-module-item').forEach(el => {
+        el.style.display = el.textContent.toLowerCase().includes(q) ? '' : 'none';
+      });
+    }
   }
 
   // ════════════════════════════════════════════════════════════
