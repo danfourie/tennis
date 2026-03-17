@@ -993,6 +993,21 @@ body {
   color: #9ca3af;
 }
 
+/* Read messages divider */
+.notif-read-divider {
+  padding: .3rem .75rem;
+  border-top: 1px solid #f3f4f6;
+}
+.notif-read-toggle {
+  background: none;
+  border: none;
+  color: #9ca3af;
+  font-size: .75rem;
+  cursor: pointer;
+  padding: .1rem 0;
+}
+.notif-read-toggle:hover { color: #6b7280; }
+
 /* Empty state */
 .notif-empty {
   padding: 2rem 1rem;

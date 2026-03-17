@@ -198,21 +198,54 @@ const NotificationService = (() => {
     if (willOpen) _refreshPanel();
   }
 
+  let _showReadNotifs = false;
+
   function _refreshPanel() {
     const list = document.getElementById('notifList');
     if (!list) return;
+
+    const unread = _notifs.filter(n => !n.read);
+    const read   = _notifs.filter(n =>  n.read);
 
     if (_notifs.length === 0) {
       list.innerHTML = '<div class="notif-empty">No notifications yet</div>';
       return;
     }
 
-    list.innerHTML = _notifs.map(n => `
+    const _itemHtml = n => `
       <div class="notif-item${n.read ? '' : ' unread'}" data-id="${esc(n.id)}" data-league="${esc(n.leagueId || '')}">
         <div class="notif-item-title">${_typeIcon(n.type)} ${esc(n.title)}</div>
         <div class="notif-item-body">${esc(n.body)}</div>
         <div class="notif-item-time">${_relativeTime(n.createdAt)}</div>
-      </div>`).join('');
+      </div>`;
+
+    let html = unread.length === 0
+      ? '<div class="notif-empty">No new notifications</div>'
+      : unread.map(_itemHtml).join('');
+
+    if (read.length > 0) {
+      if (_showReadNotifs) {
+        html += `<div class="notif-read-divider">
+          <button class="notif-read-toggle" id="notifReadToggle">▲ Hide read messages (${read.length})</button>
+        </div>`;
+        html += read.map(_itemHtml).join('');
+      } else {
+        html += `<div class="notif-read-divider">
+          <button class="notif-read-toggle" id="notifReadToggle">▼ Show read messages (${read.length})</button>
+        </div>`;
+      }
+    }
+
+    list.innerHTML = html;
+
+    const toggle = list.querySelector('#notifReadToggle');
+    if (toggle) {
+      toggle.addEventListener('click', e => {
+        e.stopPropagation();
+        _showReadNotifs = !_showReadNotifs;
+        _refreshPanel();
+      });
+    }
 
     list.querySelectorAll('.notif-item').forEach(item => {
       item.addEventListener('click', () => {
