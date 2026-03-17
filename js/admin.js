@@ -457,8 +457,9 @@ const Admin = (() => {
             <div class="school-teams" style="margin-top:.35rem">${teamsBadges}</div>
           </div>
           <div class="item-actions">
-            <button class="btn btn-xs btn-info" data-school-view="${s.id}">👁 View</button>
+            <button class="btn btn-xs btn-info"      data-school-view="${s.id}">👁 View</button>
             <button class="btn btn-xs btn-secondary" data-school-edit="${s.id}">Edit</button>
+            <button class="btn btn-xs btn-secondary" data-school-notif="${s.id}">🔔</button>
             <button class="btn btn-xs btn-danger"    data-school-delete="${s.id}">Del</button>
           </div>
         </div>`;
@@ -473,6 +474,47 @@ const Admin = (() => {
     });
     el.querySelectorAll('[data-school-delete]').forEach(btn => {
       btn.addEventListener('click', () => deleteSchool(btn.dataset.schoolDelete));
+    });
+    el.querySelectorAll('[data-school-notif]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const s = DB.getSchools().find(x => x.id === btn.dataset.schoolNotif);
+        if (!s) return;
+        NotificationService.openContextModal({
+          title: `Notify — ${s.name}`,
+          types: [
+            {
+              value:          'fixture_changed',
+              label:          '📋 Fixture changes — notify school about fixture updates',
+              subject:        `Fixture update for ${s.name}`,
+              body:           `There have been updates to your upcoming fixtures. Please check your schedule.`,
+              recipientLabel: `📬 Recipients: All users linked to ${s.name}`,
+              sendFn: async (title, body) => {
+                await NotificationService.sendToSchool(s.id, { type: 'fixture_changed', title, body });
+              },
+            },
+            {
+              value:          'general_message',
+              label:          '📢 General message — send custom message to school',
+              subject:        `Message to ${s.name}`,
+              body:           '',
+              recipientLabel: `📬 Recipients: All users linked to ${s.name}`,
+              sendFn: async (title, body) => {
+                await NotificationService.sendToSchool(s.id, { type: 'general_message', title, body });
+              },
+            },
+            {
+              value:          'score_reminder',
+              label:          '⏰ Score reminder — remind school to submit scores',
+              subject:        `Please submit your scores — ${s.name}`,
+              body:           `This is a reminder to submit outstanding match scores. Please update your results as soon as possible.`,
+              recipientLabel: `📬 Recipients: All users linked to ${s.name}`,
+              sendFn: async (title, body) => {
+                await NotificationService.sendToSchool(s.id, { type: 'score_reminder', title, body });
+              },
+            },
+          ],
+        });
+      });
     });
     _applySearch('schoolsSearch', '#schoolsList', '.admin-list-item');
   }

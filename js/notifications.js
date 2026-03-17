@@ -52,6 +52,104 @@ const NotificationService = (() => {
         panel.classList.add('hidden');
       }
     });
+
+    _initContextModal();
+  }
+
+  // ── Context notification modal ───────────────────────────────
+  let _ctxConfig = null;
+
+  function _initContextModal() {
+    const typeSel = document.getElementById('notifCtxType');
+    if (typeSel) typeSel.addEventListener('change', _onCtxTypeChange);
+    const sendBtn = document.getElementById('notifCtxSendBtn');
+    if (sendBtn) sendBtn.addEventListener('click', _onCtxSend);
+  }
+
+  /**
+   * Open the reusable notification context modal.
+   * config: { title, types: [{ value, label, subject, body, recipientLabel, schoolSelect?, sendFn }] }
+   * sendFn receives (title, body, selectedSchoolIds?) and should call the appropriate send helper.
+   */
+  function openContextModal(config) {
+    _ctxConfig = config;
+    const titleEl = document.getElementById('notifCtxTitle');
+    if (titleEl) titleEl.textContent = config.title || 'Send Notification';
+
+    const typeSel = document.getElementById('notifCtxType');
+    if (typeSel) {
+      typeSel.innerHTML = config.types.map(t =>
+        `<option value="${esc(t.value)}">${esc(t.label)}</option>`
+      ).join('');
+    }
+    _onCtxTypeChange();
+    Modal.open('notifContextModal');
+  }
+
+  function _onCtxTypeChange() {
+    if (!_ctxConfig) return;
+    const typeSel     = document.getElementById('notifCtxType');
+    const selectedType = typeSel ? typeSel.value : null;
+    const typeConfig  = _ctxConfig.types.find(t => t.value === selectedType);
+    if (!typeConfig) return;
+
+    const subjectEl = document.getElementById('notifCtxSubject');
+    const bodyEl    = document.getElementById('notifCtxBody');
+    const recEl     = document.getElementById('notifCtxRecipients');
+
+    if (subjectEl) subjectEl.value   = typeConfig.subject || '';
+    if (bodyEl)    bodyEl.value      = typeConfig.body    || '';
+    if (recEl)     recEl.textContent = typeConfig.recipientLabel || '';
+
+    const schoolGroup = document.getElementById('notifCtxSchoolSelectGroup');
+    if (schoolGroup) {
+      const show = !!typeConfig.schoolSelect;
+      schoolGroup.classList.toggle('hidden', !show);
+      if (show) {
+        const checkboxesEl = document.getElementById('notifCtxSchoolCheckboxes');
+        if (checkboxesEl) {
+          const schools = DB.getSchools();
+          checkboxesEl.innerHTML = schools.map(s =>
+            `<label class="notif-ctx-school-label">
+               <input type="checkbox" class="notif-ctx-school-cb" value="${esc(s.id)}" checked>
+               <span class="color-dot" style="background:${s.color};flex-shrink:0"></span> ${esc(s.name)}
+             </label>`
+          ).join('');
+        }
+      }
+    }
+  }
+
+  async function _onCtxSend() {
+    if (!_ctxConfig) return;
+    const typeSel     = document.getElementById('notifCtxType');
+    const selectedType = typeSel ? typeSel.value : null;
+    const typeConfig  = _ctxConfig.types.find(t => t.value === selectedType);
+    if (!typeConfig) return;
+
+    const title = (document.getElementById('notifCtxSubject') || {}).value?.trim() || '';
+    const body  = (document.getElementById('notifCtxBody')    || {}).value?.trim() || '';
+    if (!title || !body) { toast('Title and message are required', 'error'); return; }
+
+    let selectedSchoolIds = null;
+    if (typeConfig.schoolSelect) {
+      selectedSchoolIds = [...document.querySelectorAll('.notif-ctx-school-cb:checked')].map(cb => cb.value);
+      if (selectedSchoolIds.length === 0) { toast('Select at least one school', 'error'); return; }
+    }
+
+    const sendBtn = document.getElementById('notifCtxSendBtn');
+    if (sendBtn) { sendBtn.disabled = true; sendBtn.textContent = 'Sending…'; }
+
+    try {
+      await typeConfig.sendFn(title, body, selectedSchoolIds);
+      toast('Notification sent ✓', 'success');
+      Modal.close('notifContextModal');
+    } catch (err) {
+      console.error('[NotificationService] context send error:', err);
+      toast('Failed to send notification', 'error');
+    } finally {
+      if (sendBtn) { sendBtn.disabled = false; sendBtn.textContent = 'Send 🔔'; }
+    }
   }
 
   // ── Load / unload ────────────────────────────────────────────
@@ -216,6 +314,12 @@ const NotificationService = (() => {
     send({ ...payload, recipientUids: DB.getUsers().map(u => u.uid) });
   }
 
+  async function sendToMasters(payload) {
+    await _ensureUsers();
+    const uids = DB.getUsers().filter(u => u.role === 'master' || u.role === 'admin').map(u => u.uid);
+    send({ ...payload, recipientUids: uids });
+  }
+
   // ── Admin general message ────────────────────────────────────
   async function sendGeneral(title, body, groupType, groupId) {
     if (!title || !body) { toast('Title and message are required', 'error'); return; }
@@ -370,8 +474,10 @@ const NotificationService = (() => {
     sendToSchoolGroup,
     sendToLeagueParticipants,
     sendToAll,
+    sendToMasters,
     sendGeneral,
     checkPendingReminders,
     renderComposer,
+    openContextModal,
   };
 })();

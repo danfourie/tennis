@@ -1009,3 +1009,40 @@ body {
   font-family: inherit;
   font-size: .9rem;
 }
+
+/* ── Notification Context Modal ───────────────────────────── */
+.notif-ctx-school-list {
+  max-height: 180px;
+  overflow-y: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: .4rem .6rem;
+  background: #f9fafb;
+}
+.notif-ctx-school-label {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  padding: .2rem 0;
+  font-size: .88rem;
+  cursor: pointer;
+  user-select: none;
+}
+.notif-ctx-school-label input[type="checkbox"] {
+  flex-shrink: 0;
+}
+.notif-ctx-recipients {
+  font-size: .82rem;
+  color: #6b7280;
+  padding: .35rem .5rem;
+  background: #f3f4f6;
+  border-radius: 5px;
+  min-height: 1.6rem;
+}
+
+/* ── My School fixture notify button ─────────────────────── */
+.ms-notif-section {
+  margin-top: .4rem;
+  display: flex;
+  justify-content: flex-end;
+}

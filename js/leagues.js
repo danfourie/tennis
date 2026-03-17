@@ -179,6 +179,7 @@ const Leagues = (() => {
         <div class="module-actions">
           <button class="btn btn-sm btn-secondary" data-admin-fixtures="${l.id}">📋 Manage Fixtures</button>
           <button class="btn btn-sm btn-secondary" data-admin-league-edit="${l.id}">✏️ Edit</button>
+          <button class="btn btn-sm btn-secondary" data-league-notif="${l.id}">🔔 Notify</button>
           <button class="btn btn-sm btn-danger"    data-admin-league-del="${l.id}">Delete</button>
         </div>
       </div>`;
@@ -192,6 +193,62 @@ const Leagues = (() => {
     });
     container.querySelectorAll('[data-admin-league-del]').forEach(btn => {
       btn.addEventListener('click', () => deleteLeague(btn.dataset.adminLeagueDel));
+    });
+    container.querySelectorAll('[data-league-notif]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const l = DB.getLeagues().find(x => x.id === btn.dataset.leagueNotif);
+        if (!l) return;
+        const parts            = _getParticipants(l);
+        const schoolIds        = [...new Set(parts.map(p => p.schoolId))];
+        const allSchools       = DB.getSchools();
+        const participantNames = schoolIds
+          .map(id => (allSchools.find(s => s.id === id) || {}).name)
+          .filter(Boolean).join(', ');
+        const startLabel = l.startDate ? formatDate(l.startDate) : 'TBA';
+
+        NotificationService.openContextModal({
+          title: `Notify — ${l.name}`,
+          types: [
+            {
+              value:          'league_created',
+              label:          '📢 New league created — select schools to invite',
+              subject:        `New league: ${l.name}`,
+              body:           `${l.name}${l.division ? ' · ' + l.division : ''} has been created and starts on ${startLabel}. Register your school to participate.`,
+              recipientLabel: '📋 Select schools to notify below',
+              schoolSelect:   true,
+              sendFn: async (title, body, selectedSchoolIds) => {
+                await NotificationService.sendToSchoolGroup(selectedSchoolIds, {
+                  type: 'league_created', title, body, leagueId: l.id,
+                });
+              },
+            },
+            {
+              value:          'fixture_changed',
+              label:          '📋 Fixtures updated — notify all participants',
+              subject:        `Fixtures updated: ${l.name}`,
+              body:           `The fixtures for ${l.name} have been updated. Please check your upcoming schedule.`,
+              recipientLabel: `📬 Recipients: ${participantNames || 'All participants'}`,
+              sendFn: async (title, body) => {
+                await NotificationService.sendToLeagueParticipants(l.id, {
+                  type: 'fixture_changed', title, body, leagueId: l.id,
+                });
+              },
+            },
+            {
+              value:          'score_reminder',
+              label:          '⏰ Score reminder — remind all participants to submit scores',
+              subject:        `Please submit your scores — ${l.name}`,
+              body:           `This is a reminder to submit outstanding scores for ${l.name}. Please update your results as soon as possible.`,
+              recipientLabel: `📬 Recipients: ${participantNames || 'All participants'}`,
+              sendFn: async (title, body) => {
+                await NotificationService.sendToLeagueParticipants(l.id, {
+                  type: 'score_reminder', title, body, leagueId: l.id,
+                });
+              },
+            },
+          ],
+        });
+      });
     });
     // Re-apply active admin search filter
     const inp = document.getElementById('adminLeaguesSearch');

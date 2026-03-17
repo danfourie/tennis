@@ -185,6 +185,84 @@ const MySchool = (() => {
       });
     });
 
+    // Send contextual notification (opposition / master)
+    container.querySelectorAll('.ms-notif-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const leagueId     = btn.dataset.lid;
+        const fixtureId    = btn.dataset.fid;
+        const homeSchoolId = btn.dataset.home;
+        const awaySchoolId = btn.dataset.away;
+        const homeSchoolName = btn.dataset.hname;
+        const awaySchoolName = btn.dataset.aname;
+        const hasScore     = btn.dataset.hasScore === '1';
+        const schoolId     = _activeSchoolId();
+        const isHome       = schoolId === homeSchoolId;
+        const oppSchoolId  = isHome ? awaySchoolId : homeSchoolId;
+        const oppSchoolName = isHome ? awaySchoolName : homeSchoolName;
+        const league       = DB.getLeagues().find(l => l.id === leagueId);
+        const fixtureName  = `${homeSchoolName} vs ${awaySchoolName}`;
+
+        const types = [
+          {
+            value:          'fixture_change_suggestion',
+            label:          '📅 Suggest fixture change — send to master/admin',
+            subject:        `Fixture change request: ${fixtureName}`,
+            body:           `We would like to request a change for the fixture ${fixtureName}${league ? ' in ' + league.name : ''}. Please could we discuss an alternative date, time or venue?`,
+            recipientLabel: '📬 Recipients: Master / Admin users',
+            sendFn: async (title, body) => {
+              await NotificationService.sendToMasters({
+                type: 'fixture_changed', title, body, leagueId, fixtureId,
+              });
+            },
+          },
+          {
+            value:          'general_master',
+            label:          '💬 General message to master/admin',
+            subject:        `Message re: ${fixtureName}`,
+            body:           '',
+            recipientLabel: '📬 Recipients: Master / Admin users',
+            sendFn: async (title, body) => {
+              await NotificationService.sendToMasters({
+                type: 'general_message', title, body, leagueId, fixtureId,
+              });
+            },
+          },
+          {
+            value:          'general_opposition',
+            label:          `💬 General message to ${oppSchoolName}`,
+            subject:        `Message from fixture opponent`,
+            body:           '',
+            recipientLabel: `📬 Recipients: Users of ${oppSchoolName}`,
+            sendFn: async (title, body) => {
+              await NotificationService.sendToSchool(oppSchoolId, {
+                type: 'general_message', title, body, leagueId, fixtureId,
+              });
+            },
+          },
+        ];
+
+        if (hasScore) {
+          types.splice(1, 0, {
+            value:          'score_verification',
+            label:          `✅ Ask ${oppSchoolName} to verify score`,
+            subject:        `Please verify: ${fixtureName}`,
+            body:           `Could you please verify the score for ${fixtureName}? The result has been recorded and is awaiting your confirmation.`,
+            recipientLabel: `📬 Recipients: Users of ${oppSchoolName}`,
+            sendFn: async (title, body) => {
+              await NotificationService.sendToSchool(oppSchoolId, {
+                type: 'score_reminder', title, body, leagueId, fixtureId,
+              });
+            },
+          });
+        }
+
+        NotificationService.openContextModal({
+          title: `Notify — ${fixtureName}`,
+          types,
+        });
+      });
+    });
+
     // Request alternate venue
     container.querySelectorAll('.ms-altvenue-btn').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -415,6 +493,17 @@ const MySchool = (() => {
       }
     }
 
+    // ── Notification button (logged-in non-impersonating school users) ──
+    const notifBtnHtml = Auth.isLoggedIn() && !Auth.isAdmin()
+      ? `<div class="ms-notif-section">
+           <button class="btn btn-xs btn-secondary ms-notif-btn"
+             data-lid="${leagueId}" data-fid="${esc(f.id)}"
+             data-home="${esc(f.homeSchoolId || '')}" data-away="${esc(f.awaySchoolId || '')}"
+             data-hname="${esc(f.homeSchoolName || '')}" data-aname="${esc(f.awaySchoolName || '')}"
+             data-has-score="${hasScore ? '1' : '0'}">🔔 Notify</button>
+         </div>`
+      : '';
+
     return `<div class="myschool-fixture ${isHome ? 'home-fixture' : 'away-fixture'}${isClash && !f.clashOkayed ? ' ms-fixture-clash' : ''}">
       <div class="fixture-meta">
         <span class="fixture-date">${f.date ? formatDate(f.date) : '—'}</span>
@@ -432,6 +521,7 @@ const MySchool = (() => {
       </div>
       ${verifyHtml}
       ${clashHtml}
+      ${notifBtnHtml}
     </div>`;
   }
 
