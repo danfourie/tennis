@@ -115,5 +115,28 @@ service cloud.firestore {
       allow update: if false;
       allow delete: if false;
     }
+
+    // ── Notifications ────────────────────────────────────────────────────────
+    // Each document is addressed to one user (uid field).
+    // Users can only read/update-as-read their own notifications.
+    // Admin (master) can create notifications for any uid.
+    // Regular signed-in users can create notifications addressed to themselves
+    // (needed for the login-hook reminder checks).
+    match /notifications/{docId} {
+      allow read:   if request.auth != null && resource.data.uid == request.auth.uid;
+      allow read:   if isMaster();
+
+      // Self-create (reminder checks) or admin broadcast
+      allow create: if isSignedIn() && request.resource.data.uid == request.auth.uid;
+      allow create: if isMaster();
+
+      // Only the recipient may mark a notification read
+      allow update: if request.auth != null
+                    && resource.data.uid == request.auth.uid
+                    && request.resource.data.read == true
+                    && request.resource.data.uid == resource.data.uid;
+
+      allow delete: if isMaster();
+    }
   }
 }

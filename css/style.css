@@ -873,3 +873,139 @@ body {
   text-align: center;
   box-sizing: border-box;
 }
+
+/* ===== NOTIFICATION BELL + PANEL ===== */
+
+/* Bell button in the header */
+.btn-notif {
+  position: relative;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1.2rem;
+  line-height: 1;
+  padding: 4px 6px;
+  color: #fff;
+  border-radius: 6px;
+  transition: background .15s;
+}
+.btn-notif:hover { background: rgba(255,255,255,.15); }
+
+/* Unread count badge — red circle on bell */
+.notif-badge {
+  position: absolute;
+  top: -2px;
+  right: -4px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 9px;
+  background: #ef4444;
+  color: #fff;
+  font-size: .65rem;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+  pointer-events: none;
+}
+
+/* Floating notification dropdown panel */
+.notif-panel {
+  position: fixed;
+  top: 56px;        /* just below the header */
+  right: 1rem;
+  width: 340px;
+  max-height: 480px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.14);
+  z-index: 300;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.notif-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: .65rem 1rem;
+  border-bottom: 1px solid #e5e7eb;
+  background: #f9fafb;
+}
+.notif-panel-title {
+  font-weight: 600;
+  font-size: .9rem;
+  color: #111827;
+}
+.notif-mark-all {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: .78rem;
+  color: #16a34a;
+  font-weight: 500;
+  padding: 0;
+}
+.notif-mark-all:hover { text-decoration: underline; }
+
+/* Scrollable list */
+.notif-list {
+  overflow-y: auto;
+  flex: 1;
+}
+
+/* Individual notification row */
+.notif-item {
+  padding: .65rem 1rem;
+  border-bottom: 1px solid #f3f4f6;
+  cursor: pointer;
+  transition: background .12s;
+}
+.notif-item:last-child { border-bottom: none; }
+.notif-item:hover      { background: #f9fafb; }
+
+/* Unread items get a green left accent */
+.notif-item.unread {
+  background: #f0fdf4;
+  border-left: 3px solid #16a34a;
+}
+.notif-item.unread:hover { background: #dcfce7; }
+
+.notif-item-title {
+  font-size: .85rem;
+  font-weight: 600;
+  color: #111827;
+  margin-bottom: .2rem;
+}
+.notif-item-body {
+  font-size: .8rem;
+  color: #6b7280;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  margin-bottom: .2rem;
+}
+.notif-item-time {
+  font-size: .72rem;
+  color: #9ca3af;
+}
+
+/* Empty state */
+.notif-empty {
+  padding: 2rem 1rem;
+  text-align: center;
+  color: #9ca3af;
+  font-size: .88rem;
+  font-style: italic;
+}
+
+/* Notification composer textarea in admin panel */
+#subtab-notifications textarea {
+  width: 100%;
+  resize: vertical;
+  font-family: inherit;
+  font-size: .9rem;
+}

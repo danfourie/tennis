@@ -71,6 +71,15 @@ const Admin = (() => {
     // Password change
     document.getElementById('changePasswordBtn').addEventListener('click', changePassword);
 
+    // Notification composer — send button
+    document.getElementById('sendNotifBtn').addEventListener('click', () => {
+      const title    = (document.getElementById('notifTitle').value || '').trim();
+      const body     = (document.getElementById('notifBody').value  || '').trim();
+      const selVal   = document.getElementById('notifRecipientGroup').value || 'all';
+      const [groupType, groupId] = selVal.includes(':') ? selVal.split(':') : [selVal, null];
+      NotificationService.sendGeneral(title, body, groupType, groupId);
+    });
+
     // Wire up static search inputs (once; survives re-renders)
     _initSearch('venuesSearch',          '#venuesList',            '.admin-list-item');
     _initSearch('schoolsSearch',         '#schoolsList',           '.admin-list-item');
@@ -91,10 +100,11 @@ const Admin = (() => {
       panel.classList.toggle('active', panel.id === `subtab-${tab}`);
     });
     // Lazy-render heavy tabs when first opened
-    if (tab === 'leagues')     Leagues.renderAdmin();
-    if (tab === 'tournaments') Tournaments.renderAdmin();
-    if (tab === 'users')       renderUsers();
-    if (tab === 'settings')    renderAuditLog();
+    if (tab === 'leagues')       Leagues.renderAdmin();
+    if (tab === 'tournaments')   Tournaments.renderAdmin();
+    if (tab === 'users')         renderUsers();
+    if (tab === 'settings')      renderAuditLog();
+    if (tab === 'notifications') NotificationService.renderComposer();
   }
 
   function refresh() { render(); }
@@ -105,10 +115,11 @@ const Admin = (() => {
     renderClosures();
     renderPendingBookings();
     // Only re-render active heavy tabs to avoid unnecessary work
-    if (_activeTab === 'leagues')     Leagues.renderAdmin();
-    if (_activeTab === 'tournaments') Tournaments.renderAdmin();
-    if (_activeTab === 'users')       renderUsers();
-    if (_activeTab === 'settings')    renderAuditLog();
+    if (_activeTab === 'leagues')       Leagues.renderAdmin();
+    if (_activeTab === 'tournaments')   Tournaments.renderAdmin();
+    if (_activeTab === 'users')         renderUsers();
+    if (_activeTab === 'settings')      renderAuditLog();
+    if (_activeTab === 'notifications') NotificationService.renderComposer();
   }
 
   // ════════════════════════════════════════════════════════════

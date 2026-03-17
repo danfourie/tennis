@@ -37,6 +37,7 @@ const Auth = (() => {
       } else {
         _profile = null;
         _role    = null;
+        if (typeof NotificationService !== 'undefined') NotificationService.unload();
       }
       _updateUI();
       _refreshViews();
@@ -56,6 +57,7 @@ const Auth = (() => {
         _profile = doc.data();
         _role    = _profile.role || 'user';
         console.log('[Auth] profile loaded — uid:', uid, '| role:', _role);
+        if (typeof NotificationService !== 'undefined') NotificationService.loadForCurrentUser();
       } else {
         // Profile missing — create it now (happens when Firestore rules blocked
         // the write during registration, or when the DB was empty at first run).
@@ -74,6 +76,7 @@ const Auth = (() => {
         await ref.set(_profile);
         _role = role;
         console.log('[Auth] profile created — role:', _role);
+        if (typeof NotificationService !== 'undefined') NotificationService.loadForCurrentUser();
       }
     } catch (err) {
       console.warn('[Auth] Could not load/create user profile:', err.code, err.message);

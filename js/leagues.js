@@ -359,6 +359,15 @@ const Leagues = (() => {
       DB.addLeague(league);
       DB.writeAudit('league_created', 'league', `Created league: ${name} (${league.fixtures.length} fixtures)`, league.id, name);
       toast(`League created — ${league.fixtures.length} fixtures generated ✓`, 'success');
+      // Notify all participating school contacts about the new league
+      if (typeof NotificationService !== 'undefined') {
+        NotificationService.sendToLeagueParticipants(league.id, {
+          type:     'league_created',
+          title:    `New league: ${name}`,
+          body:     `${name}${league.division ? ' · ' + league.division : ''} has been created. Your fixtures start ${league.startDate ? formatDate(league.startDate) : 'soon'}.`,
+          leagueId: league.id,
+        });
+      }
     }
 
     Modal.close('leagueModal');
@@ -875,12 +884,37 @@ const Leagues = (() => {
           toast('Change request applied ✓', 'success');
           openLeagueDetail(id, isAdmin);
           Calendar.refresh();
+          // Notify both schools about the updated fixture
+          if (typeof NotificationService !== 'undefined') {
+            NotificationService.sendToSchoolGroup(
+              [fixture.homeSchoolId, fixture.awaySchoolId].filter(Boolean),
+              {
+                type:      'fixture_changed',
+                title:     'Fixture updated',
+                body:      `${fixture.homeSchoolName || 'Home'} vs ${fixture.awaySchoolName || 'Away'} has been rescheduled to ${formatDate(fixture.date)}${fixture.venueName ? ' at ' + fixture.venueName : ''}.`,
+                leagueId:  league.id,
+                fixtureId: fixture.id,
+              }
+            );
+          }
         });
       });
       body.querySelectorAll('.reject-cr-btn').forEach(btn => {
         btn.addEventListener('click', () => {
           const fixture = (league.fixtures || []).find(f => f.id === btn.dataset.fid);
+          const crUid   = fixture && fixture.changeRequest ? fixture.changeRequest.requestedBy : null;
           if (fixture) { delete fixture.changeRequest; DB.updateLeague(league); }
+          // Notify the user who submitted the request that it was dismissed
+          if (crUid && typeof NotificationService !== 'undefined') {
+            NotificationService.send({
+              type:      'fixture_changed',
+              title:     'Change request not approved',
+              body:      `Your change request for ${fixture.homeSchoolName || 'Home'} vs ${fixture.awaySchoolName || 'Away'} was not approved.`,
+              recipientUids: [crUid],
+              leagueId:  league.id,
+              fixtureId: fixture.id,
+            });
+          }
           toast('Request dismissed');
           openLeagueDetail(id, isAdmin);
         });
@@ -1279,5 +1313,5 @@ const Leagues = (() => {
     openLeagueDetail(reopenId || leagueId, isAdmin);
   }
 
-  return { init, refresh, render, renderAdmin, openLeagueModal, saveScore, verifyScore };
+  return { init, refresh, render, renderAdmin, openLeagueModal, openLeagueDetail, saveScore, verifyScore };
 })();

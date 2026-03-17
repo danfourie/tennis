@@ -25,6 +25,9 @@
       </nav>
       <div class="header-actions">
         <span class="user-badge hidden" id="userBadge"></span>
+        <button class="btn-notif user-only hidden" id="notifBell" title="Notifications">
+          🔔<span class="notif-badge hidden" id="notifBadge"></span>
+        </button>
         <button class="btn btn-outline" id="registerBtn">Register</button>
         <button class="btn btn-outline" id="loginBtn">Login</button>
         <button class="btn btn-outline hidden" id="logoutBtn">Logout</button>
@@ -103,6 +106,7 @@
         <button class="admin-subtab" data-subtab="schools">🏫 Schools</button>
         <button class="admin-subtab" data-subtab="users">👥 Users</button>
         <button class="admin-subtab" data-subtab="settings">⚙️ Settings</button>
+        <button class="admin-subtab" data-subtab="notifications">🔔 Notifications</button>
       </div>
 
       <!-- Overview Tab -->
@@ -191,6 +195,31 @@
           <div class="admin-card admin-card-full">
             <h3>📋 Audit Log</h3>
             <div id="auditList"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Notifications Tab -->
+      <div class="admin-tab-panel hidden" id="subtab-notifications">
+        <div class="admin-grid">
+          <div class="admin-card admin-card-full">
+            <h3>📢 Send Notification</h3>
+            <p class="text-muted" style="margin-bottom:1rem">Send an in-app notification to users. They will see it next time they open the app or when they are already logged in.</p>
+            <div class="form-group">
+              <label for="notifTitle">Title</label>
+              <input type="text" id="notifTitle" placeholder="e.g. Reminder: submit your scores" maxlength="80">
+            </div>
+            <div class="form-group">
+              <label for="notifBody">Message</label>
+              <textarea id="notifBody" rows="3" placeholder="Write your message here…" maxlength="400"></textarea>
+            </div>
+            <div class="form-group">
+              <label for="notifRecipientGroup">Recipients</label>
+              <select id="notifRecipientGroup">
+                <option value="all">📣 All Users</option>
+              </select>
+            </div>
+            <button class="btn btn-primary" id="sendNotifBtn">Send Notification</button>
           </div>
         </div>
       </div>
@@ -650,9 +679,20 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 
   <!-- App Scripts -->
+  <!-- Notification Panel (fixed dropdown below bell icon) -->
+  <div id="notifPanel" class="notif-panel hidden">
+    <div class="notif-panel-header">
+      <span class="notif-panel-title">🔔 Notifications</span>
+      <button class="notif-mark-all" id="notifMarkAll">Mark all read</button>
+    </div>
+    <div id="notifList" class="notif-list"></div>
+  </div>
+
+  <!-- App Scripts -->
   <script src="js/firebase-config.js"></script>
   <script src="js/data.js"></script>
   <script src="js/auth.js"></script>
+  <script src="js/notifications.js"></script>
   <script src="js/calendar.js"></script>
   <script src="js/leagues.js"></script>
   <script src="js/tournaments.js"></script>

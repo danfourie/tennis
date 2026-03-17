@@ -121,6 +121,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // ── Initialise UI modules ───────────────────────────────
     Auth.init();
+    NotificationService.init();
     Calendar.init();
     Leagues.init();
     Tournaments.init();

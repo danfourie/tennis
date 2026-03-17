@@ -16,13 +16,14 @@
 // IN-MEMORY CACHE
 // ============================================================
 const _cache = {
-  venues:      [],
-  schools:     [],
-  bookings:    [],
-  leagues:     [],
-  tournaments: [],
-  closures:    [],
-  users:       [],   // loaded on demand by master
+  venues:        [],
+  schools:       [],
+  bookings:      [],
+  leagues:       [],
+  tournaments:   [],
+  closures:      [],
+  users:         [],   // loaded on demand by master
+  notifications: [],   // loaded per-user via subscribeNotifications
   settings: {
     timeSlotStart: '07:00',
     timeSlotEnd:   '21:00',
@@ -190,6 +191,38 @@ const DB = {
   deleteUserProfile(uid) {
     _cache.users = _cache.users.filter(u => u.uid !== uid);
     _doc('users', uid).delete().catch(console.error);
+  },
+
+  // ── Notifications ─────────────────────────────────────────
+  /**
+   * Write a single notification document (fan-out: one doc per recipient uid).
+   * Does NOT update the in-memory cache — the per-user onSnapshot listener handles that.
+   */
+  writeNotification(notif) {
+    _doc('notifications', notif.id).set(notif).catch(console.error);
+  },
+
+  /**
+   * Attach a real-time listener for a single user's notifications.
+   * Returns the unsubscribe function.
+   */
+  subscribeNotifications(uid, callback) {
+    return _col('notifications')
+      .where('uid', '==', uid)
+      .orderBy('createdAt', 'desc')
+      .limit(50)
+      .onSnapshot(
+        snap => callback(snap.docs.map(d => d.data())),
+        err  => console.warn('Firestore listener [notifications]:', err)
+      );
+  },
+
+  markNotificationRead(id) {
+    _doc('notifications', id).update({ read: true }).catch(console.error);
+  },
+
+  markAllNotificationsRead(ids) {
+    ids.forEach(id => _doc('notifications', id).update({ read: true }).catch(console.error));
   },
 
   // ── Audit Log ─────────────────────────────────────────────
