@@ -328,9 +328,17 @@ const NotificationService = (() => {
   async function fetchForSchool(schoolId) {
     await DB.loadUsers();   // always reload to get fresh data
     const uids = DB.getUsers().filter(u => u.schoolId === schoolId).map(u => u.uid);
-    if (uids.length === 0) return { noUsers: true, items: [] };
 
     const db = firebase.firestore();
+
+    if (uids.length === 0) {
+      // No school users registered — show all notifications (admin read-all access)
+      // so the master can see what has been broadcast
+      const snap = await db.collection('notifications').get();
+      const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      return { noUsers: true, items: all.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).slice(0, 50) };
+    }
+
     const chunks = [];
     for (let i = 0; i < uids.length; i += 10) chunks.push(uids.slice(i, i + 10));
 
@@ -352,16 +360,15 @@ const NotificationService = (() => {
     el.innerHTML = `<p class="text-muted" style="padding:.4rem 0;font-style:italic">Loading…</p>`;
     try {
       const result = await fetchForSchool(schoolId);
-      if (result.noUsers) {
-        el.innerHTML = `<p class="text-muted" style="padding:.4rem 0;font-style:italic">No registered users for this school — notifications cannot be delivered until a school contact signs up.</p>`;
-        return;
-      }
       const notifs = result.items;
+      const noUsersBanner = result.noUsers
+        ? `<p class="text-muted" style="padding:.2rem 0 .6rem;font-style:italic;font-size:.85rem">⚠️ No registered users for this school yet — showing all sent notifications.</p>`
+        : '';
       if (notifs.length === 0) {
-        el.innerHTML = `<p class="text-muted" style="padding:.4rem 0;font-style:italic">No notifications for this school yet.</p>`;
+        el.innerHTML = noUsersBanner + `<p class="text-muted" style="padding:.4rem 0;font-style:italic">No notifications have been sent yet.</p>`;
         return;
       }
-      el.innerHTML = notifs.map(n => `
+      el.innerHTML = noUsersBanner + notifs.map(n => `
         <div class="notif-item${n.read ? '' : ' unread'}">
           <div class="notif-item-title">${_typeIcon(n.type)} ${esc(n.title)}</div>
           <div class="notif-item-body">${esc(n.body)}</div>
