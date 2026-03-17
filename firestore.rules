@@ -129,11 +129,11 @@ service cloud.firestore {
     // (needed for the login-hook reminder checks).
     match /notifications/{docId} {
       allow read:   if request.auth != null && resource.data.uid == request.auth.uid;
-      allow read:   if isMaster();
+      allow read:   if isAdminRole();
 
       // Self-create (reminder checks) or admin broadcast
       allow create: if isSignedIn() && request.resource.data.uid == request.auth.uid;
-      allow create: if isMaster();
+      allow create: if isAdminRole();
 
       // Only the recipient may mark a notification read
       allow update: if request.auth != null

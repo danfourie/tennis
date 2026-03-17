@@ -332,17 +332,14 @@ const NotificationService = (() => {
     const db = firebase.firestore();
 
     if (uids.length === 0) {
-      // No school-specific users — query by ALL known user UIDs so master can
-      // see everything that has been broadcast (avoids unfiltered collection query)
-      const allUids = DB.getUsers().map(u => u.uid).filter(Boolean);
-      if (allUids.length === 0) return { noUsers: true, items: [] };
-      const allChunks = [];
-      for (let i = 0; i < allUids.length; i += 10) allChunks.push(allUids.slice(i, i + 10));
-      const allSnaps = await Promise.all(
-        allChunks.map(chunk => db.collection('notifications').where('uid', 'in', chunk).get())
-      );
-      const all = [];
-      allSnaps.forEach(s => s.docs.forEach(d => all.push({ id: d.id, ...d.data() })));
+      // No school-specific users — fall back to the current admin's own notifications.
+      // The admin receives a copy of every broadcast ("send to all"), so this shows
+      // everything sent without requiring elevated read permissions on other users' docs.
+      const profile = Auth.getProfile();
+      const adminUid = profile ? profile.uid : null;
+      if (!adminUid) return { noUsers: true, items: [] };
+      const snap = await db.collection('notifications').where('uid', '==', adminUid).get();
+      const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       return { noUsers: true, items: all.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).slice(0, 50) };
     }
 
