@@ -190,7 +190,19 @@ const Admin = (() => {
   // ════════════════════════════════════════════════════════════
   // USERS MANAGEMENT
   // ════════════════════════════════════════════════════════════
-  let _userRoleFilter = 'all';
+  let _userRoleFilter   = 'all';
+  let _userSchoolFilter = '';
+
+  function _applyUserFilters() {
+    const q = (document.getElementById('usersSearch')?.value || '').toLowerCase().trim();
+    document.querySelectorAll('#usersList .admin-list-item').forEach(item => {
+      const roleOk   = _userRoleFilter === 'all' || item.dataset.role === _userRoleFilter;
+      const schoolOk = !_userSchoolFilter
+                    || (_userSchoolFilter === '__none__' ? item.dataset.school === '' : item.dataset.school === _userSchoolFilter);
+      const textOk   = !q || item.textContent.toLowerCase().includes(q);
+      item.style.display = (roleOk && schoolOk && textOk) ? '' : 'none';
+    });
+  }
 
   async function renderUsers() {
     const el = document.getElementById('usersList');
@@ -210,18 +222,35 @@ const Admin = (() => {
     const countEl = document.getElementById('usersCount');
     if (countEl) countEl.textContent = users.length;
 
-    // Wire role filter buttons (once per render)
+    const schools = DB.getSchools();
+
+    // Populate school filter dropdown (preserve current selection)
+    const schoolSel = document.getElementById('usersSchoolFilter');
+    if (schoolSel) {
+      const prev = schoolSel.value;
+      schoolSel.innerHTML = `<option value="">🏫 All Schools</option>` +
+        `<option value="__none__">— No school</option>` +
+        schools.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('');
+      schoolSel.value = prev;
+      schoolSel.onchange = () => {
+        _userSchoolFilter = schoolSel.value;
+        _applyUserFilters();
+      };
+    }
+
+    // Wire role filter buttons
     document.querySelectorAll('.role-filter-btn').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.role === _userRoleFilter);
       btn.onclick = () => {
         _userRoleFilter = btn.dataset.role;
         document.querySelectorAll('.role-filter-btn').forEach(b => b.classList.toggle('active', b.dataset.role === _userRoleFilter));
-        document.querySelectorAll('#usersList .admin-list-item').forEach(item => {
-          const role = item.dataset.role;
-          item.style.display = (_userRoleFilter === 'all' || role === _userRoleFilter) ? '' : 'none';
-        });
+        _applyUserFilters();
       };
     });
+
+    // Wire search (re-bind each render to pick up new list)
+    const searchInp = document.getElementById('usersSearch');
+    if (searchInp) searchInp.oninput = _applyUserFilters;
 
     if (users.length === 0) {
       el.innerHTML = `<p class="text-muted">No registered users yet.</p>`;
@@ -229,16 +258,15 @@ const Admin = (() => {
     }
 
     const currentUid = Auth.getUser() ? Auth.getUser().uid : null;
-    const schools    = DB.getSchools();
 
     el.innerHTML = `<div class="admin-list">` +
       users.map(u => {
-        const school  = schools.find(s => s.id === u.schoolId);
-        const isSelf  = u.uid === currentUid;
-        const roleIcon = u.role === 'master' ? '🔑' : u.role === 'admin' ? '🛡️' : '👤';
-        const visible  = _userRoleFilter === 'all' || u.role === _userRoleFilter;
+        const school    = schools.find(s => s.id === u.schoolId);
+        const schoolKey = u.schoolId || '';
+        const isSelf    = u.uid === currentUid;
+        const roleIcon  = u.role === 'master' ? '🔑' : u.role === 'admin' ? '🛡️' : '👤';
 
-        return `<div class="admin-list-item" data-role="${esc(u.role || 'user')}" ${!visible ? 'style="display:none"' : ''}>
+        return `<div class="admin-list-item" data-role="${esc(u.role || 'user')}" data-school="${esc(schoolKey)}">
           <div>
             <strong>${roleIcon} ${esc(u.displayName || u.email)}</strong>
             ${isSelf ? '<span class="badge badge-gray" style="font-size:.7rem;margin-left:.3rem">You</span>' : ''}
@@ -297,8 +325,8 @@ const Admin = (() => {
       });
     });
 
-    // Re-apply active search filter after re-render
-    _applySearch('usersSearch', '#usersList', '.admin-list-item');
+    // Re-apply all active filters after re-render
+    _applyUserFilters();
   }
 
   // ════════════════════════════════════════════════════════════

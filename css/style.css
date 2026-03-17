@@ -1012,6 +1012,15 @@ body {
 }
 .role-filter-btn:hover { border-color: var(--primary); color: var(--primary); }
 .role-filter-btn.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+.users-school-filter {
+  padding: .25rem .5rem;
+  border-radius: 8px;
+  border: 1.5px solid var(--border);
+  background: #fff;
+  font-size: .8rem;
+  color: var(--text-muted);
+  cursor: pointer;
+}
 
 /* Read messages divider */
 .notif-read-divider {
