@@ -326,9 +326,9 @@ const NotificationService = (() => {
    * Requires master role (Firestore rules allow master to read all notifications).
    */
   async function fetchForSchool(schoolId) {
-    await _ensureUsers();
+    await DB.loadUsers();   // always reload to get fresh data
     const uids = DB.getUsers().filter(u => u.schoolId === schoolId).map(u => u.uid);
-    if (uids.length === 0) return [];
+    if (uids.length === 0) return { noUsers: true, items: [] };
 
     const db = firebase.firestore();
     const chunks = [];
@@ -339,7 +339,7 @@ const NotificationService = (() => {
     );
     const all = [];
     snaps.forEach(s => s.docs.forEach(d => all.push({ id: d.id, ...d.data() })));
-    return all.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).slice(0, 50);
+    return { noUsers: false, items: all.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).slice(0, 50) };
   }
 
   /**
@@ -351,7 +351,12 @@ const NotificationService = (() => {
     if (!el) return;
     el.innerHTML = `<p class="text-muted" style="padding:.4rem 0;font-style:italic">Loading…</p>`;
     try {
-      const notifs = await fetchForSchool(schoolId);
+      const result = await fetchForSchool(schoolId);
+      if (result.noUsers) {
+        el.innerHTML = `<p class="text-muted" style="padding:.4rem 0;font-style:italic">No registered users for this school — notifications cannot be delivered until a school contact signs up.</p>`;
+        return;
+      }
+      const notifs = result.items;
       if (notifs.length === 0) {
         el.innerHTML = `<p class="text-muted" style="padding:.4rem 0;font-style:italic">No notifications for this school yet.</p>`;
         return;

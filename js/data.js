@@ -209,11 +209,13 @@ const DB = {
   subscribeNotifications(uid, callback) {
     return _col('notifications')
       .where('uid', '==', uid)
-      .orderBy('createdAt', 'desc')
-      .limit(50)
       .onSnapshot(
-        snap => callback(snap.docs.map(d => d.data())),
-        err  => console.warn('Firestore listener [notifications]:', err)
+        snap => {
+          const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+          docs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+          callback(docs.slice(0, 50));
+        },
+        err => console.warn('Firestore listener [notifications]:', err)
       );
   },
 
