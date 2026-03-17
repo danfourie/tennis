@@ -116,8 +116,8 @@ const Leagues = (() => {
       : played > 0
         ? `<span class="badge badge-amber">In Progress</span>`
         : `<span class="badge badge-gray">Pending</span>`;
-    const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-    const dayLabel = l.playingDay !== undefined ? ` · ${DAYS[l.playingDay]}s` : '';
+    const DAYS = ['Sundays','Mondays','Tuesdays','Wednesdays','Thursdays','Fridays','Saturdays'];
+    const dayLabel = l.playingDay !== undefined ? ` · ${DAYS[l.playingDay]}` : '';
 
     return `<div class="card">
       <div class="card-header">

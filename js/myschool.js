@@ -399,8 +399,8 @@ const MySchool = (() => {
       if (haCounts[ak] !== undefined) haCounts[ak].away++;
     });
 
-    const DAYS     = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-    const dayLabel = league.playingDay !== undefined ? ` · ${DAYS[league.playingDay]}s` : '';
+    const DAYS     = ['Sundays','Mondays','Tuesdays','Wednesdays','Thursdays','Fridays','Saturdays'];
+    const dayLabel = league.playingDay !== undefined ? ` · ${DAYS[league.playingDay]}` : '';
 
     let html = `<div class="myschool-league card">
       <div class="card-header">
