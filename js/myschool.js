@@ -155,7 +155,31 @@ const MySchool = (() => {
       html += myLeagues.map(l => _leagueSection(l, schoolId)).join('');
     }
 
+    // When impersonating, append a panel showing all notifications sent to this school
+    if (_impersonateSchoolId) {
+      html += `<div class="card" style="margin-top:1.25rem">
+        <div class="card-header" style="display:flex;align-items:center;justify-content:space-between">
+          <div class="card-title">📬 Notifications received by this school</div>
+          <button class="btn btn-xs btn-secondary" id="refreshSchoolNotifBtn">↻ Refresh</button>
+        </div>
+        <div class="card-body" style="padding:.5rem 1rem">
+          <div id="schoolNotifList"></div>
+        </div>
+      </div>`;
+    }
+
     container.innerHTML = html;
+
+    // If impersonating, load school notifications asynchronously
+    if (_impersonateSchoolId) {
+      NotificationService.renderSchoolNotifications(_impersonateSchoolId, 'schoolNotifList');
+      const refreshBtn = document.getElementById('refreshSchoolNotifBtn');
+      if (refreshBtn) {
+        refreshBtn.addEventListener('click', () =>
+          NotificationService.renderSchoolNotifications(_impersonateSchoolId, 'schoolNotifList')
+        );
+      }
+    }
 
     // Score-entry listeners
     container.querySelectorAll('.my-score-input').forEach(inp => {

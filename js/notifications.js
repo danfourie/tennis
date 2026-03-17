@@ -320,6 +320,54 @@ const NotificationService = (() => {
     send({ ...payload, recipientUids: uids });
   }
 
+  // ── School notifications (admin impersonation view) ──────────
+  /**
+   * Fetch all notifications addressed to users of a given school.
+   * Requires master role (Firestore rules allow master to read all notifications).
+   */
+  async function fetchForSchool(schoolId) {
+    await _ensureUsers();
+    const uids = DB.getUsers().filter(u => u.schoolId === schoolId).map(u => u.uid);
+    if (uids.length === 0) return [];
+
+    const db = firebase.firestore();
+    const chunks = [];
+    for (let i = 0; i < uids.length; i += 10) chunks.push(uids.slice(i, i + 10));
+
+    const snaps = await Promise.all(
+      chunks.map(chunk => db.collection('notifications').where('uid', 'in', chunk).get())
+    );
+    const all = [];
+    snaps.forEach(s => s.docs.forEach(d => all.push({ id: d.id, ...d.data() })));
+    return all.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).slice(0, 50);
+  }
+
+  /**
+   * Render notifications for a school into a container element.
+   * Used by the My School impersonation view.
+   */
+  async function renderSchoolNotifications(schoolId, containerId) {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    el.innerHTML = `<p class="text-muted" style="padding:.4rem 0;font-style:italic">Loading…</p>`;
+    try {
+      const notifs = await fetchForSchool(schoolId);
+      if (notifs.length === 0) {
+        el.innerHTML = `<p class="text-muted" style="padding:.4rem 0;font-style:italic">No notifications for this school yet.</p>`;
+        return;
+      }
+      el.innerHTML = notifs.map(n => `
+        <div class="notif-item${n.read ? '' : ' unread'}">
+          <div class="notif-item-title">${_typeIcon(n.type)} ${esc(n.title)}</div>
+          <div class="notif-item-body">${esc(n.body)}</div>
+          <div class="notif-item-time">${_relativeTime(n.createdAt)} · ${n.read ? '✓ Read' : '● Unread'}</div>
+        </div>`).join('');
+    } catch (err) {
+      console.error('[NotificationService] renderSchoolNotifications error:', err);
+      el.innerHTML = `<p class="text-muted" style="padding:.4rem 0">Could not load notifications: ${esc(err.message)}</p>`;
+    }
+  }
+
   // ── Admin general message ────────────────────────────────────
   async function sendGeneral(title, body, groupType, groupId) {
     if (!title || !body) { toast('Title and message are required', 'error'); return; }
@@ -475,6 +523,8 @@ const NotificationService = (() => {
     sendToLeagueParticipants,
     sendToAll,
     sendToMasters,
+    fetchForSchool,
+    renderSchoolNotifications,
     sendGeneral,
     checkPendingReminders,
     renderComposer,
