@@ -190,6 +190,8 @@ const Admin = (() => {
   // ════════════════════════════════════════════════════════════
   // USERS MANAGEMENT
   // ════════════════════════════════════════════════════════════
+  let _userRoleFilter = 'all';
+
   async function renderUsers() {
     const el = document.getElementById('usersList');
     if (!el) return;
@@ -202,6 +204,23 @@ const Admin = (() => {
       const ro = (roleOrder[a.role] ?? 9) - (roleOrder[b.role] ?? 9);
       if (ro !== 0) return ro;
       return (a.displayName || a.email || '').localeCompare(b.displayName || b.email || '');
+    });
+
+    // Update count badge
+    const countEl = document.getElementById('usersCount');
+    if (countEl) countEl.textContent = users.length;
+
+    // Wire role filter buttons (once per render)
+    document.querySelectorAll('.role-filter-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.role === _userRoleFilter);
+      btn.onclick = () => {
+        _userRoleFilter = btn.dataset.role;
+        document.querySelectorAll('.role-filter-btn').forEach(b => b.classList.toggle('active', b.dataset.role === _userRoleFilter));
+        document.querySelectorAll('#usersList .admin-list-item').forEach(item => {
+          const role = item.dataset.role;
+          item.style.display = (_userRoleFilter === 'all' || role === _userRoleFilter) ? '' : 'none';
+        });
+      };
     });
 
     if (users.length === 0) {
@@ -217,19 +236,21 @@ const Admin = (() => {
         const school  = schools.find(s => s.id === u.schoolId);
         const isSelf  = u.uid === currentUid;
         const roleIcon = u.role === 'master' ? '🔑' : u.role === 'admin' ? '🛡️' : '👤';
+        const visible  = _userRoleFilter === 'all' || u.role === _userRoleFilter;
 
-        return `<div class="admin-list-item">
+        return `<div class="admin-list-item" data-role="${esc(u.role || 'user')}" ${!visible ? 'style="display:none"' : ''}>
           <div>
             <strong>${roleIcon} ${esc(u.displayName || u.email)}</strong>
             ${isSelf ? '<span class="badge badge-gray" style="font-size:.7rem;margin-left:.3rem">You</span>' : ''}
             <div class="text-muted">${esc(u.email)}</div>
             <div class="text-muted">
               <span class="role-badge ${u.role === 'master' ? 'master' : u.role === 'admin' ? 'admin' : 'user'}">${u.role}</span>
-              ${school ? ` · ${esc(school.name)}` : ''}
+              ${school ? ` · <span style="color:${school.color}">●</span> ${esc(school.name)}` : ''}
               ${u.createdAt ? ` · Joined ${new Date(u.createdAt).toLocaleDateString('en-ZA',{day:'numeric',month:'short',year:'numeric'})}` : ''}
             </div>
           </div>
           <div class="item-actions">
+            <label style="font-size:.75rem;color:var(--text-muted);margin-right:.25rem">Role:</label>
             <select class="role-select" data-user-uid="${u.uid}" data-current-role="${u.role}" style="padding:.2rem .4rem;border-radius:6px;border:1.5px solid var(--border);font-size:.8rem">
               <option value="user"  ${u.role === 'user'   ? 'selected' : ''}>User</option>
               <option value="admin" ${u.role === 'admin'  ? 'selected' : ''}>Admin</option>

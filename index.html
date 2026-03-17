@@ -170,8 +170,14 @@
       <!-- Users Tab -->
       <div class="admin-tab-panel hidden" id="subtab-users">
         <div class="admin-panel-header">
-          <h3>👥 Users</h3>
-          <input type="search" id="usersSearch" class="search-input" placeholder="🔍 Search users…">
+          <h3>👥 Users <span class="badge badge-gray" id="usersCount" style="font-size:.75rem;vertical-align:middle"></span></h3>
+          <input type="search" id="usersSearch" class="search-input" placeholder="🔍 Search by name, email or school…">
+        </div>
+        <div class="users-role-filters" id="usersRoleFilters">
+          <button class="role-filter-btn active" data-role="all">All</button>
+          <button class="role-filter-btn" data-role="master">🔑 Master</button>
+          <button class="role-filter-btn" data-role="admin">🛡️ Admin</button>
+          <button class="role-filter-btn" data-role="user">👤 User</button>
         </div>
         <div id="usersList"></div>
       </div>
