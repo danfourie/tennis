@@ -820,7 +820,7 @@ const Leagues = (() => {
     const okayBtn = Auth.isAdmin()
       ? `<button class="btn btn-xs btn-warning okay-clash-btn" data-lid="${leagueId}" data-fid="${f.id}">Okay Clash</button>`
       : '';
-    return `<div class="fixture-clash-badge">⚠️ Venue clash ${okayBtn}</div>`;
+    return `<div class="fixture-clash-badge">⚠️ Potential venue clash ${okayBtn}</div>`;
   }
 
   /** Change-request badge shown in admin fixtures tab. */
