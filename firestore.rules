@@ -24,6 +24,11 @@ service cloud.firestore {
       return request.auth != null && getRole() == 'master';
     }
 
+    // True when the signed-in user has role == 'master' OR 'admin'.
+    function isAdminRole() {
+      return request.auth != null && (getRole() == 'master' || getRole() == 'admin');
+    }
+
     // True for any signed-in user (regardless of role).
     function isSignedIn() {
       return request.auth != null;
@@ -110,7 +115,7 @@ service cloud.firestore {
 
     // ── Audit Log ────────────────────────────────────────────────────────────
     match /auditLog/{docId} {
-      allow read:   if isMaster();
+      allow read:   if isAdminRole();
       allow create: if isSignedIn();
       allow update: if false;
       allow delete: if false;
