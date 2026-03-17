@@ -200,12 +200,28 @@ const MySchool = (() => {
     // Request reschedule
     container.querySelectorAll('.ms-reschedule-btn').forEach(btn => {
       btn.addEventListener('click', () => {
-        const newDate = prompt('Enter requested new date (YYYY-MM-DD):');
-        if (!newDate) return;
-        const newTime = prompt('Enter requested new time (HH:MM) or leave blank to keep current:') || '';
-        const note    = prompt('Optional note for admin:') || '';
-        _submitChangeRequest(btn.dataset.lid, btn.dataset.fid, 'reschedule',
-          { requestedDate: newDate, requestedTime: newTime, note });
+        const lid      = btn.dataset.lid;
+        const fid      = btn.dataset.fid;
+        const oppId    = btn.dataset.oppId;
+        const oppName  = btn.dataset.oppName;
+        const date     = btn.dataset.date;
+        const venue    = btn.dataset.venue;
+        const dateStr  = date ? formatDate(date) : 'TBA';
+        NotificationService.openContextModal({
+          title: '📅 Request Reschedule',
+          types: [{
+            value: 'reschedule',
+            label: 'Request Reschedule',
+            subject: `Reschedule request – fixture on ${dateStr}`,
+            body: `We would like to request a reschedule for the fixture at ${venue || 'TBA'} on ${dateStr}. Please advise on an alternative date.`,
+            recipientLabel: `Sends to: ${oppName || 'opposition'} users + all admin users`,
+            sendFn: async (title, body) => {
+              if (oppId) await NotificationService.sendToSchool(oppId, { type: 'fixture_changed', title, body, leagueId: lid, fixtureId: fid });
+              await NotificationService.sendToMasters({ type: 'fixture_changed', title, body, leagueId: lid, fixtureId: fid });
+              _submitChangeRequest(lid, fid, 'reschedule', { note: body });
+            },
+          }],
+        });
       });
     });
 
@@ -290,15 +306,28 @@ const MySchool = (() => {
     // Request alternate venue
     container.querySelectorAll('.ms-altvenue-btn').forEach(btn => {
       btn.addEventListener('click', () => {
-        const venues    = DB.getVenues();
-        const venueList = venues.map((v, i) => `${i + 1}. ${v.name}`).join('\n');
-        const pick      = prompt(`Select alternate venue:\n${venueList}\n\nEnter number:`);
-        if (!pick) return;
-        const idx = parseInt(pick) - 1;
-        if (isNaN(idx) || !venues[idx]) { toast('Invalid selection', 'error'); return; }
-        const note = prompt('Optional note for admin:') || '';
-        _submitChangeRequest(btn.dataset.lid, btn.dataset.fid, 'venue',
-          { requestedVenueId: venues[idx].id, note });
+        const lid      = btn.dataset.lid;
+        const fid      = btn.dataset.fid;
+        const oppId    = btn.dataset.oppId;
+        const oppName  = btn.dataset.oppName;
+        const date     = btn.dataset.date;
+        const venue    = btn.dataset.venue;
+        const dateStr  = date ? formatDate(date) : 'TBA';
+        NotificationService.openContextModal({
+          title: '🏟 Alternative Venue Request',
+          types: [{
+            value: 'alt_venue',
+            label: 'Alternative Venue Update',
+            subject: `Alternative venue request – fixture on ${dateStr}`,
+            body: `We would like to use an alternative venue for the fixture originally scheduled at ${venue || 'TBA'} on ${dateStr}. Please advise on availability.`,
+            recipientLabel: `Sends to: ${oppName || 'opposition'} users + all admin users`,
+            sendFn: async (title, body) => {
+              if (oppId) await NotificationService.sendToSchool(oppId, { type: 'fixture_changed', title, body, leagueId: lid, fixtureId: fid });
+              await NotificationService.sendToMasters({ type: 'fixture_changed', title, body, leagueId: lid, fixtureId: fid });
+              _submitChangeRequest(lid, fid, 'venue', { note: body });
+            },
+          }],
+        });
       });
     });
   }
@@ -493,14 +522,20 @@ const MySchool = (() => {
         clashHtml = `<div class="clash-okayed-badge">✓ Clash acknowledged${f.clashReason ? ': ' + esc(f.clashReason) : ''}</div>`;
       } else {
         const hasRequest = !!f.changeRequest;
+        const oppSchoolId   = isHome ? f.awaySchoolId   : f.homeSchoolId;
+        const oppSchoolName = isHome ? f.awaySchoolName  : f.homeSchoolName;
         let requestBtns = '';
         if (!hasRequest && Auth.isLoggedIn()) {
           requestBtns = `<button class="btn btn-xs btn-secondary ms-reschedule-btn"
-            data-lid="${leagueId}" data-fid="${f.id}">📅 Request Reschedule</button>
+            data-lid="${leagueId}" data-fid="${esc(f.id)}"
+            data-opp-id="${esc(oppSchoolId || '')}" data-opp-name="${esc(oppSchoolName || '')}"
+            data-date="${esc(f.date || '')}" data-venue="${esc(f.venueName || '')}">📅 Request Reschedule</button>
             <button class="btn btn-xs btn-secondary ms-altvenue-btn"
-            data-lid="${leagueId}" data-fid="${f.id}">🏟 Alt. Venue</button>`;
+            data-lid="${leagueId}" data-fid="${esc(f.id)}"
+            data-opp-id="${esc(oppSchoolId || '')}" data-opp-name="${esc(oppSchoolName || '')}"
+            data-date="${esc(f.date || '')}" data-venue="${esc(f.venueName || '')}">🏟 Alt. Venue</button>`;
         }
-        clashHtml = `<div class="fixture-clash-badge">⚠️ Venue clash on this day ${requestBtns}</div>`;
+        clashHtml = `<div class="fixture-clash-badge">⚠️ Potential venue clash on this day ${requestBtns}</div>`;
         if (hasRequest) {
           const cr    = f.changeRequest;
           const vName = cr.requestedVenueId
