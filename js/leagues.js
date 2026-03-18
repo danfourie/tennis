@@ -1054,6 +1054,9 @@ const Leagues = (() => {
         color:         school.color,
       };
     }).filter(Boolean);
+    // Stamp each team with its stable position so the H/A index formula
+    // works via direct property access — no indexOf or Map lookup needed.
+    teams.forEach((t, i) => { t._balanceIdx = i; });
 
     if (teams.length < 2) return [];
 
@@ -1108,12 +1111,12 @@ const Leagues = (() => {
       //     home = team[j]  if (j - i) is EVEN
       // This guarantees each team's |home − away| ≤ 1, which is the best
       // achievable when each team plays an odd number of games (N−1 for even N).
-      // Use direct reference lookup — the Berger circle reuses the exact same
-      // objects from `teams`, so indexOf() is safe and avoids any key/type issues.
+      // Use the _balanceIdx stamp assigned at team creation — O(1), no lookup
+      // needed, works even if object references are ever copied or wrapped.
       singleRRRounds.forEach(round => {
         const balancedRound = round.map(m => {
-          const iA = teams.indexOf(m.home);
-          const iB = teams.indexOf(m.away);
+          const iA = m.home._balanceIdx;
+          const iB = m.away._balanceIdx;
           const lo = Math.min(iA, iB);
           const hi = Math.max(iA, iB);
           // Odd gap → lower-indexed team is home; even gap → higher-indexed is home
