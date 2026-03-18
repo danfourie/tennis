@@ -1126,6 +1126,32 @@ body {
   border: 1px solid #fecaca;
 }
 
+/* ── League card: entered team list ──────────────────────── */
+.entry-team-list {
+  margin-top: .5rem;
+  display: flex;
+  flex-direction: column;
+  gap: .2rem;
+}
+.entry-status-row {
+  font-size: .8rem;
+  font-weight: 500;
+  padding: .2rem .5rem;
+  border-radius: 6px;
+}
+.entry-status--approved {
+  background: #dcfce7;
+  color: #166534;
+}
+.entry-status--pending {
+  background: #fef9c3;
+  color: #854d0e;
+}
+.entry-status--rejected {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
 /* ── Admin: league entry rows in the entries modal ────────── */
 .entry-admin-row {
   display: flex;

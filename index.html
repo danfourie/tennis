@@ -705,15 +705,25 @@
       </div>
       <div class="modal-body">
         <p id="leagueEntryModalDesc" style="margin-bottom:1rem"></p>
-        <div class="form-group" id="leagueEntryTeamGroup">
-          <label>Team slot</label>
-          <select id="leagueEntryTeamSuffix">
-            <option value="">Single team entry</option>
-            <option value="A">Team A (first team)</option>
-            <option value="B">Team B (second team)</option>
-          </select>
-          <small class="form-hint">Your school already has one team entered — select the slot for your second entry.</small>
+
+        <!-- Team 1 -->
+        <div class="form-group" id="leagueEntryTeam1Group">
+          <label>Team name <span class="form-hint-inline">e.g. First Team, U14 A, Fourth Team</span></label>
+          <input type="text" id="leagueEntryTeam1Name" placeholder="e.g. First Team" autocomplete="off">
         </div>
+
+        <!-- Optional 2nd team (shown when entering first time and slot available) -->
+        <div id="leagueEntrySecondToggleRow" class="hidden" style="margin-bottom:.75rem">
+          <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;font-size:.9rem">
+            <input type="checkbox" id="leagueEntryAddSecond">
+            Also enter a second team
+          </label>
+        </div>
+        <div class="form-group hidden" id="leagueEntryTeam2Group">
+          <label>2nd team name <span class="form-hint-inline">e.g. Second Team, U14 B</span></label>
+          <input type="text" id="leagueEntryTeam2Name" placeholder="e.g. Second Team" autocomplete="off">
+        </div>
+
         <p class="form-hint" style="margin-top:.5rem">Your entry will be submitted as <strong>pending</strong> and must be approved by the league administrator before it is confirmed.</p>
         <input type="hidden" id="leagueEntryLeagueId">
       </div>

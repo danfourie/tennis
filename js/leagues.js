@@ -81,23 +81,35 @@ const Leagues = (() => {
 
     const school = DB.getSchools().find(s => s.id === profile.schoolId);
     const { count } = _schoolEntryCount(leagueId, profile.schoolId);
+    const slotsLeft = 2 - count;
 
     document.getElementById('leagueEntryLeagueId').value = leagueId;
-    document.getElementById('leagueEntryModalTitle').textContent = `Enter a Team — ${league.name}`;
+    document.getElementById('leagueEntryModalTitle').textContent =
+      count === 0 ? `Enter a Team — ${league.name}` : `Enter 2nd Team — ${league.name}`;
     document.getElementById('leagueEntryModalDesc').textContent =
-      `You are submitting ${school ? school.name : 'your school'} as a participant in "${league.name}"` +
-      (league.division ? ` (${league.division})` : '') + '.';
+      `Submitting for ${school ? school.name : 'your school'} · "${league.name}"` +
+      (league.division ? ` (${league.division})` : '');
 
-    // Show team-suffix selector only if they already have 1 entry
-    const teamGroup   = document.getElementById('leagueEntryTeamGroup');
-    const teamSufSel  = document.getElementById('leagueEntryTeamSuffix');
-    if (count >= 1) {
-      teamGroup.classList.remove('hidden');
-      // Pre-select B (the second slot) by default
-      teamSufSel.value = 'B';
+    // Clear inputs
+    document.getElementById('leagueEntryTeam1Name').value = '';
+    document.getElementById('leagueEntryTeam2Name').value = '';
+
+    // Show "add second team" toggle only when entering the first time (2 slots free)
+    const toggleRow = document.getElementById('leagueEntrySecondToggleRow');
+    const team2Group = document.getElementById('leagueEntryTeam2Group');
+    const addSecondCb = document.getElementById('leagueEntryAddSecond');
+
+    if (slotsLeft >= 2) {
+      toggleRow.classList.remove('hidden');
+      addSecondCb.checked = false;
+      team2Group.classList.add('hidden');
+      addSecondCb.onchange = () => {
+        team2Group.classList.toggle('hidden', !addSecondCb.checked);
+      };
     } else {
-      teamGroup.classList.add('hidden');
-      teamSufSel.value = '';
+      toggleRow.classList.add('hidden');
+      team2Group.classList.add('hidden');
+      addSecondCb.checked = false;
     }
 
     Modal.open('leagueEntryModal');
@@ -113,48 +125,56 @@ const Leagues = (() => {
     const school = DB.getSchools().find(s => s.id === profile.schoolId);
     const { count } = _schoolEntryCount(leagueId, profile.schoolId);
 
-    // Determine suffix
-    const teamGroup  = document.getElementById('leagueEntryTeamGroup');
-    const showSuffix = !teamGroup.classList.contains('hidden');
-    const teamSuffix = showSuffix ? document.getElementById('leagueEntryTeamSuffix').value : '';
-
-    // Guard: max 2 per league
+    // Guards
     if (count >= 2) { toast('Your school already has 2 teams entered in this league', 'error'); return; }
-    // Guard: entry window
     if (!_entryOpen(league)) { toast('Entries for this league are closed', 'error'); return; }
 
-    const teamLabel = (school ? school.name : profile.schoolId) + (teamSuffix ? ' ' + teamSuffix : '');
-    const now       = new Date().toISOString();
+    const schoolName    = school ? school.name : (profile.schoolId);
+    const team1RawName  = document.getElementById('leagueEntryTeam1Name').value.trim();
+    const addSecond     = document.getElementById('leagueEntryAddSecond').checked && (count === 0);
+    const team2RawName  = addSecond ? document.getElementById('leagueEntryTeam2Name').value.trim() : '';
 
+    if (!team1RawName) { toast('Please enter a team name', 'error'); return; }
+    if (addSecond && !team2RawName) { toast('Please enter a name for the second team', 'error'); return; }
+
+    // Build the list of entries to submit
+    const toSubmit = [{ teamName: team1RawName, suffix: count === 0 ? 'A' : 'B' }];
+    if (addSecond) toSubmit.push({ teamName: team2RawName, suffix: 'B' });
+
+    const now = new Date().toISOString();
     const btn = document.getElementById('leagueEntrySubmitBtn');
     if (btn) { btn.disabled = true; btn.textContent = 'Submitting…'; }
 
     try {
-      const entry = DB.addLeagueEntry({
-        leagueId,
-        schoolId:       profile.schoolId,
-        teamSuffix,
-        teamLabel,
-        status:         'pending',
-        enteredBy:      profile.uid,
-        enteredByName:  profile.displayName || profile.email || '',
-        enteredAt:      now,
-      });
+      for (const t of toSubmit) {
+        const teamLabel = `${schoolName} — ${t.teamName}`;
+        const entry = DB.addLeagueEntry({
+          leagueId,
+          schoolId:      profile.schoolId,
+          teamSuffix:    t.suffix,
+          teamName:      t.teamName,
+          teamLabel,
+          status:        'pending',
+          enteredBy:     profile.uid,
+          enteredByName: profile.displayName || profile.email || '',
+          enteredAt:     now,
+        });
 
-      DB.writeAudit('entry_submitted', 'league',
-        `${teamLabel} entered ${league.name}`, entry.id, teamLabel);
+        DB.writeAudit('entry_submitted', 'league',
+          `${teamLabel} entered ${league.name}`, entry.id, teamLabel);
 
-      // Notify all masters/admins
-      await NotificationService.sendToMasters({
-        type:     'league_entry',
-        title:    `New league entry: ${teamLabel}`,
-        body:     `${teamLabel} has submitted an entry for "${league.name}"${league.division ? ' · ' + league.division : ''}. Please review and approve.`,
-        leagueId: leagueId,
-      });
+        await NotificationService.sendToMasters({
+          type:     'league_entry',
+          title:    `New league entry: ${teamLabel}`,
+          body:     `${teamLabel} has submitted an entry for "${league.name}"${league.division ? ' · ' + league.division : ''}. Please review and approve.`,
+          leagueId,
+        });
+      }
 
-      toast('Entry submitted — pending approval ✓', 'success');
+      const msg = toSubmit.length > 1 ? '2 entries submitted — pending approval ✓' : 'Entry submitted — pending approval ✓';
+      toast(msg, 'success');
       Modal.close('leagueEntryModal');
-      render();   // refresh cards to show pending badge
+      render();
     } catch (err) {
       console.error('[Leagues] entry submit error:', err);
       toast('Failed to submit entry', 'error');
@@ -251,24 +271,33 @@ const Leagues = (() => {
          </div>`
       : '';
 
-    // ── Entry button (only for signed-in school users) ────────
-    let entryBtn = '';
+    // ── Entry section (only for signed-in school users) ───────
+    let entryBtn   = '';
+    let entryList  = '';
     const profile  = typeof Auth !== 'undefined' ? Auth.getProfile() : null;
     if (profile && profile.schoolId) {
       const { count, entries } = _schoolEntryCount(l.id, profile.schoolId);
-      const hasPending  = entries.some(e => e.status === 'pending');
-      const hasApproved = entries.some(e => e.status === 'approved');
+      const school = DB.getSchools().find(s => s.id === profile.schoolId);
+
+      // Show each submitted entry as a small line with status colour
+      if (entries.length > 0) {
+        entryList = `<div class="entry-team-list">` +
+          entries.map(e => {
+            const statusIcon  = e.status === 'approved' ? '✓' : e.status === 'rejected' ? '✗' : '⏳';
+            const statusClass = e.status === 'approved' ? 'entry-status--approved'
+                              : e.status === 'rejected' ? 'entry-status--rejected'
+                              : 'entry-status--pending';
+            const label = e.teamLabel || (school ? school.name : 'Your team');
+            return `<div class="entry-status-row ${statusClass}">${statusIcon} ${esc(label)}</div>`;
+          }).join('') +
+        `</div>`;
+      }
+
       if (count >= 2) {
-        entryBtn = `<span class="badge badge-green" style="align-self:center">✓ 2 teams entered</span>`;
-      } else if (hasPending) {
-        entryBtn = `<span class="badge badge-amber" style="align-self:center">📝 Entry pending</span>`;
-      } else if (hasApproved && count === 1 && entryOpen) {
-        entryBtn = `<span class="badge badge-green" style="align-self:center">✓ 1 team entered</span>
-                    <button class="btn btn-sm btn-primary" data-league-enter="${esc(l.id)}">📝 Enter 2nd team</button>`;
-      } else if (hasApproved) {
-        entryBtn = `<span class="badge badge-green" style="align-self:center">✓ Entered</span>`;
+        // both slots filled — no button needed
       } else if (entryOpen) {
-        entryBtn = `<button class="btn btn-sm btn-primary" data-league-enter="${esc(l.id)}">📝 Enter a Team</button>`;
+        const btnLabel = count === 0 ? '📝 Enter a Team' : '📝 Enter 2nd team';
+        entryBtn = `<button class="btn btn-sm btn-primary" data-league-enter="${esc(l.id)}">${btnLabel}</button>`;
       }
     }
 
@@ -285,6 +314,7 @@ const Leagues = (() => {
         <div class="text-muted">${l.startDate ? formatDate(l.startDate) : '—'} → ${l.endDate ? formatDate(l.endDate) : '—'}</div>
         ${deadlineRow}
         <div class="text-muted mt-1">${totalFixtures} fixtures · ${played} played</div>
+        ${entryList}
       </div>
       <div class="card-footer">
         <button class="btn btn-sm btn-secondary" data-league-view="${l.id}">View Fixtures &amp; Standings</button>
