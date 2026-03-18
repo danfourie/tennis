@@ -737,7 +737,7 @@ const Leagues = (() => {
     document.getElementById('leagueDivision').value          = l ? (l.division   || '') : '';
     document.getElementById('leagueStart').value             = l ? (l.startDate  || '') : '';
     document.getElementById('leagueEnd').value               = l ? (l.endDate    || '') : '';
-    document.getElementById('leagueHomeMatches').value       = l ? (l.homeMatches || 1) : 1;
+    document.getElementById('leagueHomeMatches').value       = l ? (l.homeMatches >= 1 ? 1 : 0) : 1;
     document.getElementById('leaguePlayingDay').value        = l !== null ? (l.playingDay !== undefined ? l.playingDay : 5) : 5;
     document.getElementById('leagueMatchTime').value         = l ? (l.matchTime      || '14:00') : '14:00';
     document.getElementById('leagueEntryDeadline').value    = l ? (l.entryDeadline  || '')      : '';
@@ -1096,13 +1096,21 @@ const Leagues = (() => {
       circle.splice(1, 0, last);
     }
 
-    // Double (or more) round-robin
+    // Build the full round list based on format:
+    //   0 = "Only meet once"  → single round-robin, no reverse legs
+    //   1 = "Home & Away"     → each pair plays home + away (double the rounds)
     const allRounds = [];
-    for (let rep = 0; rep < homeMatchesPerPair; rep++) {
-      singleRRRounds.forEach(round => {
-        allRounds.push(round);
-        allRounds.push(round.map(m => ({ home: m.away, away: m.home })));
-      });
+    if (homeMatchesPerPair === 0) {
+      // Each pair meets exactly once — use singleRR as-is
+      singleRRRounds.forEach(round => allRounds.push(round));
+    } else {
+      const reps = Math.max(1, homeMatchesPerPair);
+      for (let rep = 0; rep < reps; rep++) {
+        singleRRRounds.forEach(round => {
+          allRounds.push(round);
+          allRounds.push(round.map(m => ({ home: m.away, away: m.home })));
+        });
+      }
     }
 
     // First playing day on or after startDate
