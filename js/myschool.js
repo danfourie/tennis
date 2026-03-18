@@ -135,6 +135,18 @@ const MySchool = (() => {
     const venue     = school.venueId ? DB.getVenues().find(v => v.id === school.venueId) : null;
     const myLeagues = DB.getLeagues().filter(l => _parts(l).some(p => p.schoolId === schoolId));
 
+    // Pending/rejected entries for leagues where this school is NOT yet a participant
+    const enrolledLeagueIds = new Set(myLeagues.map(l => l.id));
+    const myEntries = DB.getEntriesForSchool(schoolId).filter(
+      e => e.status !== 'rejected' && !enrolledLeagueIds.has(e.leagueId)
+    );
+    // Group entries by league (may have 2 per league)
+    const pendingByLeague = new Map();
+    myEntries.forEach(e => {
+      if (!pendingByLeague.has(e.leagueId)) pendingByLeague.set(e.leagueId, []);
+      pendingByLeague.get(e.leagueId).push(e);
+    });
+
     // Show school header
     let html = `<div class="myschool-header">
       <span class="color-dot" style="background:${school.color};width:20px;height:20px;flex-shrink:0"></span>
@@ -146,12 +158,43 @@ const MySchool = (() => {
       </div>
     </div>`;
 
-    if (myLeagues.length === 0) {
+    // ── Pending entries (awaiting approval) ──────────────────────
+    if (pendingByLeague.size > 0) {
+      html += `<div class="ms-pending-entries-section">
+        <h4 class="ms-section-title">⏳ Pending League Entries</h4>`;
+      pendingByLeague.forEach((entries, leagueId) => {
+        const league = DB.getLeagues().find(l => l.id === leagueId);
+        if (!league) return;
+        const DAYS = ['Sundays','Mondays','Tuesdays','Wednesdays','Thursdays','Fridays','Saturdays'];
+        const dayLabel = league.playingDay !== undefined ? ' · ' + DAYS[league.playingDay] : '';
+        html += `<div class="card ms-pending-entry-card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">${esc(league.name)}</div>
+              <div class="text-muted">${esc(league.division || '')}${dayLabel}</div>
+            </div>
+            <span class="badge badge-amber">⏳ Pending approval</span>
+          </div>
+          <div class="card-body">
+            ${entries.map(e => `<div class="ms-pending-team-row">
+              <span class="entry-status--pending" style="font-size:.85rem;font-weight:500">⏳ ${esc(e.teamLabel || e.teamName || 'Team entry')}</span>
+              <span class="text-muted" style="font-size:.75rem">Submitted ${e.enteredAt ? new Date(e.enteredAt).toLocaleDateString('en-ZA',{day:'numeric',month:'short',year:'numeric'}) : ''}</span>
+            </div>`).join('')}
+            ${league.startDate ? `<div class="text-muted mt-1" style="font-size:.8rem">Season: ${formatDate(league.startDate)} → ${league.endDate ? formatDate(league.endDate) : '—'}</div>` : ''}
+            ${league.entryDeadline ? `<div class="text-muted" style="font-size:.8rem">📋 Entry deadline: ${formatDate(league.entryDeadline)}</div>` : ''}
+          </div>
+        </div>`;
+      });
+      html += `</div>`;
+    }
+
+    // ── Approved / enrolled leagues ──────────────────────────────
+    if (myLeagues.length === 0 && pendingByLeague.size === 0) {
       html += `<div class="empty-state">
         <div class="empty-icon">🏆</div>
         <p>${_impersonateSchoolId ? 'This school is not enrolled in any leagues yet.' : 'Your school is not enrolled in any leagues yet.'}</p>
       </div>`;
-    } else {
+    } else if (myLeagues.length > 0) {
       html += myLeagues.map(l => _leagueSection(l, schoolId)).join('');
     }
 
