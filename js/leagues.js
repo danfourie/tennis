@@ -1057,7 +1057,6 @@ const Leagues = (() => {
     // Stamp each team with its stable position so the H/A index formula
     // works via direct property access — no indexOf or Map lookup needed.
     teams.forEach((t, i) => { t._balanceIdx = i; });
-    console.log('[HA-DBG] teams:', teams.map(t => t.name + '=' + t._balanceIdx));
 
     if (teams.length < 2) return [];
 
@@ -1126,7 +1125,6 @@ const Leagues = (() => {
             ? (iA === lo ? m.home : m.away)
             : (iA === hi ? m.home : m.away);
           const awayTeam = homeTeam === m.home ? m.away : m.home;
-          console.log(`[HA-DBG] ${m.home.name}(${iA}) vs ${m.away.name}(${iB}) → lo=${lo} hi=${hi} gap=${hi-lo} loIsHome=${loIsHome} → HOME=${homeTeam.name}`);
           return { home: homeTeam, away: awayTeam };
         });
         allRounds.push(balancedRound);
