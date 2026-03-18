@@ -1578,7 +1578,7 @@ const Leagues = (() => {
         }
         if (!confirm('Recalculate all fixtures?\n\nThe scheduler will try to avoid venue clashes by spreading fixtures across different weeks when needed. Existing manual edits will be lost.')) return;
         const parts      = _getParticipants(league);
-        league.fixtures  = generateFixtures(parts, league.homeMatches || 1, league.startDate, league.neutralVenueId, league.playingDay, league.matchTime, league.id, league.endDate);
+        league.fixtures  = generateFixtures(parts, league.homeMatches ?? 1, league.startDate, league.neutralVenueId, league.playingDay, league.matchTime, league.id, league.endDate);
         league.standings = generateStandings(parts);
         DB.updateLeague(league);
         DB.writeAudit('fixtures_recalculated', 'league', `Fixtures recalculated (clash-aware) for ${league.name}`, league.id, league.name);
