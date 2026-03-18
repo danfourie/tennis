@@ -54,7 +54,8 @@ const Leagues = (() => {
 
   /** True when the entry window is still open for a league. */
   function _entryOpen(league) {
-    if (!league.entryDeadline) return false;
+    // No deadline set → entries are open until master sets one
+    if (!league.entryDeadline) return true;
     const today = toDateStr(new Date());
     return today <= league.entryDeadline;
   }
