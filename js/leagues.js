@@ -693,16 +693,43 @@ const Leagues = (() => {
 
     const sortedSchools = [...schools].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 
+    // Build a map of pending/approved entries for this league (if editing)
+    const entryMap = new Map(); // schoolId → { count, labels[] }
+    if (l) {
+      DB.getEntriesForLeague(l.id).forEach(e => {
+        if (e.status === 'rejected') return;
+        if (!entryMap.has(e.schoolId)) entryMap.set(e.schoolId, { count: 0, labels: [], statuses: [] });
+        const rec = entryMap.get(e.schoolId);
+        rec.count++;
+        rec.labels.push(e.teamLabel || e.teamName || '');
+        rec.statuses.push(e.status);
+      });
+    }
+
     const box = document.getElementById('leagueSchoolsCheckboxes');
     box.classList.add('checkbox-grid--teams');
     box.innerHTML = sortedSchools.map(s => {
       const count     = existingMap.get(s.id) || 0;
       const isChecked = count > 0;
       const teams     = count > 0 ? count : 1;
-      return `<label class="school-select-row">
+
+      // Entry indicator — show pending/approved entries from the entries system
+      const entryRec = entryMap.get(s.id);
+      let entryTag = '';
+      if (entryRec) {
+        const hasApproved = entryRec.statuses.some(st => st === 'approved');
+        const hasPending  = entryRec.statuses.some(st => st === 'pending');
+        const tagClass    = hasApproved ? 'entry-tag--approved' : 'entry-tag--pending';
+        const tagIcon     = hasApproved ? '✓' : '⏳';
+        const tip         = entryRec.labels.join(', ');
+        entryTag = `<span class="entry-tag ${tagClass}" title="${esc(tip)}">${tagIcon} ${entryRec.count === 1 ? '1 entry' : entryRec.count + ' entries'}</span>`;
+      }
+
+      return `<label class="school-select-row${entryRec ? ' school-has-entry' : ''}">
         <span class="school-check-area">
           <input type="checkbox" class="school-cb" value="${s.id}" ${isChecked ? 'checked' : ''}>
           <span style="color:${s.color}">●</span> ${esc(s.name)}${s.team ? ` <em style="color:var(--neutral);font-size:.8em">(${esc(s.team)})</em>` : ''}
+          ${entryTag}
         </span>
         <span class="team-stepper"${isChecked ? '' : ' style="display:none"'}>
           <button type="button" class="stepper-btn stepper-dec" title="Remove team">−</button>
