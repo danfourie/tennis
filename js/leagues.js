@@ -1718,6 +1718,9 @@ const Leagues = (() => {
     const parts = _getParticipants(league);
     if (parts.length === 0) return `<p class="text-muted text-center" style="padding:1.5rem">No teams in this league.</p>`;
 
+    // "Only meet once" leagues have no home/away balance concept — skip the warning entirely
+    const meetOnce = (league.homeMatches ?? 1) === 0;
+
     const counts = {};
     parts.forEach(p => { counts[p.participantId] = { name: _participantName(p), home: 0, away: 0 }; });
 
@@ -1729,11 +1732,13 @@ const Leagues = (() => {
     });
 
     const rows = Object.values(counts);
-    const anyImbalance   = rows.some(r => Math.abs(r.home - r.away) > 1);
+    const anyImbalance   = !meetOnce && rows.some(r => Math.abs(r.home - r.away) > 1);
     const leagueStarted  = (league.fixtures || []).some(f => f.homeScore !== null && f.homeScore !== undefined);
 
     let html = `<div style="margin-bottom:.75rem">`;
-    if (anyImbalance) {
+    if (meetOnce) {
+      html += `<div class="clash-okayed-badge" style="margin-bottom:.75rem">✓ Meet-once format — each team plays every opponent exactly once.</div>`;
+    } else if (anyImbalance) {
       const recalcBtn = Auth.isAdmin()
         ? (leagueStarted
             ? `<span class="text-muted" style="font-size:.78rem;margin-left:auto">League in progress — edit fixtures manually.</span>`
