@@ -1108,13 +1108,12 @@ const Leagues = (() => {
       //     home = team[j]  if (j - i) is EVEN
       // This guarantees each team's |home − away| ≤ 1, which is the best
       // achievable when each team plays an odd number of games (N−1 for even N).
-      const teamIdx = new Map();
-      teams.forEach((t, idx) => teamIdx.set(t.participantId, idx));
-
+      // Use direct reference lookup — the Berger circle reuses the exact same
+      // objects from `teams`, so indexOf() is safe and avoids any key/type issues.
       singleRRRounds.forEach(round => {
         const balancedRound = round.map(m => {
-          const iA = teamIdx.get(m.home.participantId);
-          const iB = teamIdx.get(m.away.participantId);
+          const iA = teams.indexOf(m.home);
+          const iB = teams.indexOf(m.away);
           const lo = Math.min(iA, iB);
           const hi = Math.max(iA, iB);
           // Odd gap → lower-indexed team is home; even gap → higher-indexed is home
