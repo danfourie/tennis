@@ -1148,35 +1148,24 @@ const Leagues = (() => {
           ? Math.max(baseSlots, 2)
           : baseSlots;
 
-        let assignedDate  = toDateStr(addDays(baseDate, roundIdx * 7));
+        // All fixtures in a round share the same date — never push to another week.
+        // Venue clashes within a round are flagged for the master to resolve.
+        const roundDate   = toDateStr(addDays(baseDate, roundIdx * 7));
+        let assignedDate  = roundDate;
         let assignedCourt = 0;
 
         if (venueId && effectiveMaxSlots > 0) {
-          let placed = false;
-          // Try the ideal date first, then push out week-by-week (up to 52 weeks)
-          for (let attempt = 0; attempt < 52 && !placed; attempt++) {
-            const tryDateObj = addDays(baseDate, roundIdx * 7 + attempt * 7);
-            // Never schedule beyond the league end date
-            if (endDateObj && tryDateObj > endDateObj) break;
-            const tryDate = toDateStr(tryDateObj);
-            const taken   = _takenCourts(venueId, tryDate);
-
-            if (taken.length < effectiveMaxSlots) {
-              let court = 0;
-              while (taken.includes(court)) court += COURTS_PER_MATCH;
-              assignedDate  = tryDate;
-              assignedCourt = court;
-              _claim(venueId, tryDate, court);
-              placed = true;
-            }
-          }
-
-          if (!placed) {
-            // No feasible slot found within the window — schedule on preferred date
-            // with a forced clash flag so the master can resolve it.
-            assignedDate  = toDateStr(addDays(baseDate, roundIdx * 7));
+          const taken = _takenCourts(venueId, roundDate);
+          if (taken.length < effectiveMaxSlots) {
+            // Free court slot available — claim it
+            let court = 0;
+            while (taken.includes(court)) court += COURTS_PER_MATCH;
+            assignedCourt = court;
+            _claim(venueId, roundDate, court);
+          } else {
+            // Venue full on this date — schedule anyway and flag as clash
             assignedCourt = effectiveMaxSlots * COURTS_PER_MATCH;
-            _claim(venueId, assignedDate, assignedCourt);
+            _claim(venueId, roundDate, assignedCourt);
           }
         }
 
