@@ -456,7 +456,7 @@ function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 }
 
-function toDateStr(d)       { return d.toISOString().slice(0, 10); }
+function toDateStr(d)       { return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
 function parseDate(str)     { const [y, m, d] = str.split('-').map(Number); return new Date(y, m - 1, d); }
 function weekStart(d)       { const day = new Date(d); day.setDate(day.getDate() - day.getDay() + 1); return day; }
 function addDays(d, n)      { const r = new Date(d); r.setDate(r.getDate() + n); return r; }

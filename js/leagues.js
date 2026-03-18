@@ -924,7 +924,7 @@ const Leagues = (() => {
       neutralVenueId,
       playingDay,
       matchTime,
-      fixtures:  generateFixtures(participants, homeMatches, startDate, neutralVenueId, playingDay, matchTime, id || null),
+      fixtures:  generateFixtures(participants, homeMatches, startDate, neutralVenueId, playingDay, matchTime, id || null, endDate),
       standings: generateStandings(participants),
     };
 
@@ -1005,11 +1005,10 @@ const Leagues = (() => {
    * @param {string} neutralVenueId      fallback venue when home team has none
    * @param {number} playingDay          0=Sun … 6=Sat
    * @param {string} matchTime           HH:MM match start time
-   * @param {string} [leagueId]          ID of the league being (re)generated — excluded
-   *                                     from cross-league clash checks so we don't
-   *                                     block against our own old fixtures
+   * @param {string} [leagueId]          ID of the league being (re)generated
+   * @param {string} [endDateStr]        YYYY-MM-DD hard cap — no fixture beyond this date
    */
-  function generateFixtures(participants, homeMatchesPerPair, startDateStr, neutralVenueId, playingDay, matchTime, leagueId) {
+  function generateFixtures(participants, homeMatchesPerPair, startDateStr, neutralVenueId, playingDay, matchTime, leagueId, endDateStr) {
     if (!participants || participants.length < 2) return [];
 
     const COURTS_PER_MATCH = 3;
@@ -1086,6 +1085,9 @@ const Leagues = (() => {
     const daysAhead = (targetDay - baseDate.getDay() + 7) % 7;
     baseDate = addDays(baseDate, daysAhead);
 
+    // Hard end-date cap (null = no cap)
+    const endDateObj = endDateStr ? parseDate(endDateStr) : null;
+
     // ── Venue slot tracker ───────────────────────────────────────
     // venueUsage[venueId][date] = [ courtStart, … ] of already-claimed blocks
     const venueUsage = {};
@@ -1153,11 +1155,13 @@ const Leagues = (() => {
           let placed = false;
           // Try the ideal date first, then push out week-by-week (up to 52 weeks)
           for (let attempt = 0; attempt < 52 && !placed; attempt++) {
-            const tryDate = toDateStr(addDays(baseDate, roundIdx * 7 + attempt * 7));
+            const tryDateObj = addDays(baseDate, roundIdx * 7 + attempt * 7);
+            // Never schedule beyond the league end date
+            if (endDateObj && tryDateObj > endDateObj) break;
+            const tryDate = toDateStr(tryDateObj);
             const taken   = _takenCourts(venueId, tryDate);
 
             if (taken.length < effectiveMaxSlots) {
-              // Find the first free court block (multiples of COURTS_PER_MATCH)
               let court = 0;
               while (taken.includes(court)) court += COURTS_PER_MATCH;
               assignedDate  = tryDate;
@@ -1168,10 +1172,10 @@ const Leagues = (() => {
           }
 
           if (!placed) {
-            // No feasible slot found — schedule on preferred date with a forced clash.
-            // The master must "okay" it; the school can request an alternate venue.
+            // No feasible slot found within the window — schedule on preferred date
+            // with a forced clash flag so the master can resolve it.
             assignedDate  = toDateStr(addDays(baseDate, roundIdx * 7));
-            assignedCourt = effectiveMaxSlots * COURTS_PER_MATCH; // beyond capacity → clash flagged
+            assignedCourt = effectiveMaxSlots * COURTS_PER_MATCH;
             _claim(venueId, assignedDate, assignedCourt);
           }
         }
@@ -1552,7 +1556,7 @@ const Leagues = (() => {
         }
         if (!confirm('Recalculate all fixtures?\n\nThe scheduler will try to avoid venue clashes by spreading fixtures across different weeks when needed. Existing manual edits will be lost.')) return;
         const parts      = _getParticipants(league);
-        league.fixtures  = generateFixtures(parts, league.homeMatches || 1, league.startDate, league.neutralVenueId, league.playingDay, league.matchTime, league.id);
+        league.fixtures  = generateFixtures(parts, league.homeMatches || 1, league.startDate, league.neutralVenueId, league.playingDay, league.matchTime, league.id, league.endDate);
         league.standings = generateStandings(parts);
         DB.updateLeague(league);
         DB.writeAudit('fixtures_recalculated', 'league', `Fixtures recalculated (clash-aware) for ${league.name}`, league.id, league.name);
