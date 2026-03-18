@@ -286,6 +286,11 @@ const Admin = (() => {
               <option value="admin" ${u.role === 'admin'  ? 'selected' : ''}>Admin</option>
               <option value="master"${u.role === 'master' ? 'selected' : ''}>Master</option>
             </select>
+            <label style="font-size:.75rem;color:var(--text-muted);margin-right:.25rem;margin-left:.5rem">School:</label>
+            <select class="school-select" data-user-uid="${u.uid}" style="padding:.2rem .4rem;border-radius:6px;border:1.5px solid var(--border);font-size:.8rem">
+              <option value="">— None —</option>
+              ${schools.map(s => `<option value="${s.id}" ${u.schoolId === s.id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}
+            </select>
             ${!isSelf ? `<button class="btn btn-xs btn-danger" data-user-delete="${u.uid}">Remove</button>` : ''}
           </div>
         </div>`;
@@ -307,6 +312,23 @@ const Admin = (() => {
         );
         sel.dataset.currentRole = newRole;
         toast(`Role updated to "${newRole}"`, 'success');
+        renderUsers();
+      });
+    });
+
+    el.querySelectorAll('.school-select').forEach(sel => {
+      sel.addEventListener('change', () => {
+        const userUid   = sel.dataset.userUid;
+        const newSchool = sel.value || null;
+        const user      = DB.getUsers().find(u => u.uid === userUid);
+        if (!user) return;
+        DB.updateUser({ ...user, schoolId: newSchool });
+        DB.writeAudit(
+          'user_school_changed', 'user',
+          `School changed for ${esc(user.displayName || user.email)}: ${newSchool || 'none'}`,
+          userUid, user.displayName || user.email
+        );
+        toast(`School updated`, 'success');
         renderUsers();
       });
     });

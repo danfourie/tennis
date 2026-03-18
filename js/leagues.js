@@ -14,7 +14,9 @@
 const Leagues = (() => {
 
   function init() {
-    document.getElementById('leagueSubmitBtn').addEventListener('click', saveLeague);
+    document.getElementById('leagueSubmitBtn').addEventListener('click', () => saveLeague(false));
+    const saveDetailsBtn = document.getElementById('leagueSaveDetailsBtn');
+    if (saveDetailsBtn) saveDetailsBtn.addEventListener('click', () => saveLeague(true));
     // Fixture edit modal save
     document.getElementById('fixtureEditSaveBtn').addEventListener('click', saveFixtureEdit);
     document.getElementById('fixtureEditVenue').addEventListener('change', _updateFixtureCourtList);
@@ -729,11 +731,36 @@ const Leagues = (() => {
     Modal.open('leagueModal');
   }
 
-  function saveLeague() {
+  function saveLeague(detailsOnly = false) {
     const name = document.getElementById('leagueName').value.trim();
     if (!name) { toast('League name required', 'error'); return; }
 
-    // Build participants from checked schools + team counts
+    const id             = document.getElementById('leagueEditId').value;
+    const entryDeadline  = document.getElementById('leagueEntryDeadline').value || null;
+    const startDate      = document.getElementById('leagueStart').value;
+    const endDate        = document.getElementById('leagueEnd').value;
+    const homeMatches    = parseInt(document.getElementById('leagueHomeMatches').value) || 1;
+    const neutralVenueId = document.getElementById('leagueNeutralVenue').value || null;
+    const playingDay     = parseInt(document.getElementById('leaguePlayingDay').value);
+    const matchTime      = document.getElementById('leagueMatchTime').value || '14:00';
+    const division       = document.getElementById('leagueDivision').value.trim();
+
+    // ── Details-only save (no participants needed) ────────────────
+    if (detailsOnly) {
+      if (!id) { toast('Save the league first before editing details only', 'error'); return; }
+      const existing = DB.getLeagues().find(l => l.id === id);
+      if (!existing) { toast('League not found', 'error'); return; }
+      const updated = { ...existing, name, division, startDate, endDate, entryDeadline, homeMatches, neutralVenueId, playingDay, matchTime };
+      DB.updateLeague(updated);
+      DB.writeAudit('league_updated', 'league', `Updated league details: ${name}`, id, name);
+      toast('League details saved ✓', 'success');
+      Modal.close('leagueModal');
+      render();
+      renderAdmin();
+      return;
+    }
+
+    // ── Full save with fixture generation ────────────────────────
     const box          = document.getElementById('leagueSchoolsCheckboxes');
     const participants = [];
     box.querySelectorAll('.school-cb:checked').forEach(cb => {
@@ -748,25 +775,14 @@ const Leagues = (() => {
       }
     });
 
-    if (participants.length < 2) { toast('At least 2 teams required', 'error'); return; }
+    if (participants.length < 2) { toast('At least 2 teams required to generate fixtures', 'error'); return; }
 
-    // Derived schoolIds (unique) kept for backward compat
     const schoolIds = [...new Set(participants.map(p => p.schoolId))];
-
-    const id           = document.getElementById('leagueEditId').value;
-    const homeMatches  = parseInt(document.getElementById('leagueHomeMatches').value) || 1;
-    const startDate    = document.getElementById('leagueStart').value;
-    const endDate      = document.getElementById('leagueEnd').value;
-    const neutralVenueId = document.getElementById('leagueNeutralVenue').value || null;
-    const playingDay   = parseInt(document.getElementById('leaguePlayingDay').value);
-    const matchTime    = document.getElementById('leagueMatchTime').value || '14:00';
-
-    const entryDeadline = document.getElementById('leagueEntryDeadline').value || null;
 
     const league = {
       id: id || uid(),
       name,
-      division:      document.getElementById('leagueDivision').value.trim(),
+      division,
       startDate,
       endDate,
       entryDeadline,
@@ -788,12 +804,11 @@ const Leagues = (() => {
       DB.addLeague(league);
       DB.writeAudit('league_created', 'league', `Created league: ${name} (${league.fixtures.length} fixtures)`, league.id, name);
       toast(`League created — ${league.fixtures.length} fixtures generated ✓`, 'success');
-      // Notify all participating school contacts about the new league
       if (typeof NotificationService !== 'undefined') {
         NotificationService.sendToLeagueParticipants(league.id, {
           type:     'league_created',
           title:    `New league: ${name}`,
-          body:     `${name}${league.division ? ' · ' + league.division : ''} has been created. Your fixtures start ${league.startDate ? formatDate(league.startDate) : 'soon'}.`,
+          body:     `${name}${division ? ' · ' + division : ''} has been created. Your fixtures start ${startDate ? formatDate(startDate) : 'soon'}.`,
           leagueId: league.id,
         });
       }
