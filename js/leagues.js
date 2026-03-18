@@ -1739,14 +1739,9 @@ const Leagues = (() => {
     if (meetOnce) {
       html += `<div class="clash-okayed-badge" style="margin-bottom:.75rem">✓ Meet-once format — each team plays every opponent exactly once.</div>`;
     } else if (anyImbalance) {
-      const recalcBtn = Auth.isAdmin()
-        ? (leagueStarted
-            ? `<span class="text-muted" style="font-size:.78rem;margin-left:auto">League in progress — edit fixtures manually.</span>`
-            : `<button class="btn btn-xs btn-warning recalc-fixtures-btn">🔄 Recalculate Fixtures</button>`)
-        : '';
       html += `<div class="fixture-clash-badge" style="margin-bottom:.75rem">
         ⚠️ One or more teams have an unbalanced schedule (home/away difference > 1).
-        ${recalcBtn}
+        To fix, go to the <strong>Fixtures</strong> tab and use Recalculate Fixtures from there.
       </div>`;
     } else {
       html += `<div class="clash-okayed-badge" style="margin-bottom:.75rem">✓ Home/Away schedule is balanced.</div>`;
