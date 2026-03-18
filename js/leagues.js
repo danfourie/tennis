@@ -841,14 +841,50 @@ const Leagues = (() => {
     const matchTime      = document.getElementById('leagueMatchTime').value || '14:00';
     const division       = document.getElementById('leagueDivision').value.trim();
 
-    // ── Details-only save (no participants needed) ────────────────
+    // ── Details-only save (updates settings + participants, no fixture regen) ──
     if (detailsOnly) {
-      if (!id) { toast('Save the league first before editing details only', 'error'); return; }
+      if (!id) { toast('Save the league first before using Save Details', 'error'); return; }
       const existing = DB.getLeagues().find(l => l.id === id);
       if (!existing) { toast('League not found', 'error'); return; }
-      const updated = { ...existing, name, division, startDate, endDate, entryDeadline, homeMatches, neutralVenueId, playingDay, matchTime };
+
+      // Read checked schools — same logic as full save
+      const box = document.getElementById('leagueSchoolsCheckboxes');
+      const newParticipants = [];
+      box.querySelectorAll('.school-cb:checked').forEach(cb => {
+        const schoolId  = cb.value;
+        const countSpan = cb.closest('.school-select-row').querySelector('.team-count-val');
+        const count     = countSpan ? parseInt(countSpan.textContent) : 1;
+        if (count === 1) {
+          newParticipants.push({ participantId: schoolId, schoolId, teamSuffix: '' });
+        } else {
+          newParticipants.push({ participantId: schoolId + '_A', schoolId, teamSuffix: 'A' });
+          newParticipants.push({ participantId: schoolId + '_B', schoolId, teamSuffix: 'B' });
+        }
+      });
+
+      const newSchoolIds = [...new Set(newParticipants.map(p => p.schoolId))];
+
+      // Merge standings: keep existing rows, add rows for any new participants
+      const existingStandings = existing.standings || [];
+      const mergedStandings = newParticipants.map(p => {
+        return existingStandings.find(r => r.participantId === p.participantId)
+          || generateStandings([p])[0];
+      });
+
+      const updated = {
+        ...existing,
+        name, division, startDate, endDate, entryDeadline,
+        homeMatches, neutralVenueId, playingDay, matchTime,
+        participants: newParticipants,
+        schoolIds:    newSchoolIds,
+        standings:    mergedStandings,
+      };
       DB.updateLeague(updated);
       DB.writeAudit('league_updated', 'league', `Updated league details: ${name}`, id, name);
+
+      // Auto-approve any pending entries for newly added schools
+      _autoApproveEntriesForParticipants(updated);
+
       toast('League details saved ✓', 'success');
       Modal.close('leagueModal');
       render();
