@@ -1637,7 +1637,14 @@ const Leagues = (() => {
             </select>`
           : esc(f.venueName || 'TBA');
 
-        const scoreCell = Auth.isLoggedIn()
+        // Determine whether the logged-in user may enter scores for this fixture.
+        // Admins can always edit; regular users only for their own school's games.
+        const _prof        = Auth.getProfile();
+        const _mySchool    = _prof ? _prof.schoolId : null;
+        const canEnterScore = isAdmin
+          || (_mySchool && (_mySchool === f.homeSchoolId || _mySchool === f.awaySchoolId));
+
+        const scoreCell = canEnterScore
           ? `<div class="score-cell">
               <input class="score-input" type="number" min="0" max="99" value="${hasScore ? f.homeScore : ''}" data-fixture="${f.id}" data-field="homeScore" style="width:54px">
               <span style="margin:0 .25rem;color:var(--neutral)">—</span>
@@ -1848,7 +1855,10 @@ const Leagues = (() => {
     const fixture = (league.fixtures || []).find(f => f.id === fixtureId);
     if (!fixture) return;
     const oldVal  = fixture[field];
-    fixture[field] = parseInt(rawValue) || 0;
+    // Empty string = clear the score entirely (null); otherwise parse as integer.
+    fixture[field] = (rawValue === '' || rawValue === null || rawValue === undefined)
+      ? null
+      : parseInt(rawValue);
 
     // Any score change resets all verification — the process starts fresh.
     fixture.masterVerified   = false;
