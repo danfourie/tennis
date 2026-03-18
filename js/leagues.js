@@ -1097,31 +1097,33 @@ const Leagues = (() => {
     }
 
     // Build the full round list based on format:
-    //   0 = "Only meet once"  → single round-robin with greedy H/A balancing
+    //   0 = "Only meet once"  → single round-robin with index-formula H/A assignment
     //   1 = "Home & Away"     → each pair plays home + away (inherently balanced)
     const allRounds = [];
     if (homeMatchesPerPair === 0) {
       // Each pair meets exactly once.
-      // The Berger algorithm fixes circle[0] so that team is always "home" by
-      // default — apply a greedy rebalancing pass so home/away is spread as
-      // evenly as possible across all teams (max imbalance of 1 per team, which
-      // is unavoidable when each team plays an odd number of games).
-      const homeCounts = {};
-      teams.forEach(t => { homeCounts[t.participantId] = 0; });
+      // Use an index-based formula for home/away assignment that is provably optimal:
+      //   For pair (i, j) with i < j (0-based position in the teams array):
+      //     home = team[i]  if (j - i) is ODD
+      //     home = team[j]  if (j - i) is EVEN
+      // This guarantees each team's |home − away| ≤ 1, which is the best
+      // achievable when each team plays an odd number of games (N−1 for even N).
+      const teamIdx = new Map();
+      teams.forEach((t, idx) => teamIdx.set(t.participantId, idx));
 
       singleRRRounds.forEach(round => {
         const balancedRound = round.map(m => {
-          const hCount = homeCounts[m.home.participantId];
-          const aCount = homeCounts[m.away.participantId];
-          if (hCount <= aCount) {
-            // Keep original assignment — home team has fewer (or equal) home games
-            homeCounts[m.home.participantId]++;
-            return m;
-          } else {
-            // Swap — away team has fewer home games so give them the home slot
-            homeCounts[m.away.participantId]++;
-            return { home: m.away, away: m.home };
-          }
+          const iA = teamIdx.get(m.home.participantId);
+          const iB = teamIdx.get(m.away.participantId);
+          const lo = Math.min(iA, iB);
+          const hi = Math.max(iA, iB);
+          // Odd gap → lower-indexed team is home; even gap → higher-indexed is home
+          const loIsHome = (hi - lo) % 2 === 1;
+          const homeTeam = loIsHome
+            ? (iA === lo ? m.home : m.away)
+            : (iA === hi ? m.home : m.away);
+          const awayTeam = homeTeam === m.home ? m.away : m.home;
+          return { home: homeTeam, away: awayTeam };
         });
         allRounds.push(balancedRound);
       });
@@ -1756,19 +1758,20 @@ const Leagues = (() => {
     });
 
     const rows = Object.values(counts);
-    const anyImbalance   = !meetOnce && rows.some(r => Math.abs(r.home - r.away) > 1);
+    const anyImbalance   = rows.some(r => Math.abs(r.home - r.away) > 1);
     const leagueStarted  = (league.fixtures || []).some(f => f.homeScore !== null && f.homeScore !== undefined);
 
     let html = `<div style="margin-bottom:.75rem">`;
-    if (meetOnce) {
-      html += `<div class="clash-okayed-badge" style="margin-bottom:.75rem">✓ Meet-once format — each team plays every opponent exactly once.</div>`;
-    } else if (anyImbalance) {
+    if (anyImbalance) {
       html += `<div class="fixture-clash-badge" style="margin-bottom:.75rem">
         ⚠️ One or more teams have an unbalanced schedule (home/away difference > 1).
         To fix, go to the <strong>Fixtures</strong> tab and use Recalculate Fixtures from there.
       </div>`;
     } else {
-      html += `<div class="clash-okayed-badge" style="margin-bottom:.75rem">✓ Home/Away schedule is balanced.</div>`;
+      const balanceMsg = meetOnce
+        ? '✓ Home/Away schedule is balanced (meet-once format — max 1 game difference per team).'
+        : '✓ Home/Away schedule is balanced.';
+      html += `<div class="clash-okayed-badge" style="margin-bottom:.75rem">${balanceMsg}</div>`;
     }
     html += `<table class="standings-table">
       <thead><tr><th>Team</th><th>Home</th><th>Away</th><th>Total</th><th>Balance</th></tr></thead>
