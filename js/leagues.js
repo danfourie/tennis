@@ -1655,19 +1655,23 @@ const Leagues = (() => {
     const leagueStarted = fixtures.some(f => f.homeScore !== null && f.homeScore !== undefined);
 
     let html = '';
+
+    // Admin toolbar — always show Recalculate button when league not yet started
+    if (Auth.isAdmin()) {
+      html += `<div style="display:flex;justify-content:flex-end;margin-bottom:.75rem">`;
+      if (leagueStarted) {
+        html += `<span class="text-muted" style="font-size:.78rem">League in progress — edit individual fixtures manually.</span>`;
+      } else {
+        html += `<button class="btn btn-xs btn-warning recalc-fixtures-btn">🔄 Recalculate Fixtures</button>`;
+      }
+      html += `</div>`;
+    }
+
     if (unresolved.length > 0) {
       const clashCount = unresolved.length / 2;
-      let recalcBtn = '';
-      if (Auth.isAdmin()) {
-        recalcBtn = leagueStarted
-          ? `<span class="text-muted" style="font-size:.78rem;margin-left:auto">League in progress — edit fixtures manually.</span>`
-          : `<button class="btn btn-xs btn-warning recalc-fixtures-btn" style="margin-left:auto">🔄 Recalculate Fixtures</button>`;
-      } else {
-        recalcBtn = `Contact an admin to resolve the clash${clashCount > 1 ? 'es' : ''}.`;
-      }
       html += `<div class="fixture-clash-badge" style="margin-bottom:1rem;border-radius:var(--radius)">
         ⚠️ ${Math.ceil(clashCount)} venue clash${clashCount > 1 ? 'es' : ''} detected in this league's fixtures.
-        ${recalcBtn}
+        ${Auth.isAdmin() && !leagueStarted ? '' : (!Auth.isAdmin() ? `Contact an admin to resolve the clash${clashCount > 1 ? 'es' : ''}.` : '')}
       </div>`;
     }
 
@@ -1763,8 +1767,8 @@ const Leagues = (() => {
     let html = `<div style="margin-bottom:.75rem">`;
     if (anyImbalance) {
       html += `<div class="fixture-clash-badge" style="margin-bottom:.75rem">
-        ⚠️ One or more teams have an unbalanced schedule (home/away difference > 1).
-        To fix, go to the <strong>Fixtures</strong> tab and use Recalculate Fixtures from there.
+        ⚠️ One or more teams have an unbalanced schedule (home/away difference &gt; 1).
+        To fix, go to the <strong>Fixtures</strong> tab and click <strong>🔄 Recalculate Fixtures</strong>.
       </div>`;
     } else {
       const balanceMsg = meetOnce
