@@ -1759,9 +1759,11 @@ const Leagues = (() => {
     (league.fixtures || []).forEach(f => {
       const hk = f.homeParticipantId || f.homeSchoolId;
       const ak = f.awayParticipantId || f.awaySchoolId;
+      console.log(`[BAL-DBG] home=${f.homeSchoolName}(key=${hk}) away=${f.awaySchoolName}(key=${ak}) countKeys=${Object.keys(counts)}`);
       if (counts[hk]) counts[hk].home++;
       if (counts[ak]) counts[ak].away++;
     });
+    console.log('[BAL-DBG] final counts:', JSON.stringify(counts));
 
     const rows = Object.values(counts);
     const anyImbalance   = rows.some(r => Math.abs(r.home - r.away) > 1);
