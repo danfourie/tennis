@@ -56,10 +56,17 @@ const Leagues = (() => {
 
   /** True when the entry window is still open for a league. */
   function _entryOpen(league) {
-    // No deadline set → entries are open until master sets one
-    if (!league.entryDeadline) return true;
-    const today = toDateStr(new Date());
-    return today <= league.entryDeadline;
+    // Entries close once the league has any played fixtures (in progress or complete)
+    const hasStarted = (league.fixtures || []).some(
+      f => f.homeScore !== null && f.homeScore !== undefined
+    );
+    if (hasStarted) return false;
+    // Entries also close once the entry deadline has passed
+    if (league.entryDeadline) {
+      const today = toDateStr(new Date());
+      if (today > league.entryDeadline) return false;
+    }
+    return true;
   }
 
   /**
