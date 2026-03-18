@@ -860,7 +860,7 @@ const Leagues = (() => {
     const entryDeadline  = document.getElementById('leagueEntryDeadline').value || null;
     const startDate      = document.getElementById('leagueStart').value;
     const endDate        = document.getElementById('leagueEnd').value;
-    const homeMatches    = parseInt(document.getElementById('leagueHomeMatches').value) || 1;
+    const homeMatches    = parseInt(document.getElementById('leagueHomeMatches').value); // 0 = meet once, 1 = home&away (no || fallback — 0 is valid)
     const neutralVenueId = document.getElementById('leagueNeutralVenue').value || null;
     const playingDay     = parseInt(document.getElementById('leaguePlayingDay').value);
     const matchTime      = document.getElementById('leagueMatchTime').value || '14:00';
