@@ -1097,13 +1097,37 @@ const Leagues = (() => {
     }
 
     // Build the full round list based on format:
-    //   0 = "Only meet once"  → single round-robin, no reverse legs
-    //   1 = "Home & Away"     → each pair plays home + away (double the rounds)
+    //   0 = "Only meet once"  → single round-robin with greedy H/A balancing
+    //   1 = "Home & Away"     → each pair plays home + away (inherently balanced)
     const allRounds = [];
     if (homeMatchesPerPair === 0) {
-      // Each pair meets exactly once — use singleRR as-is
-      singleRRRounds.forEach(round => allRounds.push(round));
+      // Each pair meets exactly once.
+      // The Berger algorithm fixes circle[0] so that team is always "home" by
+      // default — apply a greedy rebalancing pass so home/away is spread as
+      // evenly as possible across all teams (max imbalance of 1 per team, which
+      // is unavoidable when each team plays an odd number of games).
+      const homeCounts = {};
+      teams.forEach(t => { homeCounts[t.participantId] = 0; });
+
+      singleRRRounds.forEach(round => {
+        const balancedRound = round.map(m => {
+          const hCount = homeCounts[m.home.participantId];
+          const aCount = homeCounts[m.away.participantId];
+          if (hCount <= aCount) {
+            // Keep original assignment — home team has fewer (or equal) home games
+            homeCounts[m.home.participantId]++;
+            return m;
+          } else {
+            // Swap — away team has fewer home games so give them the home slot
+            homeCounts[m.away.participantId]++;
+            return { home: m.away, away: m.home };
+          }
+        });
+        allRounds.push(balancedRound);
+      });
     } else {
+      // Home & Away: push each round followed immediately by its mirror.
+      // Every team ends up with exactly (N-1) home and (N-1) away games.
       const reps = Math.max(1, homeMatchesPerPair);
       for (let rep = 0; rep < reps; rep++) {
         singleRRRounds.forEach(round => {
