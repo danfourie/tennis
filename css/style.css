@@ -1146,6 +1146,30 @@ body {
   border: 1px solid #fecaca;
 }
 
+/* ── Pending entries banner (admin/master view on league card) ─ */
+.pending-entries-banner {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .4rem;
+  margin-top: .5rem;
+  padding: .4rem .6rem;
+  background: #fffbeb;
+  border: 1.5px solid #fcd34d;
+  border-radius: 8px;
+  font-size: .82rem;
+  color: #92400e;
+}
+.card--has-pending {
+  border-color: #fcd34d !important;
+  box-shadow: 0 0 0 2px #fde68a55;
+}
+/* ── Admin league list item: pending highlight ─────────────── */
+.admin-module-item--pending {
+  border-left: 4px solid #f59e0b;
+  background: #fffdf0;
+}
+
 /* ── League card: entered team list ──────────────────────── */
 .entry-team-list {
   margin-top: .5rem;

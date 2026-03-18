@@ -241,6 +241,9 @@ const Leagues = (() => {
     container.querySelectorAll('[data-league-view]').forEach(btn => {
       btn.addEventListener('click', () => openLeagueDetail(btn.dataset.leagueView));
     });
+    container.querySelectorAll('[data-league-entries-quick]').forEach(btn => {
+      btn.addEventListener('click', () => openEntriesModal(btn.dataset.leagueEntriesQuick));
+    });
     container.querySelectorAll('[data-league-enter]').forEach(btn => {
       btn.addEventListener('click', () => openEntryModal(btn.dataset.leagueEnter));
     });
@@ -308,7 +311,21 @@ const Leagues = (() => {
       }
     }
 
-    return `<div class="card">
+    // ── Pending entries banner (admin/master only) ────────────
+    let pendingBanner = '';
+    if (typeof Auth !== 'undefined' && Auth.isAdmin()) {
+      const pendingCount = DB.getLeagueEntries
+        ? DB.getLeagueEntries().filter(e => e.leagueId === l.id && e.status === 'pending').length
+        : 0;
+      if (pendingCount > 0) {
+        pendingBanner = `<div class="pending-entries-banner">
+          ⏳ <strong>${pendingCount} pending entr${pendingCount === 1 ? 'y' : 'ies'}</strong> awaiting approval
+          <button class="btn btn-xs btn-primary" style="margin-left:.5rem" data-league-entries-quick="${l.id}">Review</button>
+        </div>`;
+      }
+    }
+
+    return `<div class="card${pendingBanner ? ' card--has-pending' : ''}">
       <div class="card-header">
         <div>
           <div class="card-title">${esc(l.name)}</div>
@@ -321,6 +338,7 @@ const Leagues = (() => {
         <div class="text-muted">${l.startDate ? formatDate(l.startDate) : '—'} → ${l.endDate ? formatDate(l.endDate) : '—'}</div>
         ${deadlineRow}
         <div class="text-muted mt-1">${totalFixtures} fixtures · ${played} played</div>
+        ${pendingBanner}
         ${entryList}
       </div>
       <div class="card-footer">
@@ -365,9 +383,9 @@ const Leagues = (() => {
         ? `<div class="module-meta">📋 Entry deadline: ${formatDate(l.entryDeadline)}${_entryOpen(l) ? ' · <em style="color:var(--success)">Open</em>' : ' · <em style="color:var(--danger)">Closed</em>'}</div>`
         : '';
 
-      return `<div class="admin-module-item" data-league-id="${l.id}">
+      return `<div class="admin-module-item${pendingEntries.length > 0 ? ' admin-module-item--pending' : ''}" data-league-id="${l.id}">
         <div class="module-info">
-          <div class="module-title">${esc(l.name)}</div>
+          <div class="module-title">${esc(l.name)}${pendingEntries.length > 0 ? ` <span class="badge badge-amber" style="font-size:.72rem;vertical-align:middle">⏳ ${pendingEntries.length} pending</span>` : ''}</div>
           <div class="module-meta">
             ${esc(l.division || 'No division')}
             · ${l.startDate ? formatDate(l.startDate) : '?'} → ${l.endDate ? formatDate(l.endDate) : '?'}
