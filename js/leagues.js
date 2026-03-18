@@ -549,6 +549,9 @@ const Leagues = (() => {
     DB.updateLeagueEntry(updated);
     DB.writeAudit('entry_approved', 'league', `Approved entry: ${entry.teamLabel} in ${league.name}`, entryId, entry.teamLabel);
 
+    // ── Add school to league participants ──────────────────────────────────
+    _addParticipantFromEntry(league, entry);
+
     // Notify the school
     await NotificationService.sendToSchool(entry.schoolId, {
       type:     'league_entry',
@@ -557,9 +560,45 @@ const Leagues = (() => {
       leagueId: leagueId,
     });
 
-    toast('Entry approved ✓', 'success');
+    toast('Entry approved — school added to league ✓', 'success');
     _renderEntriesModal(leagueId);
     renderAdmin();
+    render();
+  }
+
+  /**
+   * Adds a school (from an entry) to a league's participants + schoolIds + standings.
+   * Does NOT regenerate fixtures — master can do that via Edit League.
+   */
+  function _addParticipantFromEntry(league, entry) {
+    const participants = _getParticipants(league).slice(); // copy
+    const suffix       = entry.teamSuffix || '';
+    const participantId = entry.schoolId + (suffix ? '_' + suffix : '');
+
+    // Avoid duplicates
+    if (participants.some(p => p.participantId === participantId)) return;
+
+    participants.push({
+      participantId,
+      schoolId:   entry.schoolId,
+      teamSuffix: suffix,
+      teamName:   entry.teamName || '',
+    });
+
+    const schoolIds  = [...new Set(participants.map(p => p.schoolId))];
+    const standings  = generateStandings(participants);
+
+    // Merge new participants into existing standings without wiping played results
+    const existingStandings = league.standings || [];
+    const mergedStandings   = standings.map(row => {
+      const ex = existingStandings.find(r => r.participantId === row.participantId);
+      return ex || row;
+    });
+
+    const updatedLeague = { ...league, participants, schoolIds, standings: mergedStandings };
+    DB.updateLeague(updatedLeague);
+    DB.writeAudit('league_participant_added', 'league',
+      `${entry.teamLabel} added to ${league.name} participants`, league.id, entry.teamLabel);
   }
 
   async function _rejectEntry(entryId, leagueId) {
@@ -856,6 +895,10 @@ const Leagues = (() => {
     if (id) {
       DB.updateLeague(league);
       DB.writeAudit('league_updated', 'league', `Updated league: ${name}`, league.id, name);
+
+      // Auto-approve any pending entries whose school was just added to the league
+      _autoApproveEntriesForParticipants(league);
+
       toast('League updated', 'success');
     } else {
       DB.addLeague(league);
@@ -875,6 +918,42 @@ const Leagues = (() => {
     render();
     renderAdmin();
     Calendar.refresh();
+  }
+
+  /**
+   * After a full save, auto-approve any pending leagueEntries whose schoolId
+   * is now in the league's participants, and notify the school.
+   */
+  async function _autoApproveEntriesForParticipants(league) {
+    const profile      = Auth.getProfile();
+    const approverName = profile ? (profile.displayName || profile.email) : 'Admin';
+    const approverUid  = profile ? profile.uid : null;
+    const participantSchoolIds = new Set(league.participants.map(p => p.schoolId));
+
+    const pending = DB.getEntriesForLeague(league.id).filter(
+      e => e.status === 'pending' && participantSchoolIds.has(e.schoolId)
+    );
+    for (const entry of pending) {
+      const updated = {
+        ...entry,
+        status:         'approved',
+        approvedBy:     approverUid,
+        approvedByName: approverName,
+        approvedAt:     new Date().toISOString(),
+      };
+      DB.updateLeagueEntry(updated);
+      DB.writeAudit('entry_approved', 'league',
+        `Auto-approved entry: ${entry.teamLabel} in ${league.name}`, entry.id, entry.teamLabel);
+
+      if (typeof NotificationService !== 'undefined') {
+        await NotificationService.sendToSchool(entry.schoolId, {
+          type:     'league_entry',
+          title:    `League entry approved: ${league.name}`,
+          body:     `Your entry for "${entry.teamLabel}" in ${league.name}${league.division ? ' · ' + league.division : ''} has been approved. Welcome to the league!`,
+          leagueId: league.id,
+        });
+      }
+    }
   }
 
   // ════════════════════════════════════════════════════════════
