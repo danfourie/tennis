@@ -100,6 +100,7 @@ const Admin = (() => {
       panel.classList.toggle('active', panel.id === `subtab-${tab}`);
     });
     // Lazy-render heavy tabs when first opened
+    if (tab === 'overview')      { renderPendingBookings(); if (typeof Leagues !== 'undefined') Leagues.renderPendingEntries(); }
     if (tab === 'leagues')       Leagues.renderAdmin();
     if (tab === 'tournaments')   Tournaments.renderAdmin();
     if (tab === 'users')         renderUsers();
@@ -114,6 +115,7 @@ const Admin = (() => {
     renderSchools();
     renderClosures();
     renderPendingBookings();
+    if (typeof Leagues !== 'undefined') Leagues.renderPendingEntries();
     // Only re-render active heavy tabs to avoid unnecessary work
     if (_activeTab === 'leagues')       Leagues.renderAdmin();
     if (_activeTab === 'tournaments')   Tournaments.renderAdmin();

@@ -1090,3 +1090,86 @@ body {
   display: flex;
   justify-content: flex-end;
 }
+
+/* ── League Entry Deadline row (on league cards) ─────────── */
+.entry-deadline-row {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  margin-top: .4rem;
+  font-size: .82rem;
+  color: var(--text-muted);
+  flex-wrap: wrap;
+}
+.entry-open-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: .2rem;
+  padding: .15rem .5rem;
+  border-radius: 999px;
+  font-size: .75rem;
+  font-weight: 600;
+  background: #dcfce7;
+  color: #16a34a;
+  border: 1px solid #bbf7d0;
+}
+.entry-closed-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: .2rem;
+  padding: .15rem .5rem;
+  border-radius: 999px;
+  font-size: .75rem;
+  font-weight: 600;
+  background: #fee2e2;
+  color: #dc2626;
+  border: 1px solid #fecaca;
+}
+
+/* ── Admin: league entry rows in the entries modal ────────── */
+.entry-admin-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: .75rem;
+  padding: .75rem 0;
+  border-bottom: 1px solid #f3f4f6;
+  flex-wrap: wrap;
+}
+.entry-admin-row:last-child { border-bottom: none; }
+.entry-admin-info { flex: 1; min-width: 0; }
+.entry-admin-name {
+  display: flex;
+  align-items: center;
+  gap: .35rem;
+  font-size: .9rem;
+  flex-wrap: wrap;
+}
+.entry-admin-meta {
+  font-size: .78rem;
+  color: #6b7280;
+  margin-top: .2rem;
+}
+.entry-admin-actions {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+.entry-move-sel {
+  font-size: .78rem;
+  padding: .2rem .4rem;
+  border: 1px solid #d1d5db;
+  border-radius: 5px;
+  background: #fff;
+  cursor: pointer;
+  max-width: 160px;
+}
+
+/* ── form-hint-inline (used in league modal deadline label) ── */
+.form-hint-inline {
+  font-size: .78rem;
+  color: #9ca3af;
+  font-weight: 400;
+}

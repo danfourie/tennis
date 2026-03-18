@@ -16,14 +16,15 @@
 // IN-MEMORY CACHE
 // ============================================================
 const _cache = {
-  venues:        [],
-  schools:       [],
-  bookings:      [],
-  leagues:       [],
-  tournaments:   [],
-  closures:      [],
-  users:         [],   // loaded on demand by master
-  notifications: [],   // loaded per-user via subscribeNotifications
+  venues:         [],
+  schools:        [],
+  bookings:       [],
+  leagues:        [],
+  tournaments:    [],
+  closures:       [],
+  leagueEntries:  [],  // pending/approved team entries for leagues
+  users:          [],  // loaded on demand by master
+  notifications:  [],  // loaded per-user via subscribeNotifications
   settings: {
     timeSlotStart: '07:00',
     timeSlotEnd:   '21:00',
@@ -154,6 +155,34 @@ const DB = {
   deleteTournament(id) {
     _cache.tournaments = _cache.tournaments.filter(t => t.id !== id);
     _doc('tournaments', id).delete().catch(console.error);
+  },
+
+  // ── League Entries ────────────────────────────────────────
+  /**
+   * leagueEntry shape:
+   *   { id, leagueId, schoolId, teamSuffix, teamLabel,
+   *     status: 'pending'|'approved'|'rejected',
+   *     enteredBy, enteredByName, enteredAt,
+   *     approvedBy?, approvedByName?, approvedAt?,
+   *     movedToLeagueId?, note? }
+   */
+  getLeagueEntries()        { return _cache.leagueEntries; },
+  getEntriesForLeague(lid)  { return _cache.leagueEntries.filter(e => e.leagueId === lid); },
+  getEntriesForSchool(sid)  { return _cache.leagueEntries.filter(e => e.schoolId === sid); },
+
+  addLeagueEntry(entry) {
+    entry.id = entry.id || uid();
+    _cache.leagueEntries.push(entry);
+    _doc('leagueEntries', entry.id).set(entry).catch(console.error);
+    return entry;
+  },
+  updateLeagueEntry(entry) {
+    _cache.leagueEntries = _cache.leagueEntries.map(e => e.id === entry.id ? entry : e);
+    _doc('leagueEntries', entry.id).set(entry).catch(console.error);
+  },
+  deleteLeagueEntry(id) {
+    _cache.leagueEntries = _cache.leagueEntries.filter(e => e.id !== id);
+    _doc('leagueEntries', id).delete().catch(console.error);
   },
 
   // ── Closures ──────────────────────────────────────────────
@@ -326,7 +355,7 @@ const DB = {
 
   // ── Load all public collections from Firestore ────────────
   async loadAll() {
-    const [venues, schools, bookings, leagues, tournaments, closures, settingsDoc] =
+    const [venues, schools, bookings, leagues, tournaments, closures, leagueEntries, settingsDoc] =
       await Promise.all([
         _col('venues').get(),
         _col('schools').get(),
@@ -334,15 +363,17 @@ const DB = {
         _col('leagues').get(),
         _col('tournaments').get(),
         _col('closures').get(),
+        _col('leagueEntries').get(),
         _doc('settings', 'global').get(),
       ]);
 
-    _cache.venues      = venues.docs.map(d => d.data());
-    _cache.schools     = schools.docs.map(d => d.data()).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-    _cache.bookings    = bookings.docs.map(d => d.data());
-    _cache.leagues     = leagues.docs.map(d => d.data());
-    _cache.tournaments = tournaments.docs.map(d => d.data());
-    _cache.closures    = closures.docs.map(d => d.data());
+    _cache.venues         = venues.docs.map(d => d.data());
+    _cache.schools        = schools.docs.map(d => d.data()).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    _cache.bookings       = bookings.docs.map(d => d.data());
+    _cache.leagues        = leagues.docs.map(d => d.data());
+    _cache.tournaments    = tournaments.docs.map(d => d.data());
+    _cache.closures       = closures.docs.map(d => d.data());
+    _cache.leagueEntries  = leagueEntries.docs.map(d => d.data());
     if (settingsDoc.exists) _cache.settings = settingsDoc.data();
 
     // Seed demo data if this is a brand-new project
@@ -364,12 +395,13 @@ const DB = {
       unsubs.push(unsub);
     };
 
-    watch('venues',      'venues');
-    watch('schools',     'schools');
-    watch('bookings',    'bookings');
-    watch('leagues',     'leagues');
-    watch('tournaments', 'tournaments');
-    watch('closures',    'closures');
+    watch('venues',        'venues');
+    watch('schools',       'schools');
+    watch('bookings',      'bookings');
+    watch('leagues',       'leagues');
+    watch('tournaments',   'tournaments');
+    watch('closures',      'closures');
+    watch('leagueEntries', 'leagueEntries');
 
     unsubs.push(
       _doc('settings', 'global').onSnapshot(

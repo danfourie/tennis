@@ -556,6 +556,7 @@ const NotificationService = (() => {
       fixture_cancelled:           '❌',
       general_message:             '📢',
       team_registration_reminder:  '📝',
+      league_entry:                '📝',
     };
     return icons[type] || '🔔';
   }

@@ -113,6 +113,10 @@
       <div class="admin-tab-panel active" id="subtab-overview">
         <div class="admin-grid">
           <div class="admin-card admin-card-full">
+            <h3>📝 Pending League Entries</h3>
+            <div id="pendingEntriesList"></div>
+          </div>
+          <div class="admin-card admin-card-full">
             <h3>⏳ Pending Booking Requests</h3>
             <div id="pendingList"></div>
           </div>
@@ -462,6 +466,15 @@
             </select>
           </div>
         </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Entry Deadline <span class="form-hint-inline">(last date schools can register)</span></label>
+            <input type="date" id="leagueEntryDeadline">
+          </div>
+          <div class="form-group">
+            <!-- spacer -->
+          </div>
+        </div>
         <input type="hidden" id="leagueEditId">
       </div>
       <div class="modal-footer">
@@ -679,6 +692,48 @@
     <div class="loading-box">
       <div class="loading-spinner"></div>
       <div class="loading-message">Connecting…</div>
+    </div>
+  </div>
+
+  <!-- League Entry Confirm Modal -->
+  <div class="modal-overlay hidden" id="leagueEntryModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 id="leagueEntryModalTitle">Enter a Team</h3>
+        <button class="modal-close" data-modal="leagueEntryModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p id="leagueEntryModalDesc" style="margin-bottom:1rem"></p>
+        <div class="form-group" id="leagueEntryTeamGroup">
+          <label>Team slot</label>
+          <select id="leagueEntryTeamSuffix">
+            <option value="">Single team entry</option>
+            <option value="A">Team A (first team)</option>
+            <option value="B">Team B (second team)</option>
+          </select>
+          <small class="form-hint">Your school already has one team entered — select the slot for your second entry.</small>
+        </div>
+        <p class="form-hint" style="margin-top:.5rem">Your entry will be submitted as <strong>pending</strong> and must be approved by the league administrator before it is confirmed.</p>
+        <input type="hidden" id="leagueEntryLeagueId">
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-modal="leagueEntryModal">Cancel</button>
+        <button class="btn btn-primary" id="leagueEntrySubmitBtn">📝 Submit Entry</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Admin: League Entries Review Modal -->
+  <div class="modal-overlay hidden" id="leagueEntriesModal">
+    <div class="modal modal-lg">
+      <div class="modal-header">
+        <h3 id="leagueEntriesModalTitle">League Entries</h3>
+        <button class="modal-close" data-modal="leagueEntriesModal">&times;</button>
+      </div>
+      <div class="modal-body" id="leagueEntriesModalBody"></div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-modal="leagueEntriesModal">Close</button>
+      </div>
     </div>
   </div>
 

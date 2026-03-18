@@ -18,6 +18,9 @@ const Leagues = (() => {
     // Fixture edit modal save
     document.getElementById('fixtureEditSaveBtn').addEventListener('click', saveFixtureEdit);
     document.getElementById('fixtureEditVenue').addEventListener('change', _updateFixtureCourtList);
+    // League entry submit
+    const entrySubmitBtn = document.getElementById('leagueEntrySubmitBtn');
+    if (entrySubmitBtn) entrySubmitBtn.addEventListener('click', _submitEntry);
     render();
   }
 
@@ -43,6 +46,118 @@ const Leagues = (() => {
     const s = DB.getSchools().find(x => x.id === p.schoolId);
     if (!s) return p.participantId;
     return s.name + (p.teamSuffix ? ' ' + p.teamSuffix : '');
+  }
+
+  // ════════════════════════════════════════════════════════════
+  // ENTRY HELPERS
+  // ════════════════════════════════════════════════════════════
+
+  /** True when the entry window is still open for a league. */
+  function _entryOpen(league) {
+    if (!league.entryDeadline) return false;
+    const today = toDateStr(new Date());
+    return today <= league.entryDeadline;
+  }
+
+  /**
+   * How many pending/approved entries does this school have in this league?
+   * Returns { count, entries }
+   */
+  function _schoolEntryCount(leagueId, schoolId) {
+    const entries = DB.getLeagueEntries().filter(
+      e => e.leagueId === leagueId && e.schoolId === schoolId && e.status !== 'rejected'
+    );
+    return { count: entries.length, entries };
+  }
+
+  /** Open the entry-confirm modal pre-filled for this league. */
+  function openEntryModal(leagueId) {
+    const league  = DB.getLeagues().find(l => l.id === leagueId);
+    const profile = Auth.getProfile();
+    if (!league || !profile || !profile.schoolId) return;
+
+    const school = DB.getSchools().find(s => s.id === profile.schoolId);
+    const { count } = _schoolEntryCount(leagueId, profile.schoolId);
+
+    document.getElementById('leagueEntryLeagueId').value = leagueId;
+    document.getElementById('leagueEntryModalTitle').textContent = `Enter a Team — ${league.name}`;
+    document.getElementById('leagueEntryModalDesc').textContent =
+      `You are submitting ${school ? school.name : 'your school'} as a participant in "${league.name}"` +
+      (league.division ? ` (${league.division})` : '') + '.';
+
+    // Show team-suffix selector only if they already have 1 entry
+    const teamGroup   = document.getElementById('leagueEntryTeamGroup');
+    const teamSufSel  = document.getElementById('leagueEntryTeamSuffix');
+    if (count >= 1) {
+      teamGroup.classList.remove('hidden');
+      // Pre-select B (the second slot) by default
+      teamSufSel.value = 'B';
+    } else {
+      teamGroup.classList.add('hidden');
+      teamSufSel.value = '';
+    }
+
+    Modal.open('leagueEntryModal');
+  }
+
+  /** Called when the submit button is clicked inside the entry modal. */
+  async function _submitEntry() {
+    const leagueId = document.getElementById('leagueEntryLeagueId').value;
+    const league   = DB.getLeagues().find(l => l.id === leagueId);
+    const profile  = Auth.getProfile();
+    if (!league || !profile || !profile.schoolId) return;
+
+    const school = DB.getSchools().find(s => s.id === profile.schoolId);
+    const { count } = _schoolEntryCount(leagueId, profile.schoolId);
+
+    // Determine suffix
+    const teamGroup  = document.getElementById('leagueEntryTeamGroup');
+    const showSuffix = !teamGroup.classList.contains('hidden');
+    const teamSuffix = showSuffix ? document.getElementById('leagueEntryTeamSuffix').value : '';
+
+    // Guard: max 2 per league
+    if (count >= 2) { toast('Your school already has 2 teams entered in this league', 'error'); return; }
+    // Guard: entry window
+    if (!_entryOpen(league)) { toast('Entries for this league are closed', 'error'); return; }
+
+    const teamLabel = (school ? school.name : profile.schoolId) + (teamSuffix ? ' ' + teamSuffix : '');
+    const now       = new Date().toISOString();
+
+    const btn = document.getElementById('leagueEntrySubmitBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Submitting…'; }
+
+    try {
+      const entry = DB.addLeagueEntry({
+        leagueId,
+        schoolId:       profile.schoolId,
+        teamSuffix,
+        teamLabel,
+        status:         'pending',
+        enteredBy:      profile.uid,
+        enteredByName:  profile.displayName || profile.email || '',
+        enteredAt:      now,
+      });
+
+      DB.writeAudit('entry_submitted', 'league',
+        `${teamLabel} entered ${league.name}`, entry.id, teamLabel);
+
+      // Notify all masters/admins
+      await NotificationService.sendToMasters({
+        type:     'league_entry',
+        title:    `New league entry: ${teamLabel}`,
+        body:     `${teamLabel} has submitted an entry for "${league.name}"${league.division ? ' · ' + league.division : ''}. Please review and approve.`,
+        leagueId: leagueId,
+      });
+
+      toast('Entry submitted — pending approval ✓', 'success');
+      Modal.close('leagueEntryModal');
+      render();   // refresh cards to show pending badge
+    } catch (err) {
+      console.error('[Leagues] entry submit error:', err);
+      toast('Failed to submit entry', 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = '📝 Submit Entry'; }
+    }
   }
 
   // ════════════════════════════════════════════════════════════
@@ -96,6 +211,9 @@ const Leagues = (() => {
     container.querySelectorAll('[data-league-view]').forEach(btn => {
       btn.addEventListener('click', () => openLeagueDetail(btn.dataset.leagueView));
     });
+    container.querySelectorAll('[data-league-enter]').forEach(btn => {
+      btn.addEventListener('click', () => openEntryModal(btn.dataset.leagueEnter));
+    });
     _initCardSearch('leaguesSearch', '#leaguesList');
     _applyCardSearch('leaguesSearch', '#leaguesList');
   }
@@ -119,6 +237,38 @@ const Leagues = (() => {
     const DAYS = ['Sundays','Mondays','Tuesdays','Wednesdays','Thursdays','Fridays','Saturdays'];
     const dayLabel = l.playingDay !== undefined ? ` · ${DAYS[l.playingDay]}` : '';
 
+    // ── Entry deadline row ────────────────────────────────────
+    const entryOpen   = _entryOpen(l);
+    const deadlineRow = l.entryDeadline
+      ? `<div class="entry-deadline-row">
+           📋 Entry deadline: <strong>${formatDate(l.entryDeadline)}</strong>
+           ${entryOpen
+             ? '<span class="entry-open-badge">Open for entries</span>'
+             : '<span class="entry-closed-badge">Entries closed</span>'}
+         </div>`
+      : '';
+
+    // ── Entry button (only for signed-in school users) ────────
+    let entryBtn = '';
+    const profile  = typeof Auth !== 'undefined' ? Auth.getProfile() : null;
+    if (profile && profile.schoolId) {
+      const { count, entries } = _schoolEntryCount(l.id, profile.schoolId);
+      const hasPending  = entries.some(e => e.status === 'pending');
+      const hasApproved = entries.some(e => e.status === 'approved');
+      if (count >= 2) {
+        entryBtn = `<span class="badge badge-green" style="align-self:center">✓ 2 teams entered</span>`;
+      } else if (hasPending) {
+        entryBtn = `<span class="badge badge-amber" style="align-self:center">📝 Entry pending</span>`;
+      } else if (hasApproved && count === 1 && entryOpen) {
+        entryBtn = `<span class="badge badge-green" style="align-self:center">✓ 1 team entered</span>
+                    <button class="btn btn-sm btn-primary" data-league-enter="${esc(l.id)}">📝 Enter 2nd team</button>`;
+      } else if (hasApproved) {
+        entryBtn = `<span class="badge badge-green" style="align-self:center">✓ Entered</span>`;
+      } else if (entryOpen) {
+        entryBtn = `<button class="btn btn-sm btn-primary" data-league-enter="${esc(l.id)}">📝 Enter a Team</button>`;
+      }
+    }
+
     return `<div class="card">
       <div class="card-header">
         <div>
@@ -130,10 +280,12 @@ const Leagues = (() => {
       <div class="card-body">
         <div style="display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:.5rem">${badges}</div>
         <div class="text-muted">${l.startDate ? formatDate(l.startDate) : '—'} → ${l.endDate ? formatDate(l.endDate) : '—'}</div>
+        ${deadlineRow}
         <div class="text-muted mt-1">${totalFixtures} fixtures · ${played} played</div>
       </div>
       <div class="card-footer">
         <button class="btn btn-sm btn-secondary" data-league-view="${l.id}">View Fixtures &amp; Standings</button>
+        ${entryBtn}
       </div>
     </div>`;
   }
@@ -165,6 +317,14 @@ const Leagues = (() => {
         return `<span style="color:${s.color};margin-right:.4rem">● ${esc(label)}</span>`;
       }).join('');
 
+      const pendingEntries = DB.getEntriesForLeague(l.id).filter(e => e.status === 'pending');
+      const entryBadge = pendingEntries.length > 0
+        ? ` <span class="badge badge-amber" style="font-size:.72rem">${pendingEntries.length} pending</span>`
+        : '';
+      const deadlineMeta = l.entryDeadline
+        ? `<div class="module-meta">📋 Entry deadline: ${formatDate(l.entryDeadline)}${_entryOpen(l) ? ' · <em style="color:var(--success)">Open</em>' : ' · <em style="color:var(--danger)">Closed</em>'}</div>`
+        : '';
+
       return `<div class="admin-module-item" data-league-id="${l.id}">
         <div class="module-info">
           <div class="module-title">${esc(l.name)}</div>
@@ -175,8 +335,10 @@ const Leagues = (() => {
           </div>
           <div class="module-meta" style="margin-top:.25rem">${teamBadges}</div>
           <div class="module-meta">${totalFixtures} fixtures · ${played} played · ${totalFixtures - played} remaining</div>
+          ${deadlineMeta}
         </div>
         <div class="module-actions">
+          <button class="btn btn-sm btn-secondary" data-admin-entries="${l.id}">📝 Entries${entryBadge}</button>
           <button class="btn btn-sm btn-secondary" data-admin-fixtures="${l.id}">📋 Manage Fixtures</button>
           <button class="btn btn-sm btn-secondary" data-admin-league-edit="${l.id}">✏️ Edit</button>
           <button class="btn btn-sm btn-secondary" data-league-notif="${l.id}">🔔 Notify</button>
@@ -185,6 +347,9 @@ const Leagues = (() => {
       </div>`;
     }).join('');
 
+    container.querySelectorAll('[data-admin-entries]').forEach(btn => {
+      btn.addEventListener('click', () => openEntriesModal(btn.dataset.adminEntries));
+    });
     container.querySelectorAll('[data-admin-fixtures]').forEach(btn => {
       btn.addEventListener('click', () => openLeagueDetail(btn.dataset.adminFixtures, true));
     });
@@ -261,6 +426,208 @@ const Leagues = (() => {
   }
 
   // ════════════════════════════════════════════════════════════
+  // ENTRIES ADMIN MODAL
+  // ════════════════════════════════════════════════════════════
+
+  function openEntriesModal(leagueId) {
+    const league  = DB.getLeagues().find(l => l.id === leagueId);
+    if (!league) return;
+    document.getElementById('leagueEntriesModalTitle').textContent =
+      `📝 Entries — ${league.name}`;
+    _renderEntriesModal(leagueId);
+    Modal.open('leagueEntriesModal');
+  }
+
+  function _renderEntriesModal(leagueId) {
+    const body    = document.getElementById('leagueEntriesModalBody');
+    if (!body) return;
+    const league  = DB.getLeagues().find(l => l.id === leagueId);
+    const entries = DB.getEntriesForLeague(leagueId);
+    const leagues = DB.getLeagues().filter(l => l.id !== leagueId);
+
+    if (entries.length === 0) {
+      body.innerHTML = `<p class="text-muted" style="padding:.5rem 0">No entries yet for this league.</p>`;
+      return;
+    }
+
+    const statusBadge = s =>
+      s === 'approved' ? '<span class="badge badge-green">✓ Approved</span>'
+      : s === 'rejected' ? '<span class="badge badge-red">✕ Rejected</span>'
+      : '<span class="badge badge-amber">⏳ Pending</span>';
+
+    const moveOpts = leagues.map(l =>
+      `<option value="${esc(l.id)}">${esc(l.name)}${l.division ? ' · ' + esc(l.division) : ''}</option>`
+    ).join('');
+
+    body.innerHTML = entries.map(e => {
+      const school = DB.getSchools().find(s => s.id === e.schoolId);
+      const dot    = school ? `<span style="color:${school.color}">●</span> ` : '';
+      return `<div class="entry-admin-row" data-entry-id="${esc(e.id)}">
+        <div class="entry-admin-info">
+          <div class="entry-admin-name">${dot}<strong>${esc(e.teamLabel || e.schoolId)}</strong> ${statusBadge(e.status)}</div>
+          <div class="entry-admin-meta">
+            Submitted by ${esc(e.enteredByName || e.enteredBy)} on ${formatDate(e.enteredAt.slice(0,10))}
+            ${e.approvedByName ? `· ${e.status === 'approved' ? 'Approved' : 'Rejected'} by ${esc(e.approvedByName)}` : ''}
+          </div>
+        </div>
+        <div class="entry-admin-actions">
+          ${e.status !== 'approved' ? `<button class="btn btn-xs btn-primary entry-approve-btn">✅ Approve</button>` : ''}
+          ${e.status !== 'rejected' ? `<button class="btn btn-xs btn-danger  entry-reject-btn">✕ Reject</button>` : ''}
+          ${leagues.length > 0 && e.status !== 'rejected'
+            ? `<select class="entry-move-sel" title="Move to another league">
+                 <option value="">🔄 Move to…</option>${moveOpts}
+               </select>`
+            : ''}
+        </div>
+      </div>`;
+    }).join('');
+
+    // Wire approve
+    body.querySelectorAll('.entry-approve-btn').forEach(btn => {
+      const row = btn.closest('[data-entry-id]');
+      btn.addEventListener('click', () => _approveEntry(row.dataset.entryId, leagueId));
+    });
+    // Wire reject
+    body.querySelectorAll('.entry-reject-btn').forEach(btn => {
+      const row = btn.closest('[data-entry-id]');
+      btn.addEventListener('click', () => _rejectEntry(row.dataset.entryId, leagueId));
+    });
+    // Wire move
+    body.querySelectorAll('.entry-move-sel').forEach(sel => {
+      const row = sel.closest('[data-entry-id]');
+      sel.addEventListener('change', () => {
+        if (sel.value) _moveEntry(row.dataset.entryId, leagueId, sel.value);
+      });
+    });
+  }
+
+  async function _approveEntry(entryId, leagueId) {
+    const entry  = DB.getLeagueEntries().find(e => e.id === entryId);
+    const league = DB.getLeagues().find(l => l.id === leagueId);
+    if (!entry || !league) return;
+    const profile = Auth.getProfile();
+    const updated = {
+      ...entry,
+      status:          'approved',
+      approvedBy:      profile ? profile.uid : null,
+      approvedByName:  profile ? (profile.displayName || profile.email) : null,
+      approvedAt:      new Date().toISOString(),
+    };
+    DB.updateLeagueEntry(updated);
+    DB.writeAudit('entry_approved', 'league', `Approved entry: ${entry.teamLabel} in ${league.name}`, entryId, entry.teamLabel);
+
+    // Notify the school
+    await NotificationService.sendToSchool(entry.schoolId, {
+      type:     'league_entry',
+      title:    `League entry approved: ${league.name}`,
+      body:     `Your entry for "${entry.teamLabel}" in ${league.name}${league.division ? ' · ' + league.division : ''} has been approved. Welcome to the league!`,
+      leagueId: leagueId,
+    });
+
+    toast('Entry approved ✓', 'success');
+    _renderEntriesModal(leagueId);
+    renderAdmin();
+  }
+
+  async function _rejectEntry(entryId, leagueId) {
+    const entry  = DB.getLeagueEntries().find(e => e.id === entryId);
+    const league = DB.getLeagues().find(l => l.id === leagueId);
+    if (!entry || !league) return;
+    const profile = Auth.getProfile();
+    const updated = {
+      ...entry,
+      status:          'rejected',
+      approvedBy:      profile ? profile.uid : null,
+      approvedByName:  profile ? (profile.displayName || profile.email) : null,
+      approvedAt:      new Date().toISOString(),
+    };
+    DB.updateLeagueEntry(updated);
+    DB.writeAudit('entry_rejected', 'league', `Rejected entry: ${entry.teamLabel} in ${league.name}`, entryId, entry.teamLabel);
+
+    // Notify the school
+    await NotificationService.sendToSchool(entry.schoolId, {
+      type:     'league_entry',
+      title:    `League entry not accepted: ${league.name}`,
+      body:     `Your entry for "${entry.teamLabel}" in ${league.name}${league.division ? ' · ' + league.division : ''} was not accepted. Please contact the league administrator for more information.`,
+      leagueId: leagueId,
+    });
+
+    toast('Entry rejected', 'success');
+    _renderEntriesModal(leagueId);
+    renderAdmin();
+  }
+
+  async function _moveEntry(entryId, fromLeagueId, toLeagueId) {
+    const entry     = DB.getLeagueEntries().find(e => e.id === entryId);
+    const fromLeague = DB.getLeagues().find(l => l.id === fromLeagueId);
+    const toLeague   = DB.getLeagues().find(l => l.id === toLeagueId);
+    if (!entry || !fromLeague || !toLeague) return;
+    const profile = Auth.getProfile();
+    const updated = {
+      ...entry,
+      leagueId:         toLeagueId,
+      status:           'approved',
+      movedFromLeagueId: fromLeagueId,
+      approvedBy:       profile ? profile.uid : null,
+      approvedByName:   profile ? (profile.displayName || profile.email) : null,
+      approvedAt:       new Date().toISOString(),
+    };
+    DB.updateLeagueEntry(updated);
+    DB.writeAudit('entry_moved', 'league',
+      `Moved entry ${entry.teamLabel} from ${fromLeague.name} to ${toLeague.name}`, entryId, entry.teamLabel);
+
+    // Notify the school
+    await NotificationService.sendToSchool(entry.schoolId, {
+      type:     'league_entry',
+      title:    `League entry moved: ${toLeague.name}`,
+      body:     `Your entry for "${entry.teamLabel}" has been moved from ${fromLeague.name} to ${toLeague.name}${toLeague.division ? ' · ' + toLeague.division : ''}. Your entry is now approved in the new league.`,
+      leagueId: toLeagueId,
+    });
+
+    toast(`Entry moved to ${toLeague.name} ✓`, 'success');
+    Modal.close('leagueEntriesModal');
+    renderAdmin();
+  }
+
+  // ════════════════════════════════════════════════════════════
+  // ADMIN OVERVIEW — pending entries list
+  // ════════════════════════════════════════════════════════════
+
+  function renderPendingEntries() {
+    const el = document.getElementById('pendingEntriesList');
+    if (!el) return;
+    const pending = DB.getLeagueEntries().filter(e => e.status === 'pending');
+    if (pending.length === 0) {
+      el.innerHTML = `<p class="text-muted">No pending entries.</p>`;
+      return;
+    }
+    el.innerHTML = pending.map(e => {
+      const league = DB.getLeagues().find(l => l.id === e.leagueId);
+      const school = DB.getSchools().find(s => s.id === e.schoolId);
+      const dot    = school ? `<span style="color:${school.color}">●</span> ` : '';
+      return `<div class="admin-list-item" style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;flex-wrap:wrap">
+        <div>
+          <div>${dot}<strong>${esc(e.teamLabel || e.schoolId)}</strong>
+            <span class="badge badge-amber" style="font-size:.72rem;margin-left:.3rem">pending</span>
+          </div>
+          <div class="text-muted" style="font-size:.82rem">${esc(league ? league.name : e.leagueId)} · submitted ${_relativeEntryTime(e.enteredAt)}</div>
+        </div>
+        <button class="btn btn-xs btn-secondary" data-overview-entries="${esc(e.leagueId)}">Review</button>
+      </div>`;
+    }).join('');
+
+    el.querySelectorAll('[data-overview-entries]').forEach(btn => {
+      btn.addEventListener('click', () => openEntriesModal(btn.dataset.overviewEntries));
+    });
+  }
+
+  function _relativeEntryTime(iso) {
+    if (!iso) return '';
+    const d = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
+    return d === 0 ? 'today' : d === 1 ? 'yesterday' : `${d} days ago`;
+  }
+
+  // ════════════════════════════════════════════════════════════
   // LEAGUE MODAL (create / edit)
   // ════════════════════════════════════════════════════════════
   function openLeagueModal(id) {
@@ -275,7 +642,8 @@ const Leagues = (() => {
     document.getElementById('leagueEnd').value               = l ? (l.endDate    || '') : '';
     document.getElementById('leagueHomeMatches').value       = l ? (l.homeMatches || 1) : 1;
     document.getElementById('leaguePlayingDay').value        = l !== null ? (l.playingDay !== undefined ? l.playingDay : 5) : 5;
-    document.getElementById('leagueMatchTime').value         = l ? (l.matchTime  || '14:00') : '14:00';
+    document.getElementById('leagueMatchTime').value         = l ? (l.matchTime      || '14:00') : '14:00';
+    document.getElementById('leagueEntryDeadline').value    = l ? (l.entryDeadline  || '')      : '';
     document.getElementById('leagueEditId').value            = l ? l.id : '';
 
     const neutralSel = document.getElementById('leagueNeutralVenue');
@@ -392,12 +760,15 @@ const Leagues = (() => {
     const playingDay   = parseInt(document.getElementById('leaguePlayingDay').value);
     const matchTime    = document.getElementById('leagueMatchTime').value || '14:00';
 
+    const entryDeadline = document.getElementById('leagueEntryDeadline').value || null;
+
     const league = {
       id: id || uid(),
       name,
       division:      document.getElementById('leagueDivision').value.trim(),
       startDate,
       endDate,
+      entryDeadline,
       schoolIds,
       participants,
       homeMatches,
@@ -1370,5 +1741,6 @@ const Leagues = (() => {
     openLeagueDetail(reopenId || leagueId, isAdmin);
   }
 
-  return { init, refresh, render, renderAdmin, openLeagueModal, openLeagueDetail, saveScore, verifyScore };
+  return { init, refresh, render, renderAdmin, openLeagueModal, openLeagueDetail, saveScore, verifyScore,
+           openEntriesModal, renderPendingEntries };
 })();
