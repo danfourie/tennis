@@ -63,6 +63,21 @@ const MySchool = (() => {
     // Wire up the "Exit School View" button in the banner
     const stopBtn = document.getElementById('stopImpersonateBtn');
     if (stopBtn) stopBtn.addEventListener('click', stopImpersonation);
+    // Wire fixture view toggle buttons (once, on DOMContentLoaded)
+    const btnAll  = document.getElementById('msViewAll');
+    const btnNext = document.getElementById('msViewNext');
+    if (btnAll && btnNext) {
+      btnAll .addEventListener('click', () => { _fixtureView = 'all';  _syncToggleBtns(); _render(); });
+      btnNext.addEventListener('click', () => { _fixtureView = 'next'; _syncToggleBtns(); _render(); });
+    }
+  }
+
+  function _syncToggleBtns() {
+    const btnAll  = document.getElementById('msViewAll');
+    const btnNext = document.getElementById('msViewNext');
+    if (!btnAll || !btnNext) return;
+    btnAll .className = `btn btn-sm ${_fixtureView === 'all'  ? 'btn-primary' : 'btn-secondary'}`;
+    btnNext.className = `btn btn-sm ${_fixtureView === 'next' ? 'btn-primary' : 'btn-secondary'}`;
   }
 
   /**
@@ -149,25 +164,7 @@ const MySchool = (() => {
       }
     }
 
-    // Wire fixture view toggle (once)
-    const btnAll  = document.getElementById('msViewAll');
-    const btnNext = document.getElementById('msViewNext');
-    if (btnAll && btnNext && !btnAll.dataset.bound) {
-      const _setView = v => {
-        _fixtureView = v;
-        btnAll .className = `btn btn-sm ${v === 'all'  ? 'btn-primary' : 'btn-secondary'}`;
-        btnNext.className = `btn btn-sm ${v === 'next' ? 'btn-primary' : 'btn-secondary'}`;
-        _render();
-      };
-      btnAll .addEventListener('click', () => _setView('all'));
-      btnNext.addEventListener('click', () => _setView('next'));
-      btnAll.dataset.bound = '1';
-    }
-    // Sync button styles on every render (in case state was set before wiring)
-    if (btnAll && btnNext) {
-      btnAll .className = `btn btn-sm ${_fixtureView === 'all'  ? 'btn-primary' : 'btn-secondary'}`;
-      btnNext.className = `btn btn-sm ${_fixtureView === 'next' ? 'btn-primary' : 'btn-secondary'}`;
-    }
+    _syncToggleBtns();
 
     let myLeagues = DB.getLeagues().filter(l => _parts(l).some(p => p.schoolId === schoolId));
     if (_divFilter) myLeagues = myLeagues.filter(l => (l.division || '') === _divFilter);
