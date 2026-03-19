@@ -406,7 +406,11 @@ const Admin = (() => {
           <div>
             <strong>${esc(v.name)}</strong>
             <div class="text-muted">${v.courts || 0} courts${v.address ? ' · ' + esc(v.address) : ''}</div>
-            <div class="text-muted">${v.contact ? esc(v.contact) : ''}${v.contact && v.email ? ' · ' : ''}${v.email ? esc(v.email) : ''}${v.phone ? ' · ' + esc(v.phone) : ''}</div>
+            ${(v.contacts && v.contacts.length
+                ? v.contacts.map(c => `<div class="text-muted">👤 ${esc(c.name)}${c.email ? ' · ' + esc(c.email) : ''}${c.phone ? ' · ' + esc(c.phone) : ''}</div>`).join('')
+                : (v.email || v.phone || v.contact)
+                    ? `<div class="text-muted">👤 ${v.contact ? esc(v.contact) : ''}${v.contact && v.email ? ' · ' : ''}${v.email ? esc(v.email) : ''}${v.phone ? ' · ' + esc(v.phone) : ''}</div>`
+                    : '')}
           </div>
           <div class="item-actions">
             <button class="btn btn-xs btn-secondary" data-venue-edit="${v.id}">Edit</button>
@@ -433,6 +437,17 @@ const Admin = (() => {
     document.getElementById('venuePhone').value            = v ? (v.phone  || '') : '';
     document.getElementById('venueCourtCount').value       = v ? (v.courts || 4) : 4;
     document.getElementById('venueEditId').value           = v ? v.id : '';
+    // Populate contacts
+    const conEl = document.getElementById('venueContacts');
+    const conSeed = (v && v.contacts && v.contacts.length)
+      ? v.contacts
+      : (v && (v.email || v.phone || v.contact) ? [{ name: v.contact || '', email: v.email || '', phone: v.phone || '' }] : []);
+    conEl.innerHTML = conSeed.map(_contactRow).join('');
+    document.getElementById('addContactBtn').onclick = () => {
+      conEl.insertAdjacentHTML('beforeend', _contactRow({ name: '', email: '', phone: '' }));
+      _wireContactRemoveButtons();
+    };
+    _wireContactRemoveButtons();
     Modal.open('venueModal');
   }
 
@@ -444,6 +459,11 @@ const Admin = (() => {
       toast('Each phone number must be 10 digits starting with 0 (separate multiple numbers with /)', 'error'); return;
     }
     const id = document.getElementById('venueEditId').value;
+    const contacts = [...document.querySelectorAll('#venueContacts .contact-row')].map(row => ({
+      name:  row.querySelector('.con-name').value.trim(),
+      email: row.querySelector('.con-email').value.trim(),
+      phone: row.querySelector('.con-phone').value.trim(),
+    })).filter(c => c.name || c.email);
     const venue = {
       id: id || uid(),
       name,
@@ -451,6 +471,7 @@ const Admin = (() => {
       email:   document.getElementById('venueEmail').value.trim(),
       phone,
       courts:  parseInt(document.getElementById('venueCourtCount').value) || 4,
+      contacts,
     };
     if (id) {
       DB.updateVenue(venue);
@@ -492,7 +513,22 @@ const Admin = (() => {
   }
 
   // ── Organiser row helpers ─────────────────────────────────────────────────
-  function _orgRow(o) {
+  function _contactRow(c) {
+  return `<div class="contact-row" style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:.35rem;align-items:center;margin-bottom:.15rem">
+    <input class="form-control form-control-sm con-name"  placeholder="Name"  value="${esc(c.name  || '')}">
+    <input class="form-control form-control-sm con-email" placeholder="Email" value="${esc(c.email || '')}" type="email">
+    <input class="form-control form-control-sm con-phone" placeholder="Phone" value="${esc(c.phone || '')}">
+    <button type="button" class="btn btn-xs btn-danger con-remove" title="Remove">✕</button>
+  </div>`;
+}
+
+function _wireContactRemoveButtons() {
+  document.querySelectorAll('#venueContacts .con-remove').forEach(btn => {
+    btn.onclick = () => btn.closest('.contact-row').remove();
+  });
+}
+
+function _orgRow(o) {
     return `<div class="organizer-row" style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:.35rem;align-items:center;margin-bottom:.15rem">
       <input class="form-control form-control-sm org-name"  placeholder="Name"  value="${esc(o.name  || '')}">
       <input class="form-control form-control-sm org-email" placeholder="Email" value="${esc(o.email || '')}" type="email">
