@@ -491,7 +491,42 @@ const Admin = (() => {
     });
   }
 
+  // ── Organiser row helpers ─────────────────────────────────────────────────
+  function _orgRow(o) {
+    return `<div class="organizer-row" style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:.35rem;align-items:center;margin-bottom:.15rem">
+      <input class="form-control form-control-sm org-name"  placeholder="Name"  value="${esc(o.name  || '')}">
+      <input class="form-control form-control-sm org-email" placeholder="Email" value="${esc(o.email || '')}" type="email">
+      <input class="form-control form-control-sm org-phone" placeholder="Phone" value="${esc(o.phone || '')}">
+      <button type="button" class="btn btn-xs btn-danger org-remove" title="Remove">✕</button>
+    </div>`;
+  }
+
+  function _wireOrgRemoveButtons() {
+    document.querySelectorAll('#schoolOrganizers .org-remove').forEach(btn => {
+      btn.onclick = () => btn.closest('.organizer-row').remove();
+    });
+  }
+
+  // ── Auto-link schools to venues with matching names ───────────────────────
+  function _autoLinkSchoolVenues() {
+    const venues = DB.getVenues();
+    let count = 0;
+    DB.getSchools().forEach(s => {
+      if (s.venueId) return;
+      const match = venues.find(v => v.name.toLowerCase() === s.name.toLowerCase());
+      if (match) {
+        DB.updateSchool({ ...s, venueId: match.id });
+        count++;
+      }
+    });
+    if (count > 0) {
+      toast(`🔗 ${count} school${count > 1 ? 's' : ''} linked to matching home venue${count > 1 ? 's' : ''}`, 'success');
+      render();
+    }
+  }
+
   function renderSchools() {
+    _autoLinkSchoolVenues();
     const el = document.getElementById('schoolsList');
     const schools = [...DB.getSchools()].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
     if (schools.length === 0) {
@@ -526,7 +561,9 @@ const Admin = (() => {
               ${s.team ? `<span class="text-muted" style="font-size:.82rem">(${esc(s.team)})</span>` : ''}
             </div>
             <div class="text-muted">${venue ? esc(venue.name) : 'No home venue'}</div>
-            <div class="text-muted">${s.contact ? esc(s.contact) : ''}${s.email ? ' · ' + esc(s.email) : ''}${s.phone ? ' · ' + esc(s.phone) : ''}</div>
+            ${(s.organizers && s.organizers.length
+                ? s.organizers.map(o => `<div class="text-muted">👤 ${esc(o.name)}${o.email ? ' · ' + esc(o.email) : ''}${o.phone ? ' · ' + esc(o.phone) : ''}</div>`).join('')
+                : s.contact ? `<div class="text-muted">👤 ${esc(s.contact)}${s.email ? ' · ' + esc(s.email) : ''}${s.phone ? ' · ' + esc(s.phone) : ''}</div>` : '')}
             <div class="school-teams" style="margin-top:.35rem">${teamsBadges}</div>
           </div>
           <div class="item-actions">
@@ -606,6 +643,17 @@ const Admin = (() => {
     const vSel = document.getElementById('schoolVenue');
     vSel.innerHTML = `<option value="">No home venue</option>` +
       venues.map(v => `<option value="${v.id}"${s && s.venueId === v.id ? ' selected' : ''}>${esc(v.name)}</option>`).join('');
+    // Populate organizers
+    const orgsEl = document.getElementById('schoolOrganizers');
+    const seed = (s && s.organizers && s.organizers.length)
+      ? s.organizers
+      : (s && s.contact ? [{ name: s.contact, email: s.email || '', phone: s.phone || '' }] : []);
+    orgsEl.innerHTML = seed.map(_orgRow).join('');
+    document.getElementById('addOrganizerBtn').onclick = () => {
+      orgsEl.insertAdjacentHTML('beforeend', _orgRow({ name: '', email: '', phone: '' }));
+      _wireOrgRemoveButtons();
+    };
+    _wireOrgRemoveButtons();
     Modal.open('schoolModal');
   }
 
@@ -617,6 +665,11 @@ const Admin = (() => {
       toast('Each phone number must be 10 digits starting with 0 (separate multiple numbers with /)', 'error'); return;
     }
     const id = document.getElementById('schoolEditId').value;
+    const organizers = [...document.querySelectorAll('#schoolOrganizers .organizer-row')].map(row => ({
+      name:  row.querySelector('.org-name').value.trim(),
+      email: row.querySelector('.org-email').value.trim(),
+      phone: row.querySelector('.org-phone').value.trim(),
+    })).filter(o => o.name || o.email);
     const school = {
       id:      id || uid(),
       name,
@@ -626,6 +679,7 @@ const Admin = (() => {
       email:   document.getElementById('schoolEmail').value.trim(),
       phone,
       color:   document.getElementById('schoolColor').value,
+      organizers,
     };
     if (id) {
       DB.updateSchool(school);

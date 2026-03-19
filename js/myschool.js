@@ -154,7 +154,9 @@ const MySchool = (() => {
         <div class="myschool-school-name">${esc(school.name)}</div>
         ${school.team  ? `<div class="text-muted">${esc(school.team)}</div>` : ''}
         ${venue        ? `<div class="text-muted">🏟 ${esc(venue.name)}</div>` : ''}
-        ${school.contact ? `<div class="text-muted">👤 ${esc(school.contact)}${school.email ? ' · ' + esc(school.email) : ''}${school.phone ? ' · ' + esc(school.phone) : ''}</div>` : ''}
+        ${(school.organizers && school.organizers.length
+            ? school.organizers.map(o => `<div class="text-muted">👤 ${esc(o.name)}${o.email ? ' · ' + esc(o.email) : ''}${o.phone ? ' · ' + esc(o.phone) : ''}</div>`).join('')
+            : school.contact ? `<div class="text-muted">👤 ${esc(school.contact)}${school.email ? ' · ' + esc(school.email) : ''}${school.phone ? ' · ' + esc(school.phone) : ''}</div>` : '')}
       </div>
     </div>`;
 
