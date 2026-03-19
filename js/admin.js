@@ -392,8 +392,33 @@ const Admin = (() => {
 
   // ════════════════════════════════════════════════════════════
   // VENUES
+  function _syncSchoolOrganizersToVenues() {
+    const schools = DB.getSchools();
+    let count = 0;
+    DB.getVenues().forEach(v => {
+      const linked = schools.filter(s => s.venueId === v.id && s.organizers && s.organizers.length);
+      if (!linked.length) return;
+      const existing = v.contacts || [];
+      const keys = new Set(existing.map(c => `${(c.email || '').toLowerCase()}|${c.phone || ''}`));
+      const toAdd = [];
+      linked.forEach(s => s.organizers.forEach(o => {
+        const key = `${(o.email || '').toLowerCase()}|${o.phone || ''}`;
+        if (!keys.has(key)) { toAdd.push(o); keys.add(key); }
+      }));
+      if (toAdd.length) {
+        DB.updateVenue({ ...v, contacts: [...existing, ...toAdd] });
+        count += toAdd.length;
+      }
+    });
+    if (count > 0) {
+      toast(`🔗 ${count} school contact${count > 1 ? 's' : ''} synced to home venues`, 'success');
+      render();
+    }
+  }
+
   // ════════════════════════════════════════════════════════════
   function renderVenues() {
+    _syncSchoolOrganizersToVenues();
     const el = document.getElementById('venuesList');
     const venues = [...DB.getVenues()].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
     if (venues.length === 0) {
