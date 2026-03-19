@@ -396,7 +396,11 @@ const Admin = (() => {
     const schools = DB.getSchools();
     let count = 0;
     DB.getVenues().forEach(v => {
-      const linked = schools.filter(s => s.venueId === v.id && s.organizers && s.organizers.length);
+      const vNameLc = v.name.toLowerCase();
+      const linked = schools.filter(s =>
+        s.organizers && s.organizers.length &&
+        (s.venueId === v.id || (!s.venueId && s.name.toLowerCase() === vNameLc))
+      );
       if (!linked.length) return;
       const existing = v.contacts || [];
       const keys = new Set(existing.map(c => `${(c.email || '').toLowerCase()}|${c.phone || ''}`));
