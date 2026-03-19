@@ -4,13 +4,14 @@
   <meta charset="UTF-8">
   <title>Import Schools — Court Campus</title>
   <style>
-    body { font-family: Arial, sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; background: #f4f4f4; }
+    body { font-family: Arial, sans-serif; max-width: 900px; margin: 40px auto; padding: 0 20px; background: #f4f4f4; }
     h1   { color: #1e3a5f; }
     .card { background: #fff; border-radius: 8px; padding: 24px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,.1); }
     table { width: 100%; border-collapse: collapse; font-size: .9rem; }
     th    { background: #1e3a5f; color: #fff; text-align: left; padding: 8px 10px; }
     td    { padding: 7px 10px; border-bottom: 1px solid #e5e5e5; vertical-align: top; }
     tr:nth-child(even) td { background: #f9f9f9; }
+    td.new-school { background: #fef9c3 !important; }
     button { background: #2563eb; color: #fff; border: none; padding: 12px 28px; border-radius: 6px; font-size: 1rem; cursor: pointer; }
     button:disabled { background: #9ca3af; cursor: not-allowed; }
     #log  { margin-top: 16px; }
@@ -18,24 +19,34 @@
     .ok   { background: #d1fae5; color: #065f46; }
     .err  { background: #fee2e2; color: #991b1b; }
     .info { background: #dbeafe; color: #1e40af; }
+    .upd  { background: #ede9fe; color: #5b21b6; }
     #summary { font-weight: bold; font-size: 1.1rem; margin-top: 16px; }
+    .legend { font-size: .85rem; color: #555; margin-bottom: 12px; }
+    .badge-new { background: #fef08a; color: #854d0e; font-size: .75rem; padding: 2px 6px; border-radius: 4px; font-weight: bold; }
   </style>
 </head>
 <body>
 
 <div class="card">
   <h1>🎾 Import Schools</h1>
-  <p>This page imports <strong>25 schools</strong> from the spreadsheet directly into your Firebase Firestore database.</p>
-  <p><strong>Note:</strong> You must be logged in as <em>master</em> on the main app in the same browser session for this to work. Schools with duplicate names will be skipped.</p>
-  <button id="importBtn" onclick="runImport()">Import All 25 Schools →</button>
+  <p>This page imports <strong>40 schools</strong> from the spreadsheet into Firebase Firestore.</p>
+  <p><strong>Behaviour:</strong></p>
+  <ul>
+    <li><strong>New schools</strong> — created with full organizer list.</li>
+    <li><strong>Existing schools</strong> — organizers array updated (merged), no other fields changed.</li>
+    <li>Schools with no new data are skipped.</li>
+  </ul>
+  <p><strong>Note:</strong> You must be logged in as <em>master</em> on the main app in the same browser session.</p>
+  <button id="importBtn" onclick="runImport()">Import All 40 Schools →</button>
   <div id="log"></div>
   <div id="summary"></div>
 </div>
 
 <div class="card">
   <h2>Preview</h2>
+  <p class="legend"><span class="badge-new">NEW</span> = not yet in database &nbsp;|&nbsp; Yellow rows = new schools</p>
   <table>
-    <thead><tr><th>#</th><th>School Name</th><th>Contact</th><th>Email</th><th>Phone</th></tr></thead>
+    <thead><tr><th>#</th><th>School Name</th><th>Primary Contact</th><th>Email</th><th>Phone</th><th>Organizers</th></tr></thead>
     <tbody id="preview"></tbody>
   </table>
 </div>
@@ -48,39 +59,298 @@
 
 <script>
 // ── School data from spreadsheet ────────────────────────────────────────────
+// Each entry has:
+//   name, contact, email, phone  — primary contact fields (backward compat)
+//   organizers: [{name, email, phone}]  — all organizers from spreadsheet (deduplicated by email+phone)
+//   isNew: true  — marks schools not yet in database (for preview highlighting)
 const SCHOOLS = [
-  { name: "H/S Tuine",                       contact: "Ewalt Carstens",                        email: "ewalt.carstens@gmail.com",              phone: "0828869001" },
-  { name: "St Mary's DSG",                    contact: "Esti van Vuuren",                        email: "tennis@stmarys.pta.school.za",           phone: "0843396792" },
-  { name: "Hoërskool Centurion",              contact: "Marianke Pienaar",                       email: "m.pienaar@hscenturion.co.za",            phone: "0726453151" },
-  { name: "Midstream College",                contact: "Eben du Toit",                           email: "ebendutoit@midstreamcollege.co.za",       phone: "0788535750" },
-  { name: "Pinnacle College Copperleaf",      contact: "Deon Rudman",                            email: "drudman@pinnaclecolleges.co.za",          phone: "0725840734" },
-  { name: "Hoërskool Eldoraigne",             contact: "Corlia Fouche",                          email: "vanstadenc@hseldo.co.za",                phone: "0725394476" },
-  { name: "Hoërskool Zwartkop",               contact: "Marthinus Gouws",                        email: "tennis@zwarries.co.za",                  phone: "0824671723" },
-  { name: "Hoërskool Waterkloof",             contact: "Alexandra Dreyer",                       email: "alexandra.dreyer@klofies.co.za",         phone: "0721960540" },
-  { name: "Hoërskool Die Wilgers",            contact: "Lindi Erasmus",                          email: "erasmusl@hswilgers.co.za",               phone: "0723743974" },
-  { name: "Sutherland High School",           contact: "Daniella Truter",                        email: "daniella.truter@sutherlandhs.co.za",     phone: "0782972125" },
-  { name: "Woodhill College",                 contact: "Vejanthi (Jen) Padayachy",               email: "vejanthi.p@curro.co.za",                 phone: "0842501609" },
-  { name: "Rietondale High School",           contact: "Elodie Jansen",                          email: "ejansen@rietondalehs.co.za",             phone: "0733143239" },
-  { name: "Hatfield Christian School",        contact: "Demi Neuper",                            email: "dneuper@hatfieldcs.co.za",               phone: "0844402350" },
-  { name: "Hoërskool Monument",               contact: "Bianca Avenant",                         email: "bianca.avenant01@gmail.com",             phone: "0621894463" },
-  { name: "Hoërskool Gerrit Maritz",          contact: "Thuli Modisane",                         email: "honeymodisane@gmail.com",                phone: "0783713147" },
-  { name: "Eduplex",                          contact: "Melindi Williams",                       email: "melindi.williams@eduplex.co.za",         phone: "0746272600" },
-  { name: "Hoërskool Garsfontein",            contact: "Mia Cilliers",                           email: "mia@garsies.co.za",                      phone: "0713355773" },
-  { name: "Die Hoërskool Menlopark",          contact: "Elne Coertzen",                          email: "elne.coertzen@menlopark.co.za",          phone: "0824599483" },
-  { name: "Hoërskool Noorheuwel",             contact: "Ciska Nice",                             email: "ciska.nice@nories.co.za",                phone: "0728043346" },
-  { name: "Cornwall Hill College",            contact: "Jason Pieters",                          email: "jay.pieters@cornwallhill.org",            phone: "0818254498" },
-  { name: "AHMP",                             contact: "JP van der Merwe",                       email: "tennis@ahmp.co.za",                      phone: "0827867364" },
-  { name: "Hoërskool Hartbeespoort",          contact: "Daniella Erasmus / Tharien Coetzer",     email: "sport@hsharties.co.za",                  phone: "0781623676 / 0746320827" },
-  { name: "Montana",                          contact: "Lara Ras",                               email: "lras@hsmontana.co.za",                   phone: "0823241931" },
-  { name: "Oos-Moot",                         contact: "Willem Smit",                            email: "smitwillem78@gmail.com",                 phone: "0832738968" },
-  { name: "Hoërskool Pretoria Noord",         contact: "Sandrie van Aswegen",                    email: "S.vanaswegen@pnhs.co.za",                phone: "0718923566" },
+  // ── EXISTING 25 ──────────────────────────────────────────────────────────
+  {
+    name: "H/S Tuine", contact: "Ewalt Carstens", email: "ewalt.carstens@gmail.com", phone: "0828869001",
+    organizers: [
+      { name: "Ewalt Carstens", email: "ewalt.carstens@gmail.com", phone: "0828869001" },
+    ],
+  },
+  {
+    name: "St Mary's DSG", contact: "Esti Van Vuuren", email: "tennis@stmarys.pta.school.za", phone: "0843396792",
+    organizers: [
+      { name: "Esti Van Vuuren", email: "tennis@stmarys.pta.school.za", phone: "0843396792" },
+    ],
+  },
+  {
+    name: "Hoërskool Centurion", contact: "Marianke Pienaar", email: "m.pienaar@hscenturion.co.za", phone: "0726453151",
+    organizers: [
+      { name: "Marianke Pienaar", email: "m.pienaar@hscenturion.co.za", phone: "0726453151" },
+    ],
+  },
+  {
+    name: "Midstream College", contact: "Eben du Toit", email: "ebendutoit@midstreamcollege.co.za", phone: "0788535750",
+    organizers: [
+      { name: "Eben du Toit", email: "ebendutoit@midstreamcollege.co.za", phone: "0788535750" },
+    ],
+  },
+  {
+    name: "Pinnacle College Copperleaf", contact: "Deon Rudman", email: "drudman@pinnaclecolleges.co.za", phone: "0725840734",
+    organizers: [
+      { name: "Deon Rudman", email: "drudman@pinnaclecolleges.co.za", phone: "0725840734" },
+    ],
+  },
+  {
+    name: "Hoërskool Eldoraigne", contact: "Corlia Fouche", email: "vanstadenc@hseldo.co.za", phone: "0725394476",
+    organizers: [
+      { name: "Corlia Fouche",  email: "vanstadenc@hseldo.co.za", phone: "0725394476" },
+      { name: "Franco Dreyer",  email: "dreyerf@hseldo.co.za",    phone: "0823162256" },
+    ],
+  },
+  {
+    name: "Hoërskool Zwartkop", contact: "Marthinus Gouws", email: "tennis@zwarries.co.za", phone: "0824671723",
+    organizers: [
+      { name: "Marthinus Gouws", email: "tennis@zwarries.co.za", phone: "0824671723" },
+    ],
+  },
+  {
+    name: "Hoërskool Waterkloof", contact: "Alexandra Dreyer", email: "alexandra.dreyer@klofies.co.za", phone: "0721960540",
+    organizers: [
+      { name: "Alexandra Dreyer", email: "alexandra.dreyer@klofies.co.za", phone: "0721960540" },
+    ],
+  },
+  {
+    name: "Hoërskool Die Wilgers", contact: "Lindi Erasmus", email: "erasmusl@hswilgers.co.za", phone: "0723743974",
+    organizers: [
+      { name: "Lindi Erasmus", email: "erasmusl@hswilgers.co.za", phone: "0723743974" },
+    ],
+  },
+  {
+    name: "Sutherland High School", contact: "Daniella Truter", email: "daniella.truter@sutherlandhs.co.za", phone: "0782972125",
+    organizers: [
+      { name: "Daniella Truter", email: "daniella.truter@sutherlandhs.co.za", phone: "0782972125" },
+    ],
+  },
+  {
+    name: "Woodhill College", contact: "Vejanthi (Jen) Padayachy", email: "vejanthi.p@curro.co.za", phone: "0842501609",
+    organizers: [
+      { name: "Vejanthi (Jen) Padayachy", email: "vejanthi.p@curro.co.za", phone: "0842501609" },
+    ],
+  },
+  {
+    name: "Rietondale High School", contact: "Elodie Jansen", email: "ejansen@rietondalehs.co.za", phone: "0733143239",
+    organizers: [
+      { name: "Elodie Jansen", email: "ejansen@rietondalehs.co.za", phone: "0733143239" },
+    ],
+  },
+  {
+    name: "Hatfield Christian School", contact: "Demi Neuper", email: "dneuper@hatfieldcs.co.za", phone: "0844402350",
+    organizers: [
+      { name: "Demi Neuper", email: "dneuper@hatfieldcs.co.za", phone: "0844402350" },
+    ],
+  },
+  {
+    name: "Hoërskool Monument", contact: "Bianca Avenant", email: "bianca.avenant01@gmail.com", phone: "0621894463",
+    organizers: [
+      { name: "Bianca Avenant", email: "bianca.avenant01@gmail.com", phone: "0621894463" },
+    ],
+  },
+  {
+    name: "Hoërskool Gerrit Maritz", contact: "Thuli Modisane", email: "honeymodisane@gmail.com", phone: "0783713147",
+    organizers: [
+      { name: "Thuli Modisane", email: "honeymodisane@gmail.com", phone: "0783713147" },
+    ],
+  },
+  {
+    name: "Eduplex", contact: "Melindi Williams", email: "melindi.williams@eduplex.co.za", phone: "0746272600",
+    organizers: [
+      { name: "Melindi Williams", email: "melindi.williams@eduplex.co.za", phone: "0746272600" },
+    ],
+  },
+  {
+    name: "Hoërskool Garsfontein", contact: "Mia Cilliers", email: "mia@garsies.co.za", phone: "0713355773",
+    organizers: [
+      { name: "Mia Cilliers", email: "mia@garsies.co.za", phone: "0713355773" },
+    ],
+  },
+  {
+    name: "Die Hoërskool Menlopark", contact: "Elné Coertzen", email: "elne.coertzen@menlopark.co.za", phone: "0824599483",
+    organizers: [
+      { name: "Elné Coertzen", email: "elne.coertzen@menlopark.co.za", phone: "0824599483" },
+    ],
+  },
+  {
+    name: "Hoërskool Noorheuwel", contact: "Ciska Nice", email: "ciska.nice@nories.co.za", phone: "0728043346",
+    organizers: [
+      { name: "Ciska Nice", email: "ciska.nice@nories.co.za", phone: "0728043346" },
+    ],
+  },
+  {
+    name: "Cornwall Hill College", contact: "Jason Pieters", email: "jay.pieters@cornwallhill.org", phone: "0818254498",
+    organizers: [
+      { name: "Jason Pieters", email: "jay.pieters@cornwallhill.org", phone: "0818254498" },
+    ],
+  },
+  {
+    name: "AHMP", contact: "JP van der Merwe", email: "tennis@ahmp.co.za", phone: "0827867364",
+    organizers: [
+      { name: "JP van der Merwe", email: "tennis@ahmp.co.za", phone: "0827867364" },
+    ],
+  },
+  {
+    // Two organizers share the same school email — dedup key is email+phone combined
+    name: "Hoërskool Hartbeespoort", contact: "Daniella Erasmus", email: "sport@hsharties.co.za", phone: "0781623676",
+    organizers: [
+      { name: "Daniella Erasmus",  email: "sport@hsharties.co.za", phone: "0781623676" },
+      { name: "Tharien Coetzer",   email: "sport@hsharties.co.za", phone: "0746320827" },
+    ],
+  },
+  {
+    name: "Montana", contact: "Lara Ras", email: "lras@hsmontana.co.za", phone: "0823241931",
+    organizers: [
+      { name: "Lara Ras", email: "lras@hsmontana.co.za", phone: "0823241931" },
+    ],
+  },
+  {
+    name: "Oos-Moot", contact: "Willem Smit", email: "smitwillem78@gmail.com", phone: "0832738968",
+    organizers: [
+      { name: "Willem Smit", email: "smitwillem78@gmail.com", phone: "0832738968" },
+    ],
+  },
+  {
+    name: "Hoërskool Pretoria Noord", contact: "Sandrie van Aswegen", email: "s.vanaswegen@pnhs.co.za", phone: "0718923566",
+    organizers: [
+      { name: "Sandrie van Aswegen", email: "s.vanaswegen@pnhs.co.za", phone: "0718923566" },
+    ],
+  },
+
+  // ── NEW 15 ───────────────────────────────────────────────────────────────
+  {
+    isNew: true,
+    name: "Afrikaanse Hoër Seunskool", contact: "Gerda Nel", email: "gerda.nel@affies.co.za", phone: "0718892031",
+    organizers: [
+      { name: "Gerda Nel",     email: "gerda.nel@affies.co.za", phone: "0718892031" },
+      { name: "David Jaquire", email: "david.jq@affies.co.za",  phone: "0834153091" },
+    ],
+  },
+  {
+    isNew: true,
+    name: "Hoërskool Wonderboom", contact: "Talita Joubert", email: "joubert.t@wonnies.co.za", phone: "0766361777",
+    organizers: [
+      { name: "Talita Joubert", email: "joubert.t@wonnies.co.za", phone: "0766361777" },
+    ],
+  },
+  {
+    isNew: true,
+    name: "Hoërskool Silverton", contact: "Cornél Koekemoer", email: "cduplessis@hssilverton.com", phone: "0833284475",
+    organizers: [
+      { name: "Cornél Koekemoer", email: "cduplessis@hssilverton.com", phone: "0833284475" },
+      { name: "Lona Myburgh",     email: "diemyburgh@gmail.com",       phone: "0763846844" },
+    ],
+  },
+  {
+    isNew: true,
+    name: "Crawford International Pretoria", contact: "Klaus Ottner", email: "kottner@crawfordinternational.co.za", phone: "0725369575",
+    organizers: [
+      { name: "Klaus Ottner", email: "kottner@crawfordinternational.co.za", phone: "0725369575" },
+    ],
+  },
+  {
+    isNew: true,
+    name: "Hoërskool Akasia", contact: "Ofentse Kekana", email: "ofentsejohhanes@gmail.com", phone: "0676419362",
+    organizers: [
+      { name: "Ofentse Kekana", email: "ofentsejohhanes@gmail.com", phone: "0676419362" },
+    ],
+  },
+  {
+    isNew: true,
+    name: "PHSG", contact: "Gawie Dreyer", email: "gdreyer@phsg.org.za", phone: "0768876407",
+    organizers: [
+      { name: "Gawie Dreyer", email: "gdreyer@phsg.org.za", phone: "0768876407" },
+    ],
+  },
+  {
+    isNew: true,
+    name: "Hoërskool Erasmus", contact: "Harriet Botha", email: "harriet@hserasmus.co.za", phone: "0829611457",
+    organizers: [
+      { name: "Harriet Botha",            email: "harriet@hserasmus.co.za", phone: "0829611457" },
+      { name: "Stephan Janse van Vuuren", email: "stephan@hserasmus.co.za", phone: "0813117199" },
+    ],
+  },
+  {
+    isNew: true,
+    name: "Curro Hazeldean High School", contact: "Leandri Cerff", email: "leandri.c1@curro.co.za", phone: "0836787863",
+    organizers: [
+      { name: "Leandri Cerff", email: "leandri.c1@curro.co.za", phone: "0836787863" },
+    ],
+  },
+  {
+    isNew: true,
+    name: "Loreto Convent School", contact: "Donna Ferreira", email: "d.sequeira.22@gmail.com", phone: "0728976233",
+    organizers: [
+      { name: "Donna Ferreira", email: "d.sequeira.22@gmail.com", phone: "0728976233" },
+    ],
+  },
+  {
+    isNew: true,
+    name: "Pretoria German School", contact: "Keegan Holmwood", email: "holmwood@dspretoria.co.za", phone: "0721553682",
+    organizers: [
+      { name: "Keegan Holmwood", email: "holmwood@dspretoria.co.za", phone: "0721553682" },
+    ],
+  },
+  {
+    isNew: true,
+    name: "Pretoria Boys High School", contact: "Saide Malose Moruane", email: "smoruane@boyshigh.com", phone: "0739716568",
+    organizers: [
+      { name: "Saide Malose Moruane", email: "smoruane@boyshigh.com", phone: "0739716568" },
+    ],
+  },
+  {
+    isNew: true,
+    name: "Maragon Mooikloof", contact: "Delene Hibbert", email: "dehibbert@maragon.co.za", phone: "0842993742",
+    organizers: [
+      { name: "Delene Hibbert", email: "dehibbert@maragon.co.za", phone: "0842993742" },
+    ],
+  },
+  {
+    isNew: true,
+    // Phone number was incomplete in all spreadsheet rows ("076189" / "076") — stored as ""
+    name: "HTS John Vorster", contact: "Nadia Knoesen", email: "nprinsloo@htsjv.co.za", phone: "",
+    organizers: [
+      { name: "Nadia Knoesen", email: "nprinsloo@htsjv.co.za", phone: "" },
+    ],
+  },
+  {
+    isNew: true,
+    name: "St Albans College", contact: "Bathethwa Mthethwa", email: "mthethwab@stalbanscollege.com", phone: "0714079135",
+    organizers: [
+      { name: "Bathethwa Mthethwa", email: "mthethwab@stalbanscollege.com", phone: "0714079135" },
+    ],
+  },
+  {
+    isNew: true,
+    name: "Tyger Valley College", contact: "Brendon Tarr", email: "btarr@tygervalleycollege.co.za", phone: "0761509766",
+    organizers: [
+      { name: "Brendon Tarr", email: "btarr@tygervalleycollege.co.za", phone: "0761509766" },
+    ],
+  },
 ];
 
 // ── Populate preview table ───────────────────────────────────────────────────
 const tbody = document.getElementById('preview');
 SCHOOLS.forEach((s, i) => {
   const tr = document.createElement('tr');
-  tr.innerHTML = `<td>${i+1}</td><td>${s.name}</td><td>${s.contact}</td><td>${s.email}</td><td>${s.phone}</td>`;
+  const nameCell = s.isNew
+    ? `${s.name} <span class="badge-new">NEW</span>`
+    : s.name;
+  const orgCount = s.organizers.length > 1
+    ? `${s.organizers.length} (${s.organizers.map(o => o.name).join(', ')})`
+    : '1';
+  if (s.isNew) {
+    tr.querySelectorAll('td').forEach ? null : null; // placeholder
+  }
+  tr.innerHTML = `
+    <td${s.isNew ? ' class="new-school"' : ''}>${i + 1}</td>
+    <td${s.isNew ? ' class="new-school"' : ''}>${nameCell}</td>
+    <td${s.isNew ? ' class="new-school"' : ''}>${s.contact}</td>
+    <td${s.isNew ? ' class="new-school"' : ''}>${s.email}</td>
+    <td${s.isNew ? ' class="new-school"' : ''}>${s.phone || '<em>incomplete</em>'}</td>
+    <td${s.isNew ? ' class="new-school"' : ''}>${orgCount}</td>`;
   tbody.appendChild(tr);
 });
 
@@ -94,6 +364,24 @@ function log(msg, type = 'info') {
   div.className = `log-item ${type}`;
   div.textContent = msg;
   document.getElementById('log').appendChild(div);
+}
+
+// Merge incoming organizers into existing list.
+// Dedup key: lowercase(email) + '|' + phone — handles schools where
+// multiple organizers share the same email (e.g. Hartbeespoort uses a shared sport@ address).
+function mergeOrganizers(existing, incoming) {
+  const keys = new Set(existing.map(o => `${o.email.toLowerCase()}|${o.phone}`));
+  const merged = [...existing];
+  let added = 0;
+  for (const org of incoming) {
+    const key = `${org.email.toLowerCase()}|${org.phone}`;
+    if (!keys.has(key)) {
+      merged.push(org);
+      keys.add(key);
+      added++;
+    }
+  }
+  return { merged, added };
 }
 
 // ── Import ───────────────────────────────────────────────────────────────────
@@ -129,54 +417,77 @@ async function runImport() {
 
   log(`✅ Logged in as ${userRole}: ${user.email}`, 'ok');
 
-  // Fetch existing school names to skip duplicates
+  // Fetch all existing schools
   const existingSnap = await db.collection('schools').get();
-  const existingNames = new Set(existingSnap.docs.map(d => d.data().name?.toLowerCase()));
-  log(`ℹ️  ${existingNames.size} school(s) already in database — duplicates will be skipped.`, 'info');
+  const existingMap  = new Map(); // lowercase name → doc snapshot
+  existingSnap.docs.forEach(d => {
+    const n = d.data().name;
+    if (n) existingMap.set(n.toLowerCase(), d);
+  });
+  log(`ℹ️  ${existingMap.size} school(s) already in database.`, 'info');
 
-  let added = 0, skipped = 0, errors = 0;
+  let added = 0, updated = 0, skipped = 0, errors = 0;
 
   for (const s of SCHOOLS) {
-    if (existingNames.has(s.name.toLowerCase())) {
-      log(`⏭️  Skipped (already exists): ${s.name}`, 'info');
-      skipped++;
-      continue;
-    }
-    try {
-      const id = uid();
-      await db.collection('schools').doc(id).set({
-        id,
-        name:    s.name,
-        team:    '',
-        contact: s.contact,
-        email:   s.email,
-        phone:   s.phone,
-        venueId: null,
-        color:   '#3b82f6',
-      });
+    const existingDoc = existingMap.get(s.name.toLowerCase());
 
-      // Write audit log
-      await db.collection('auditLog').add({
-        action:      'school_imported',
-        category:    'admin',
-        description: `School imported: ${s.name}`,
-        entityId:    id,
-        entityName:  s.name,
-        userId:      user.uid,
-        userName:    user.displayName || user.email,
-        timestamp:   new Date().toISOString(),
-      });
+    if (existingDoc) {
+      // ── UPDATE: merge organizers into existing school ──────────────────
+      try {
+        const existingOrgs = existingDoc.data().organizers || [];
+        const { merged, added: newCount } = mergeOrganizers(existingOrgs, s.organizers);
 
-      log(`✅ Imported: ${s.name}`, 'ok');
-      added++;
-    } catch (err) {
-      log(`❌ Failed: ${s.name} — ${err.message}`, 'err');
-      errors++;
+        if (newCount > 0) {
+          await db.collection('schools').doc(existingDoc.id).update({ organizers: merged });
+          log(`🔄 Updated organizers for: ${s.name} (+${newCount} added)`, 'upd');
+          updated++;
+        } else {
+          log(`⏭️  Skipped (no new data): ${s.name}`, 'info');
+          skipped++;
+        }
+      } catch (err) {
+        log(`❌ Failed to update: ${s.name} — ${err.message}`, 'err');
+        errors++;
+      }
+    } else {
+      // ── CREATE: new school ────────────────────────────────────────────
+      try {
+        const id = uid();
+        await db.collection('schools').doc(id).set({
+          id,
+          name:       s.name,
+          team:       '',
+          contact:    s.contact,
+          email:      s.email,
+          phone:      s.phone,
+          venueId:    null,
+          color:      '#3b82f6',
+          organizers: s.organizers,
+        });
+
+        // Write audit log
+        await db.collection('auditLog').add({
+          action:      'school_imported',
+          category:    'admin',
+          description: `School imported: ${s.name}`,
+          entityId:    id,
+          entityName:  s.name,
+          userId:      user.uid,
+          userName:    user.displayName || user.email,
+          timestamp:   new Date().toISOString(),
+        });
+
+        log(`✅ Imported: ${s.name}`, 'ok');
+        added++;
+      } catch (err) {
+        log(`❌ Failed: ${s.name} — ${err.message}`, 'err');
+        errors++;
+      }
     }
   }
 
   document.getElementById('summary').textContent =
-    `Done — ${added} added, ${skipped} skipped, ${errors} failed.`;
+    `Done — ${added} added, ${updated} updated, ${skipped} skipped, ${errors} failed.`;
   btn.disabled = false;
 }
 </script>
