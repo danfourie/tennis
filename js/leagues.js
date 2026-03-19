@@ -13,6 +13,19 @@
 
 const Leagues = (() => {
 
+  // ── Division filter state ────────────────────────────────────
+  let _pubDivFilter   = '';
+  let _adminDivFilter = '';
+
+  /** Populate a division <select> from current leagues, preserving selection. */
+  function _populateDivFilter(id, currentVal) {
+    const sel = document.getElementById(id);
+    if (!sel) return;
+    const divs = [...new Set(DB.getLeagues().map(l => l.division || '').filter(Boolean))].sort();
+    sel.innerHTML = '<option value="">All Divisions</option>' +
+      divs.map(d => `<option value="${esc(d)}"${d === currentVal ? ' selected' : ''}>${esc(d)}</option>`).join('');
+  }
+
   function init() {
     document.getElementById('leagueSubmitBtn').addEventListener('click', () => saveLeague(false));
     const saveDetailsBtn = document.getElementById('leagueSaveDetailsBtn');
@@ -23,6 +36,11 @@ const Leagues = (() => {
     // League entry submit
     const entrySubmitBtn = document.getElementById('leagueEntrySubmitBtn');
     if (entrySubmitBtn) entrySubmitBtn.addEventListener('click', _submitEntry);
+    // Division filters
+    const pubDivSel = document.getElementById('leaguesDivFilter');
+    if (pubDivSel) pubDivSel.addEventListener('change', e => { _pubDivFilter = e.target.value; render(); });
+    const admDivSel = document.getElementById('adminLeaguesDivFilter');
+    if (admDivSel) admDivSel.addEventListener('change', e => { _adminDivFilter = e.target.value; renderAdmin(); });
     render();
   }
 
@@ -231,7 +249,9 @@ const Leagues = (() => {
   function render() {
     const container = document.getElementById('leaguesList');
     if (!container) return;
-    const leagues = _sortLeagues(DB.getLeagues());
+    _populateDivFilter('leaguesDivFilter', _pubDivFilter);
+    let leagues = _sortLeagues(DB.getLeagues());
+    if (_pubDivFilter) leagues = leagues.filter(l => (l.division || '') === _pubDivFilter);
     if (leagues.length === 0) {
       container.innerHTML = `<div class="empty-state"><div class="empty-icon">🏆</div><p>No leagues yet.</p></div>`;
       _initCardSearch('leaguesSearch', '#leaguesList');
@@ -354,7 +374,9 @@ const Leagues = (() => {
   function renderAdmin() {
     const container = document.getElementById('adminLeaguesList');
     if (!container) return;
-    const leagues = _sortLeagues(DB.getLeagues());
+    _populateDivFilter('adminLeaguesDivFilter', _adminDivFilter);
+    let leagues = _sortLeagues(DB.getLeagues());
+    if (_adminDivFilter) leagues = leagues.filter(l => (l.division || '') === _adminDivFilter);
     if (leagues.length === 0) {
       container.innerHTML = `<div class="empty-state"><div class="empty-icon">🏆</div><p>No leagues yet. Click <strong>+ Create League</strong> to get started.</p></div>`;
       return;

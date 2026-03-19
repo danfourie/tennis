@@ -13,6 +13,7 @@ const MySchool = (() => {
 
   // ── state ────────────────────────────────────────────────────
   let _impersonateSchoolId = null;   // null = normal mode
+  let _divFilter           = '';     // division filter ('') = all
 
   // ── helpers ─────────────────────────────────────────────────
   /** Backward-compatible participant list for a league. */
@@ -132,8 +133,23 @@ const MySchool = (() => {
     const title = document.getElementById('myschoolTitle');
     if (title) title.textContent = school.name;
 
-    const venue     = school.venueId ? DB.getVenues().find(v => v.id === school.venueId) : null;
-    const myLeagues = DB.getLeagues().filter(l => _parts(l).some(p => p.schoolId === schoolId));
+    const venue = school.venueId ? DB.getVenues().find(v => v.id === school.venueId) : null;
+
+    // Populate + wire the division filter (idempotent)
+    const divSel = document.getElementById('myschoolDivFilter');
+    if (divSel) {
+      const allLeagues = DB.getLeagues().filter(l => _parts(l).some(p => p.schoolId === schoolId));
+      const divs = [...new Set(allLeagues.map(l => l.division || '').filter(Boolean))].sort();
+      divSel.innerHTML = '<option value="">All Divisions</option>' +
+        divs.map(d => `<option value="${esc(d)}"${d === _divFilter ? ' selected' : ''}>${esc(d)}</option>`).join('');
+      if (!divSel.dataset.bound) {
+        divSel.addEventListener('change', e => { _divFilter = e.target.value; _render(); });
+        divSel.dataset.bound = '1';
+      }
+    }
+
+    let myLeagues = DB.getLeagues().filter(l => _parts(l).some(p => p.schoolId === schoolId));
+    if (_divFilter) myLeagues = myLeagues.filter(l => (l.division || '') === _divFilter);
 
     // Pending/rejected entries for leagues where this school is NOT yet a participant
     const enrolledLeagueIds = new Set(myLeagues.map(l => l.id));

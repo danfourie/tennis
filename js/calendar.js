@@ -97,6 +97,15 @@ const Calendar = (() => {
     const venues = [...DB.getVenues()].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
     while (sel.options.length > 1) sel.remove(1);
     venues.forEach(v => sel.add(new Option(v.name, v.id)));
+    // Default to the user's home venue on first load (only when still on 'all')
+    if (currentVenueFilter === 'all' && Auth.isLoggedIn()) {
+      const profile = Auth.getProfile();
+      if (profile && profile.schoolId) {
+        const school = DB.getSchools().find(s => s.id === profile.schoolId);
+        if (school && school.venueId) currentVenueFilter = school.venueId;
+      }
+    }
+    sel.value = currentVenueFilter;
   }
 
   function refresh() {

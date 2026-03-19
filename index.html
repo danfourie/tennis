@@ -69,7 +69,12 @@
     <section id="view-leagues" class="view hidden">
       <div class="view-header">
         <h2>School Leagues</h2>
-        <input type="search" id="leaguesSearch" class="search-input" placeholder="🔍 Search leagues…">
+        <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+          <select id="leaguesDivFilter" class="search-input" style="width:auto;min-width:150px">
+            <option value="">All Divisions</option>
+          </select>
+          <input type="search" id="leaguesSearch" class="search-input" placeholder="🔍 Search leagues…">
+        </div>
       </div>
       <div id="leaguesList" class="cards-grid"></div>
     </section>
@@ -87,6 +92,9 @@
     <section id="view-myschool" class="view hidden">
       <div class="view-header">
         <h2 id="myschoolTitle">My School</h2>
+        <select id="myschoolDivFilter" class="search-input" style="width:auto;min-width:150px">
+          <option value="">All Divisions</option>
+        </select>
       </div>
       <div id="myschoolContent"></div>
     </section>
@@ -128,6 +136,9 @@
         <div class="admin-panel-header">
           <h3>🏆 Leagues</h3>
           <div class="panel-header-right">
+            <select id="adminLeaguesDivFilter" class="search-input" style="width:auto;min-width:150px">
+              <option value="">All Divisions</option>
+            </select>
             <input type="search" id="adminLeaguesSearch" class="search-input" placeholder="🔍 Search…">
             <button class="btn btn-primary" id="addLeagueBtnAdmin">+ Create League</button>
           </div>
