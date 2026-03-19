@@ -208,3 +208,9 @@
 .timeslot-btn:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); }
 .timeslot-btn.selected { background: var(--primary); color: white; border-color: var(--primary); }
 .timeslot-btn:disabled { opacity: .4; cursor: not-allowed; background: var(--neutral-light); }
+
+@media (max-width: 640px) {
+  /* Contain the 700px-wide grid within the scroll container.
+     The existing overflow:auto on .calendar-container handles internal scroll. */
+  .calendar-container { max-width: 100%; }
+}

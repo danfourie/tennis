@@ -299,3 +299,8 @@
   border-bottom: 1px dashed var(--border);
 }
 .editable-score:focus { outline: none; border-bottom-color: var(--primary); }
+
+@media (max-width: 640px) {
+  .modal-overlay                { padding: .5rem; }
+  .modal, .modal-lg, .modal-xl { max-width: calc(100vw - 1rem); }
+}
