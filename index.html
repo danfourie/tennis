@@ -92,9 +92,15 @@
     <section id="view-myschool" class="view hidden">
       <div class="view-header">
         <h2 id="myschoolTitle">My School</h2>
-        <select id="myschoolDivFilter" class="search-input" style="width:auto;min-width:150px">
-          <option value="">All Divisions</option>
-        </select>
+        <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+          <select id="myschoolDivFilter" class="search-input" style="width:auto;min-width:150px">
+            <option value="">All Divisions</option>
+          </select>
+          <div style="display:flex;gap:.25rem">
+            <button id="msViewAll"  class="btn btn-sm btn-primary"   title="Show all fixtures per league">All fixtures</button>
+            <button id="msViewNext" class="btn btn-sm btn-secondary" title="Show only the next upcoming fixture per league">Next only</button>
+          </div>
+        </div>
       </div>
       <div id="myschoolContent"></div>
     </section>

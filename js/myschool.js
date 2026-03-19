@@ -14,6 +14,7 @@ const MySchool = (() => {
   // ── state ────────────────────────────────────────────────────
   let _impersonateSchoolId = null;   // null = normal mode
   let _divFilter           = '';     // division filter ('') = all
+  let _fixtureView         = 'all';  // 'all' | 'next'
 
   // ── helpers ─────────────────────────────────────────────────
   /** Backward-compatible participant list for a league. */
@@ -146,6 +147,26 @@ const MySchool = (() => {
         divSel.addEventListener('change', e => { _divFilter = e.target.value; _render(); });
         divSel.dataset.bound = '1';
       }
+    }
+
+    // Wire fixture view toggle (once)
+    const btnAll  = document.getElementById('msViewAll');
+    const btnNext = document.getElementById('msViewNext');
+    if (btnAll && btnNext && !btnAll.dataset.bound) {
+      const _setView = v => {
+        _fixtureView = v;
+        btnAll .className = `btn btn-sm ${v === 'all'  ? 'btn-primary' : 'btn-secondary'}`;
+        btnNext.className = `btn btn-sm ${v === 'next' ? 'btn-primary' : 'btn-secondary'}`;
+        _render();
+      };
+      btnAll .addEventListener('click', () => _setView('all'));
+      btnNext.addEventListener('click', () => _setView('next'));
+      btnAll.dataset.bound = '1';
+    }
+    // Sync button styles on every render (in case state was set before wiring)
+    if (btnAll && btnNext) {
+      btnAll .className = `btn btn-sm ${_fixtureView === 'all'  ? 'btn-primary' : 'btn-secondary'}`;
+      btnNext.className = `btn btn-sm ${_fixtureView === 'next' ? 'btn-primary' : 'btn-secondary'}`;
     }
 
     let myLeagues = DB.getLeagues().filter(l => _parts(l).some(p => p.schoolId === schoolId));
@@ -438,11 +459,13 @@ const MySchool = (() => {
       }
     }
 
-    const upcoming = myFixtures
+    const allUpcoming = myFixtures
       .filter(f => f.homeScore === null || f.homeScore === undefined)
       .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
 
-    const recent = myFixtures
+    const upcoming = _fixtureView === 'next' ? allUpcoming.slice(0, 1) : allUpcoming;
+
+    const recent = _fixtureView === 'next' ? [] : myFixtures
       .filter(f => f.homeScore !== null && f.homeScore !== undefined)
       .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
       .slice(0, 5);
