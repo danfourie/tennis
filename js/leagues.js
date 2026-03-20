@@ -1,3 +1,5 @@
+// BUILD: 20260321-fix
+console.log('[leagues.js] BUILD 20260321-fix loaded');
 /**
  * leagues.js — School league management.
  *   Public view  : render()       → #leaguesList        (read-only / score entry)
@@ -422,6 +424,7 @@ const Leagues = (() => {
           <button class="btn btn-sm btn-secondary" data-admin-fixtures="${l.id}">📋 Manage Fixtures</button>
           <button class="btn btn-sm btn-secondary" data-admin-league-edit="${l.id}">✏️ Edit</button>
           <button class="btn btn-sm btn-secondary" data-league-notif="${l.id}">🔔 Notify</button>
+          <button class="btn btn-sm btn-warning"   data-reset-fixtures="${l.id}">🔄 Reset Fixtures</button>
           <button class="btn btn-sm btn-danger"    data-admin-league-del="${l.id}">Delete</button>
         </div>
       </div>`;
@@ -438,6 +441,16 @@ const Leagues = (() => {
     });
     container.querySelectorAll('[data-admin-league-del]').forEach(btn => {
       btn.addEventListener('click', () => deleteLeague(btn.dataset.adminLeagueDel));
+    });
+    container.querySelectorAll('[data-reset-fixtures]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const l = DB.getLeagues().find(x => x.id === btn.dataset.resetFixtures);
+        if (!l) return;
+        if (!confirm(`Reset all fixtures for "${l.name}"?\n\nThis clears fixtures and standings so you can regenerate from scratch.`)) return;
+        DB.updateLeague({ ...l, fixtures: [], standings: [] });
+        toast(`Fixtures cleared for ${l.name}`, 'success');
+        renderAdmin();
+      });
     });
     container.querySelectorAll('[data-league-notif]').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -958,6 +971,15 @@ const Leagues = (() => {
 
     const schoolIds = [...new Set(participants.map(p => p.schoolId))];
 
+    let generatedFixtures;
+    try {
+      generatedFixtures = generateFixtures(participants, homeMatches, startDate, neutralVenueId, playingDay, matchTime, id || null, endDate);
+    } catch (err) {
+      console.error('generateFixtures error:', err);
+      toast('Error generating fixtures: ' + err.message, 'error');
+      return;
+    }
+
     const league = {
       id: id || uid(),
       name,
@@ -971,7 +993,7 @@ const Leagues = (() => {
       neutralVenueId,
       playingDay,
       matchTime,
-      fixtures:  generateFixtures(participants, homeMatches, startDate, neutralVenueId, playingDay, matchTime, id || null, endDate),
+      fixtures:  generatedFixtures,
       standings: generateStandings(participants),
     };
 
@@ -1570,8 +1592,14 @@ const Leagues = (() => {
           return;
         }
         if (!confirm('Recalculate all fixtures?\n\nThe scheduler will try to avoid venue clashes by spreading fixtures across different weeks when needed. Existing manual edits will be lost.')) return;
-        const parts      = _getParticipants(league);
-        league.fixtures  = generateFixtures(parts, league.homeMatches ?? 1, league.startDate, league.neutralVenueId, league.playingDay, league.matchTime, league.id, league.endDate);
+        const parts = _getParticipants(league);
+        try {
+          league.fixtures = generateFixtures(parts, league.homeMatches ?? 1, league.startDate, league.neutralVenueId, league.playingDay, league.matchTime, league.id, league.endDate);
+        } catch (err) {
+          console.error('generateFixtures error (recalc):', err);
+          toast('Error recalculating fixtures: ' + err.message, 'error');
+          return;
+        }
         league.standings = generateStandings(parts);
         DB.updateLeague(league);
         DB.writeAudit('fixtures_recalculated', 'league', `Fixtures recalculated (clash-aware) for ${league.name}`, league.id, league.name);
