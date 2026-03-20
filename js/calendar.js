@@ -47,6 +47,54 @@ const Calendar = (() => {
    * A match blocks COURTS_PER_MATCH courts (starting from the fixture's
    * base courtIndex) for MATCH_MINS (3 hours) from matchTime.
    */
+  /**
+   * Pre-compute court assignments for every fixture based on how many
+   * fixtures actually share the same venue+date (rather than trusting the
+   * stored courtIndex / courtsBooked which may be stale for old fixtures).
+   *
+   * Returns Map<fixtureId, { courtIndex, courtsBooked }>
+   *
+   * Algorithm:
+   *   Group fixtures by venue+date → sort each group by stored courtIndex
+   *   (stable ordering) → divide venue courts evenly (max 3 each).
+   *
+   * Examples:
+   *   4-court venue, 2 fixtures → cb=2: fixture0 courts 0-1, fixture1 courts 2-3
+   *   6-court venue, 2 fixtures → cb=3: 0-2 and 3-5
+   *   6-court venue, 3 fixtures → cb=2: 0-1, 2-3, 4-5
+   *   1-court venue             → cb=1: flagged as clash elsewhere
+   */
+  function _buildFixtureCourtMap() {
+    const map    = new Map(); // fixtureId → {courtIndex, courtsBooked}
+    const groups = {};        // 'venueId|date' → [{f, league}]
+
+    for (const league of DB.getLeagues()) {
+      for (const f of (league.fixtures || [])) {
+        if (!f.venueId || !f.date || !f.id) continue;
+        const key = `${f.venueId}|${f.date}`;
+        (groups[key] || (groups[key] = [])).push({ f, league });
+      }
+    }
+
+    for (const entries of Object.values(groups)) {
+      const venueId = entries[0].f.venueId;
+      const venue   = DB.getVenues().find(v => v.id === venueId);
+      const vc      = venue ? (venue.courts || 0) : 0;
+      const n       = entries.length;
+      const cb      = Math.min(3, Math.max(1, Math.floor(vc / n)));
+      // Stable ordering: sort by stored courtIndex so fixture positions
+      // remain consistent whether read from Firestore cache or memory.
+      entries.sort((a, b) => (a.f.courtIndex || 0) - (b.f.courtIndex || 0));
+      entries.forEach(({ f }, i) => {
+        map.set(f.id, { courtIndex: i * cb, courtsBooked: cb });
+      });
+    }
+    return map;
+  }
+
+  // Cache rebuilt once per render() call
+  let _fixtureCourtMap = new Map();
+
   function _getLeagueFixtureForSlot(venueId, courtIndex, dateStr, timeStr) {
     const slotMins = _timeToMins(timeStr);
 
@@ -55,16 +103,12 @@ const Calendar = (() => {
         if (!f.venueId || f.venueId !== venueId) continue;
         if (f.date !== dateStr) continue;
 
-        // Per-fixture: 3 courts booked if ≥3 available, 2 if only 2, else 1.
-        // Duration: 3 courts → 3 h (180 min), 2 courts → 4 h (240 min).
-        const courtsBooked = (f.courtsBooked !== null && f.courtsBooked !== undefined)
-          ? f.courtsBooked : 3;
-        const matchMins = courtsBooked >= 3 ? 180 : 240;
+        // Use dynamically-computed values (correct for old + new fixtures)
+        const cached      = _fixtureCourtMap.get(f.id);
+        const courtsBooked = cached ? cached.courtsBooked : (f.courtsBooked || 3);
+        const baseCourt    = cached ? cached.courtIndex   : (f.courtIndex != null ? parseInt(f.courtIndex) : 0);
+        const matchMins    = courtsBooked >= 3 ? 180 : 240;
 
-        // Base court: use fixture's courtIndex if set, otherwise default to 0
-        const baseCourt = (f.courtIndex !== null && f.courtIndex !== undefined && f.courtIndex !== '')
-          ? parseInt(f.courtIndex) : 0;
-        // Block baseCourt … baseCourt + courtsBooked - 1
         if (courtIndex < baseCourt || courtIndex >= baseCourt + courtsBooked) continue;
         const fixtureMins = _timeToMins(f.timeSlot || '14:00');
         if (slotMins >= fixtureMins && slotMins < fixtureMins + matchMins) {
@@ -120,6 +164,10 @@ const Calendar = (() => {
 
   // ── Main render ─────────────────────────────────────────────
   function render() {
+    // Rebuild fixture→court mapping so allocations always reflect actual
+    // sharing at each venue+date (fixes stale stored courtIndex values too).
+    _fixtureCourtMap = _buildFixtureCourtMap();
+
     const container     = document.getElementById('calendarContainer');
     const allVenues     = [...DB.getVenues()].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
     const filteredVenues = currentVenueFilter === 'all'
