@@ -1265,7 +1265,7 @@ const Leagues = (() => {
           date:         assignedDate,
           timeSlot:     matchTime || '14:00',
           courtIndex:   assignedCourt,
-          courtsBooked,
+          courtsBooked: COURTS_PER_MATCH,   // overwritten by _redistributeCourts below
           homeScore:    null,
           awayScore:    null,
           round:        roundIdx + 1,
