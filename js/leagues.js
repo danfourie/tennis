@@ -1214,14 +1214,18 @@ const Leagues = (() => {
         const hasHome   = homeVenue && (homeVenue.courts || 0) > 0;
         const venueId   = hasHome ? homeVenue.id : (neutralVenueId || null);
         const venue     = venueId ? DB.getVenues().find(v => v.id === venueId) : null;
-        const venueName  = venue ? venue.name : 'TBA';
+        const venueName   = venue ? venue.name : 'TBA';
         const venueCourts = venue ? (venue.courts || 0) : 0;
+        // Per-venue: 3 courts if ≥3 available, 2 if only 2, else 1.
+        // Booking duration: 3 courts → 3 h, 2 courts → 4 h.
+        const courtsBooked = venueCourts >= 3 ? 3 : venueCourts >= 2 ? 2 : 1;
+
         // Always allow at least 1 match-slot for any venue that has courts,
-        // even if it has fewer than COURTS_PER_MATCH courts.  Without this,
+        // even if it has fewer than 3 courts.  Without this,
         // baseSlots=0 causes the venue tracker to be skipped entirely, which
         // lets two fixtures land on the same date+court at the same venue.
         const baseSlots  = venueCourts > 0
-          ? Math.max(Math.floor(venueCourts / COURTS_PER_MATCH), 1)
+          ? Math.max(Math.floor(venueCourts / courtsBooked), 1)
           : 0;
 
         // If this venue hosts two teams from the same school, allow both home
@@ -1242,12 +1246,12 @@ const Leagues = (() => {
           if (taken.length < effectiveMaxSlots) {
             // Free court slot available — claim it
             let court = 0;
-            while (taken.includes(court)) court += COURTS_PER_MATCH;
+            while (taken.includes(court)) court += courtsBooked;
             assignedCourt = court;
             _claim(venueId, roundDate, court);
           } else {
             // Venue full on this date — schedule anyway and flag as clash
-            assignedCourt = effectiveMaxSlots * COURTS_PER_MATCH;
+            assignedCourt = effectiveMaxSlots * courtsBooked;
             _claim(venueId, roundDate, assignedCourt);
           }
         }
@@ -1262,13 +1266,14 @@ const Leagues = (() => {
           awaySchoolName:    match.away.name,
           venueId,
           venueName,
-          isNeutral:  !hasHome,
-          date:       assignedDate,
-          timeSlot:   matchTime || '14:00',
-          courtIndex: assignedCourt,
-          homeScore:  null,
-          awayScore:  null,
-          round:      roundIdx + 1,
+          isNeutral:    !hasHome,
+          date:         assignedDate,
+          timeSlot:     matchTime || '14:00',
+          courtIndex:   assignedCourt,
+          courtsBooked,
+          homeScore:    null,
+          awayScore:    null,
+          round:        roundIdx + 1,
         });
       });
     });
@@ -1867,20 +1872,48 @@ const Leagues = (() => {
       DB.getVenues().map(v => `<option value="${v.id}"${v.id === fixture.venueId ? ' selected' : ''}>${esc(v.name)}</option>`).join('');
 
     _updateFixtureCourtList(fixture.courtIndex);
+
+    // Wire venue change → refresh court block options + summary
+    document.getElementById('fixtureEditVenue').onchange = () => _updateFixtureCourtList(null);
+    // Wire court change → refresh summary line
+    document.getElementById('fixtureEditCourt').onchange = _updateFixtureCourtSummary;
+
     Modal.open('fixtureEditModal');
   }
 
   function _updateFixtureCourtList(preselect) {
-    const venueId = document.getElementById('fixtureEditVenue').value;
-    const venue   = DB.getVenues().find(v => v.id === venueId);
-    const sel     = document.getElementById('fixtureEditCourt');
-    sel.innerHTML = `<option value="">Any court</option>`;
+    const venueId      = document.getElementById('fixtureEditVenue').value;
+    const venue        = DB.getVenues().find(v => v.id === venueId);
+    const sel          = document.getElementById('fixtureEditCourt');
+    sel.innerHTML      = `<option value="">Any court</option>`;
     if (venue) {
-      for (let i = 0; i < (venue.courts || 0); i++) {
-        const selected = (preselect !== undefined && parseInt(preselect) === i) ? ' selected' : '';
-        sel.innerHTML += `<option value="${i}"${selected}>Court ${i + 1}</option>`;
+      const vCourts      = venue.courts || 0;
+      const courtsBooked = vCourts >= 3 ? 3 : vCourts >= 2 ? 2 : 1;
+      for (let i = 0; i + courtsBooked <= vCourts; i++) {
+        const label    = courtsBooked > 1
+          ? `Courts ${i + 1}–${i + courtsBooked}`
+          : `Court ${i + 1}`;
+        const selected = (preselect !== undefined && preselect !== null && parseInt(preselect) === i) ? ' selected' : '';
+        sel.innerHTML += `<option value="${i}"${selected}>${label}</option>`;
       }
     }
+    _updateFixtureCourtSummary();
+  }
+
+  function _updateFixtureCourtSummary() {
+    const summaryEl = document.getElementById('fixtureCourtSummary');
+    if (!summaryEl) return;
+    const venueId = document.getElementById('fixtureEditVenue').value;
+    const venue   = DB.getVenues().find(v => v.id === venueId);
+    if (!venue) { summaryEl.textContent = ''; return; }
+    const vCourts      = venue.courts || 0;
+    const courtsBooked = vCourts >= 3 ? 3 : vCourts >= 2 ? 2 : 1;
+    const durationH    = courtsBooked >= 3 ? 3 : 4;
+    const courtVal     = document.getElementById('fixtureEditCourt').value;
+    const startCourt   = courtVal !== '' ? parseInt(courtVal) + 1 : 1;
+    const endCourt     = startCourt + courtsBooked - 1;
+    const range        = courtsBooked > 1 ? `Courts ${startCourt}–${endCourt}` : `Court ${startCourt}`;
+    summaryEl.textContent = `📋 ${range} · ${courtsBooked} court${courtsBooked > 1 ? 's' : ''} booked · ${durationH}h duration`;
   }
 
   function saveFixtureEdit() {
@@ -1896,13 +1929,14 @@ const Leagues = (() => {
     const newVenueId  = document.getElementById('fixtureEditVenue').value;
     const newCourt    = document.getElementById('fixtureEditCourt').value;
 
+    const venueObj     = newVenueId ? DB.getVenues().find(v => v.id === newVenueId) : null;
+    const vCourts      = venueObj ? (venueObj.courts || 0) : (fixture.courtsBooked || 0);
     fixture.date       = newDate    || fixture.date;
     fixture.timeSlot   = newTime    || fixture.timeSlot;
     fixture.venueId    = newVenueId || null;
-    fixture.venueName  = newVenueId
-      ? ((DB.getVenues().find(v => v.id === newVenueId) || {}).name || 'TBA')
-      : 'TBA';
+    fixture.venueName  = venueObj ? (venueObj.name || 'TBA') : 'TBA';
     fixture.courtIndex = newCourt !== '' ? parseInt(newCourt) : null;
+    fixture.courtsBooked = vCourts >= 3 ? 3 : vCourts >= 2 ? 2 : 1;
 
     DB.updateLeague(league);
     DB.writeAudit(

@@ -308,9 +308,6 @@ const DB = {
    * Only fixtures that have a venueId and date are considered.
    */
   detectFixtureClashes() {
-    const COURTS    = 3;   // courts per match (must match calendar.js constant)
-    const MATCH_MINS = 180; // 3-hour match window
-
     const all = [];
     for (const league of _cache.leagues) {
       for (const f of (league.fixtures || [])) {
@@ -325,15 +322,21 @@ const DB = {
         if (a.fixture.venueId !== b.fixture.venueId) continue;
         if (a.fixture.date    !== b.fixture.date)    continue;
 
+        // Per-fixture court count and duration
+        const aCourts = a.fixture.courtsBooked || 3;
+        const bCourts = b.fixture.courtsBooked || 3;
+        const aDur    = aCourts >= 3 ? 180 : 240;
+        const bDur    = bCourts >= 3 ? 180 : 240;
+
         // Court-range overlap
         const aBase = parseInt(a.fixture.courtIndex ?? 0);
         const bBase = parseInt(b.fixture.courtIndex ?? 0);
-        if (aBase + COURTS <= bBase || bBase + COURTS <= aBase) continue;
+        if (aBase + aCourts <= bBase || bBase + bCourts <= aBase) continue;
 
         // Time-window overlap
         const aTime = timeToMins(a.fixture.timeSlot || '14:00');
         const bTime = timeToMins(b.fixture.timeSlot || '14:00');
-        if (aTime + MATCH_MINS <= bTime || bTime + MATCH_MINS <= aTime) continue;
+        if (aTime + aDur <= bTime || bTime + bDur <= aTime) continue;
 
         clashes.push({ a, b });
       }

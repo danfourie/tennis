@@ -48,21 +48,26 @@ const Calendar = (() => {
    * base courtIndex) for MATCH_MINS (3 hours) from matchTime.
    */
   function _getLeagueFixtureForSlot(venueId, courtIndex, dateStr, timeStr) {
-    const slotMins        = _timeToMins(timeStr);
-    const MATCH_MINS      = 180; // 3 hours
-    const COURTS_PER_MATCH = 3;  // a league fixture blocks 3 courts
+    const slotMins = _timeToMins(timeStr);
 
     for (const league of DB.getLeagues()) {
       for (const f of (league.fixtures || [])) {
         if (!f.venueId || f.venueId !== venueId) continue;
         if (f.date !== dateStr) continue;
+
+        // Per-fixture: 3 courts booked if ≥3 available, 2 if only 2, else 1.
+        // Duration: 3 courts → 3 h (180 min), 2 courts → 4 h (240 min).
+        const courtsBooked = (f.courtsBooked !== null && f.courtsBooked !== undefined)
+          ? f.courtsBooked : 3;
+        const matchMins = courtsBooked >= 3 ? 180 : 240;
+
         // Base court: use fixture's courtIndex if set, otherwise default to 0
         const baseCourt = (f.courtIndex !== null && f.courtIndex !== undefined && f.courtIndex !== '')
           ? parseInt(f.courtIndex) : 0;
-        // Block baseCourt … baseCourt + COURTS_PER_MATCH - 1
-        if (courtIndex < baseCourt || courtIndex >= baseCourt + COURTS_PER_MATCH) continue;
+        // Block baseCourt … baseCourt + courtsBooked - 1
+        if (courtIndex < baseCourt || courtIndex >= baseCourt + courtsBooked) continue;
         const fixtureMins = _timeToMins(f.timeSlot || '14:00');
-        if (slotMins >= fixtureMins && slotMins < fixtureMins + MATCH_MINS) {
+        if (slotMins >= fixtureMins && slotMins < fixtureMins + matchMins) {
           return { fixture: f, league };
         }
       }
