@@ -1216,16 +1216,11 @@ const Leagues = (() => {
         const venue     = venueId ? DB.getVenues().find(v => v.id === venueId) : null;
         const venueName   = venue ? venue.name : 'TBA';
         const venueCourts = venue ? (venue.courts || 0) : 0;
-        // Per-venue: 3 courts if ≥3 available, 2 if only 2, else 1.
-        // Booking duration: 3 courts → 3 h, 2 courts → 4 h.
-        const courtsBooked = venueCourts >= 3 ? 3 : venueCourts >= 2 ? 2 : 1;
-
-        // Always allow at least 1 match-slot for any venue that has courts,
-        // even if it has fewer than 3 courts.  Without this,
-        // baseSlots=0 causes the venue tracker to be skipped entirely, which
-        // lets two fixtures land on the same date+court at the same venue.
-        const baseSlots  = venueCourts > 0
-          ? Math.max(Math.floor(venueCourts / courtsBooked), 1)
+        // Capacity planning uses 2 courts as the minimum unit so venues like
+        // Midstream (4 courts) can host 2 fixtures (not just 1).
+        // Actual courtsBooked is set in the post-processing pass below.
+        const baseSlots = venueCourts > 0
+          ? Math.max(Math.floor(venueCourts / 2), 1)
           : 0;
 
         // If this venue hosts two teams from the same school, allow both home
@@ -1244,14 +1239,14 @@ const Leagues = (() => {
         if (venueId && effectiveMaxSlots > 0) {
           const taken = _takenCourts(venueId, roundDate);
           if (taken.length < effectiveMaxSlots) {
-            // Free court slot available — claim it
+            // Free court slot available — claim it (step by 2, post-proc redistributes)
             let court = 0;
-            while (taken.includes(court)) court += courtsBooked;
+            while (taken.includes(court)) court += 2;
             assignedCourt = court;
             _claim(venueId, roundDate, court);
           } else {
             // Venue full on this date — schedule anyway and flag as clash
-            assignedCourt = effectiveMaxSlots * courtsBooked;
+            assignedCourt = effectiveMaxSlots * 2;
             _claim(venueId, roundDate, assignedCourt);
           }
         }
@@ -1278,6 +1273,33 @@ const Leagues = (() => {
       });
     });
 
+    // ── Post-processing: redistribute court blocks ───────────────
+    // Groups fixtures by venue+date and divides courts evenly (max 3 each).
+    // e.g. 4-court venue with 2 fixtures → 2 courts each (Courts 1–2 and 3–4).
+    //      6-court venue with 3 fixtures → 2 courts each.
+    //      6-court venue with 2 fixtures → 3 courts each.
+    //      1-court venue → courtsBooked=1 (flagged as clash by detectFixtureClashes).
+    function _redistributeCourts(fixArr) {
+      const groups = {};
+      fixArr.forEach((f, i) => {
+        if (!f.venueId || !f.date) return;
+        const k = `${f.venueId}|${f.date}`;
+        (groups[k] || (groups[k] = [])).push(i);
+      });
+      Object.values(groups).forEach(idxList => {
+        const f0    = fixArr[idxList[0]];
+        const ven   = DB.getVenues().find(v => v.id === f0.venueId);
+        const vc    = ven ? (ven.courts || 0) : 0;
+        const n     = idxList.length;
+        const cb    = Math.min(3, Math.max(1, Math.floor(vc / n)));
+        idxList.forEach((fi, i) => {
+          fixArr[fi].courtsBooked = cb;
+          fixArr[fi].courtIndex   = i * cb;
+        });
+      });
+    }
+    _redistributeCourts(fixtures);
+
     // ── Post-generation: swap home/away to reduce clashes ────────
     // For every fixture that is involved in a venue clash, try reversing
     // home and away (which moves the match to the away team's home venue).
@@ -1293,10 +1315,12 @@ const Leagues = (() => {
 
       const _clash = (a, b) => {
         if (!a.venueId || !b.venueId || a.venueId !== b.venueId || a.date !== b.date) return false;
+        const aCB = a.courtsBooked || 3, bCB = b.courtsBooked || 3;
         const aBase = a.courtIndex || 0, bBase = b.courtIndex || 0;
-        if (aBase + COURTS_PER_MATCH <= bBase || bBase + COURTS_PER_MATCH <= aBase) return false;
-        const aT = timeToMins(a.timeSlot || '14:00'), bT = timeToMins(b.timeSlot || '14:00');
-        return aT + MATCH_MINS > bT && bT + MATCH_MINS > aT;
+        if (aBase + aCB <= bBase || bBase + bCB <= aBase) return false;
+        const aT   = timeToMins(a.timeSlot || '14:00'), bT = timeToMins(b.timeSlot || '14:00');
+        const aDur = aCB >= 3 ? MATCH_MINS : 240, bDur = bCB >= 3 ? MATCH_MINS : 240;
+        return aT + aDur > bT && bT + bDur > aT;
       };
 
       const _totalClashes = fxArr =>
@@ -1331,7 +1355,7 @@ const Leagues = (() => {
           // Find first free court at the new venue on the same date
           const taken = [...(_takenCourts(newVenue.id, orig.date))];
           let court = 0;
-          while (taken.includes(court)) court += COURTS_PER_MATCH;
+          while (taken.includes(court)) court += 2;
 
           const candidate = {
             ...orig,
@@ -1364,6 +1388,9 @@ const Leagues = (() => {
         if (!swapped) break; // no improvement found — stop
       }
     }
+
+    // Final redistribution pass after any home/away swaps
+    _redistributeCourts(fixtures);
 
     return fixtures;
   }
@@ -1873,23 +1900,41 @@ const Leagues = (() => {
 
     _updateFixtureCourtList(fixture.courtIndex);
 
-    // Wire venue change → refresh court block options + summary
+    // Wire venue/date/court changes → refresh block options + summary
     document.getElementById('fixtureEditVenue').onchange = () => _updateFixtureCourtList(null);
-    // Wire court change → refresh summary line
+    document.getElementById('fixtureEditDate').onchange  = () => _updateFixtureCourtList(null);
     document.getElementById('fixtureEditCourt').onchange = _updateFixtureCourtSummary;
 
     Modal.open('fixtureEditModal');
   }
 
+  function _courtsBookedForVenueDate(venueId, dateStr, excludeId) {
+    if (!venueId) return 3;
+    const venue = DB.getVenues().find(v => v.id === venueId);
+    if (!venue) return 3;
+    const vc = venue.courts || 0;
+    if (vc === 0) return 1;
+    // Count fixtures at this venue+date, excluding the one being edited
+    const others = DB.getLeagues()
+      .flatMap(l => l.fixtures || [])
+      .filter(f => f.venueId === venueId && f.date === dateStr && f.id !== excludeId)
+      .length;
+    const total = others + 1; // +1 for the fixture being edited
+    return Math.min(3, Math.max(1, Math.floor(vc / total)));
+  }
+
   function _updateFixtureCourtList(preselect) {
     const venueId      = document.getElementById('fixtureEditVenue').value;
+    const dateVal      = document.getElementById('fixtureEditDate').value;
+    const fixtureId    = document.getElementById('fixtureEditId').value;
     const venue        = DB.getVenues().find(v => v.id === venueId);
     const sel          = document.getElementById('fixtureEditCourt');
     sel.innerHTML      = `<option value="">Any court</option>`;
     if (venue) {
       const vCourts      = venue.courts || 0;
-      const courtsBooked = vCourts >= 3 ? 3 : vCourts >= 2 ? 2 : 1;
-      for (let i = 0; i + courtsBooked <= vCourts; i++) {
+      const courtsBooked = _courtsBookedForVenueDate(venueId, dateVal, fixtureId);
+      // Step by courtsBooked to show non-overlapping blocks
+      for (let i = 0; i + courtsBooked <= vCourts; i += courtsBooked) {
         const label    = courtsBooked > 1
           ? `Courts ${i + 1}–${i + courtsBooked}`
           : `Court ${i + 1}`;
@@ -1903,17 +1948,23 @@ const Leagues = (() => {
   function _updateFixtureCourtSummary() {
     const summaryEl = document.getElementById('fixtureCourtSummary');
     if (!summaryEl) return;
-    const venueId = document.getElementById('fixtureEditVenue').value;
-    const venue   = DB.getVenues().find(v => v.id === venueId);
+    const venueId   = document.getElementById('fixtureEditVenue').value;
+    const dateVal   = document.getElementById('fixtureEditDate').value;
+    const fixtureId = document.getElementById('fixtureEditId').value;
+    const venue     = DB.getVenues().find(v => v.id === venueId);
     if (!venue) { summaryEl.textContent = ''; return; }
-    const vCourts      = venue.courts || 0;
-    const courtsBooked = vCourts >= 3 ? 3 : vCourts >= 2 ? 2 : 1;
+    const courtsBooked = _courtsBookedForVenueDate(venueId, dateVal, fixtureId);
     const durationH    = courtsBooked >= 3 ? 3 : 4;
     const courtVal     = document.getElementById('fixtureEditCourt').value;
     const startCourt   = courtVal !== '' ? parseInt(courtVal) + 1 : 1;
     const endCourt     = startCourt + courtsBooked - 1;
     const range        = courtsBooked > 1 ? `Courts ${startCourt}–${endCourt}` : `Court ${startCourt}`;
-    summaryEl.textContent = `📋 ${range} · ${courtsBooked} court${courtsBooked > 1 ? 's' : ''} booked · ${durationH}h duration`;
+    const others = dateVal
+      ? DB.getLeagues().flatMap(l => l.fixtures || [])
+          .filter(f => f.venueId === venueId && f.date === dateVal && f.id !== fixtureId).length
+      : 0;
+    const shareNote = others > 0 ? ` · ${others + 1} fixtures share venue` : '';
+    summaryEl.textContent = `📋 ${range} · ${courtsBooked} court${courtsBooked > 1 ? 's' : ''} booked · ${durationH}h duration${shareNote}`;
   }
 
   function saveFixtureEdit() {
@@ -1929,14 +1980,18 @@ const Leagues = (() => {
     const newVenueId  = document.getElementById('fixtureEditVenue').value;
     const newCourt    = document.getElementById('fixtureEditCourt').value;
 
-    const venueObj     = newVenueId ? DB.getVenues().find(v => v.id === newVenueId) : null;
-    const vCourts      = venueObj ? (venueObj.courts || 0) : (fixture.courtsBooked || 0);
+    const venueObj   = newVenueId ? DB.getVenues().find(v => v.id === newVenueId) : null;
     fixture.date       = newDate    || fixture.date;
     fixture.timeSlot   = newTime    || fixture.timeSlot;
     fixture.venueId    = newVenueId || null;
     fixture.venueName  = venueObj ? (venueObj.name || 'TBA') : 'TBA';
     fixture.courtIndex = newCourt !== '' ? parseInt(newCourt) : null;
-    fixture.courtsBooked = vCourts >= 3 ? 3 : vCourts >= 2 ? 2 : 1;
+    // courtsBooked accounts for other fixtures sharing this venue+date
+    fixture.courtsBooked = _courtsBookedForVenueDate(
+      fixture.venueId,
+      fixture.date,
+      fixture.id
+    );
 
     DB.updateLeague(league);
     DB.writeAudit(
