@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Clear All Fixtures</title>
+  <style>
+    body { font-family: sans-serif; max-width: 600px; margin: 60px auto; padding: 0 20px; }
+    button { padding: 12px 24px; font-size: 16px; cursor: pointer; background: #dc3545; color: white; border: none; border-radius: 6px; }
+    button:disabled { background: #6c757d; cursor: default; }
+    #log { margin-top: 20px; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px; padding: 16px; white-space: pre-wrap; font-family: monospace; font-size: 13px; min-height: 100px; }
+  </style>
+</head>
+<body>
+  <h2>Clear All League Fixtures</h2>
+  <p>This will set <code>fixtures: []</code> and <code>standings: []</code> on every league document.</p>
+  <button id="btn" onclick="run()">Clear All Fixtures</button>
+  <div id="log">Click the button to clear all fixtures. If you are not logged in, Firestore will show a permission error.</div>
+
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <!-- unique:20260320-1647 -->
+  <script src="js/firebase-config.js"></script>
+  <script>
+    firebase.initializeApp(FIREBASE_CONFIG);
+    const db = firebase.firestore();
+    const log = document.getElementById('log');
+
+    // Show auth state but don't block the button
+    firebase.auth().onAuthStateChanged(user => {
+      if (user) log.textContent = `Logged in as: ${user.email} — ready to clear fixtures.`;
+    });
+
+    async function run() {
+      const btn = document.getElementById('btn');
+      btn.disabled = true;
+      log.textContent = 'Starting...\n';
+      try {
+        const snap = await db.collection('leagues').get();
+        log.textContent += `Found ${snap.size} league(s).\n`;
+        for (const doc of snap.docs) {
+          await doc.ref.update({ fixtures: [], standings: [] });
+          log.textContent += `✓ Cleared: ${doc.data().name}\n`;
+        }
+        log.textContent += '\nDone! All fixtures cleared. You can now regenerate them from the Leagues view.';
+      } catch (err) {
+        log.textContent += `\nERROR: ${err.message}`;
+        btn.disabled = false;
+      }
+    }
+  </script>
+</body>
+</html>

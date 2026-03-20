@@ -7,7 +7,8 @@
       "Bash(find ~/OneDrive -maxdepth 6 -name *.html)",
       "Bash(find ~/Desktop -maxdepth 5 -name *.html)",
       "Bash(find ~/Documents -maxdepth 5 -name *.html)",
-      "Bash(find ~/.claude -name *.jsonl)"
+      "Bash(find ~/.claude -name *.jsonl)",
+      "Bash(wc -l \"/c/Users/User/OneDrive - CreoX/Danie Design File/Claude Code Projects/Tennis/js\"/*.js)"
     ]
   }
 }
