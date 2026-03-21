@@ -836,6 +836,125 @@
     </div>
   </div>
 
+  <!-- Score Sheet Modal -->
+  <div class="modal-overlay hidden" id="scoreSheetModal">
+    <div class="modal" style="max-width:700px;width:96%">
+      <div class="modal-header">
+        <h3 id="scoreSheetTitle">📋 Score Sheet</h3>
+        <button class="modal-close" data-modal="scoreSheetModal">&times;</button>
+      </div>
+      <div class="modal-body" style="padding:1rem 1.25rem">
+
+        <!-- Header metadata -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem .75rem;margin-bottom:1rem">
+          <div class="form-group" style="margin:0">
+            <label style="font-size:.8rem">Boys / Girls</label>
+            <select id="ssGender" class="search-input" style="width:100%">
+              <option value="">— select —</option>
+              <option value="Boys">Boys</option>
+              <option value="Girls">Girls</option>
+            </select>
+          </div>
+          <div class="form-group" style="margin:0">
+            <label style="font-size:.8rem">Age Group</label>
+            <select id="ssAgeGroup" class="search-input" style="width:100%">
+              <option value="">— select —</option>
+              <option value="U">U (Under age)</option>
+              <option value="15">15</option>
+              <option value="Senior">Senior</option>
+            </select>
+          </div>
+          <div class="form-group" style="margin:0">
+            <label style="font-size:.8rem">League</label>
+            <input id="ssLeague" type="text" class="search-input" style="width:100%" readonly>
+          </div>
+          <div class="form-group" style="margin:0">
+            <label style="font-size:.8rem">Date</label>
+            <input id="ssDate" type="text" class="search-input" style="width:100%" readonly>
+          </div>
+          <div class="form-group" style="margin:0">
+            <label style="font-size:.8rem">Home Team</label>
+            <input id="ssHomeTeam" type="text" class="search-input" style="width:100%" readonly>
+          </div>
+          <div class="form-group" style="margin:0">
+            <label style="font-size:.8rem">Visiting Team</label>
+            <input id="ssVisitTeam" type="text" class="search-input" style="width:100%" readonly>
+          </div>
+        </div>
+
+        <!-- Singles table -->
+        <table style="width:100%;border-collapse:collapse;margin-bottom:.75rem">
+          <thead>
+            <tr><th colspan="4" style="background:var(--primary,#2563eb);color:#fff;padding:.35rem .5rem;text-align:left;font-size:.85rem">Singles</th></tr>
+            <tr style="background:var(--surface2,#f1f5f9)">
+              <th style="padding:.3rem .5rem;font-size:.78rem;border:1px solid #ddd;width:28%">Home Player</th>
+              <th style="padding:.3rem .5rem;font-size:.78rem;border:1px solid #ddd;width:28%">Visiting Player</th>
+              <th style="padding:.3rem .5rem;font-size:.78rem;border:1px solid #ddd;width:22%;text-align:center">Games (Home)</th>
+              <th style="padding:.3rem .5rem;font-size:.78rem;border:1px solid #ddd;width:22%;text-align:center">Games (Visitors)</th>
+            </tr>
+          </thead>
+          <tbody id="ssSinglesBody"></tbody>
+          <tfoot>
+            <tr style="background:var(--surface2,#f1f5f9)">
+              <td colspan="2" style="padding:.3rem .5rem;font-size:.8rem;border:1px solid #ddd;font-weight:600">Total — Singles</td>
+              <td style="padding:.3rem .5rem;border:1px solid #ddd;text-align:center;font-weight:600" id="ssSinglesHomeTotal">—</td>
+              <td style="padding:.3rem .5rem;border:1px solid #ddd;text-align:center;font-weight:600" id="ssSinglesVisitTotal">—</td>
+            </tr>
+          </tfoot>
+        </table>
+
+        <!-- Doubles table -->
+        <table style="width:100%;border-collapse:collapse;margin-bottom:.75rem">
+          <thead>
+            <tr><th colspan="4" style="background:var(--primary,#2563eb);color:#fff;padding:.35rem .5rem;text-align:left;font-size:.85rem">Doubles</th></tr>
+            <tr style="background:var(--surface2,#f1f5f9)">
+              <th style="padding:.3rem .5rem;font-size:.78rem;border:1px solid #ddd;width:28%">Home Players</th>
+              <th style="padding:.3rem .5rem;font-size:.78rem;border:1px solid #ddd;width:28%">Visiting Players</th>
+              <th style="padding:.3rem .5rem;font-size:.78rem;border:1px solid #ddd;width:22%;text-align:center">Games (Home)</th>
+              <th style="padding:.3rem .5rem;font-size:.78rem;border:1px solid #ddd;width:22%;text-align:center">Games (Visitors)</th>
+            </tr>
+          </thead>
+          <tbody id="ssDoublesBody"></tbody>
+          <tfoot>
+            <tr style="background:var(--surface2,#f1f5f9)">
+              <td colspan="2" style="padding:.3rem .5rem;font-size:.8rem;border:1px solid #ddd;font-weight:600">Total — Doubles</td>
+              <td style="padding:.3rem .5rem;border:1px solid #ddd;text-align:center;font-weight:600" id="ssDoublesHomeTotal">—</td>
+              <td style="padding:.3rem .5rem;border:1px solid #ddd;text-align:center;font-weight:600" id="ssDoublesVisitTotal">—</td>
+            </tr>
+          </tfoot>
+        </table>
+
+        <!-- Grand total -->
+        <table style="width:100%;border-collapse:collapse;margin-bottom:1rem">
+          <tr style="background:var(--surface2,#f1f5f9)">
+            <td style="padding:.4rem .5rem;font-size:.9rem;border:2px solid #ccc;font-weight:700">Grand Total</td>
+            <td style="padding:.4rem .5rem;border:2px solid #ccc;text-align:center;font-weight:700;font-size:1rem" id="ssGrandHomeTotal">—</td>
+            <td style="padding:.4rem .5rem;border:2px solid #ccc;text-align:center;font-weight:700;font-size:1rem" id="ssGrandVisitTotal">—</td>
+          </tr>
+        </table>
+
+        <!-- Signatures -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
+          <div class="form-group" style="margin:0">
+            <label style="font-size:.8rem">Signature — Home</label>
+            <input id="ssHomeSig" type="text" class="search-input" style="width:100%" placeholder="Name / initials">
+          </div>
+          <div class="form-group" style="margin:0">
+            <label style="font-size:.8rem">Signature — Visitors</label>
+            <input id="ssVisitSig" type="text" class="search-input" style="width:100%" placeholder="Name / initials">
+          </div>
+        </div>
+
+        <input type="hidden" id="ssLeagueId">
+        <input type="hidden" id="ssFixtureId">
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-modal="scoreSheetModal">Cancel</button>
+        <button class="btn btn-primary" id="scoreSheetSaveBtn">💾 Save Score Sheet</button>
+      </div>
+    </div>
+  </div>
+
   <!-- App Scripts -->
   <!-- Notification Panel (fixed dropdown below bell icon) -->
   <div id="notifPanel" class="notif-panel hidden">
@@ -848,15 +967,15 @@
 
   <!-- App Scripts -->
   <script src="js/firebase-config.js"></script>
-  <script src="js/data.js?v=20260325"></script>
-  <script src="js/auth.js?v=20260325"></script>
-  <script src="js/notifications.js?v=20260325"></script>
-  <script src="js/calendar.js?v=20260325"></script>
-  <script src="js/leagues.js?v=20260325"></script>
-  <script src="js/tournaments.js?v=20260325"></script>
-  <script src="js/admin.js?v=20260325"></script>
-  <script src="js/myschool.js?v=20260325"></script>
-  <script src="js/myvenue.js?v=20260325"></script>
-  <script src="js/app.js?v=20260325"></script>
+  <script src="js/data.js?v=20260326"></script>
+  <script src="js/auth.js?v=20260326"></script>
+  <script src="js/notifications.js?v=20260326"></script>
+  <script src="js/calendar.js?v=20260326"></script>
+  <script src="js/leagues.js?v=20260326"></script>
+  <script src="js/tournaments.js?v=20260326"></script>
+  <script src="js/admin.js?v=20260326"></script>
+  <script src="js/myschool.js?v=20260326"></script>
+  <script src="js/myvenue.js?v=20260326"></script>
+  <script src="js/app.js?v=20260326"></script>
 </body>
 </html>

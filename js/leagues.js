@@ -43,6 +43,7 @@ const Leagues = (() => {
     if (pubDivSel) pubDivSel.addEventListener('change', e => { _pubDivFilter = e.target.value; render(); });
     const admDivSel = document.getElementById('adminLeaguesDivFilter');
     if (admDivSel) admDivSel.addEventListener('change', e => { _adminDivFilter = e.target.value; renderAdmin(); });
+    _initScoreSheetModal();
     render();
   }
 
@@ -2068,6 +2069,218 @@ const Leagues = (() => {
     openLeagueDetail(reopenId || leagueId, isAdmin);
   }
 
+  // ── Score Sheet ─────────────────────────────────────────────
+
+  /**
+   * Open the score sheet modal for a fixture.
+   * Pre-fills fixture metadata; loads any previously saved scoreSheet data.
+   */
+  function openScoreSheet(leagueId, fixtureId) {
+    const league  = DB.getLeagues().find(l => l.id === leagueId);
+    if (!league) return;
+    const fixture = (league.fixtures || []).find(f => f.id === fixtureId);
+    if (!fixture) return;
+
+    const ss = fixture.scoreSheet || {};
+
+    // Pre-fill header fields
+    document.getElementById('ssLeagueId').value  = leagueId;
+    document.getElementById('ssFixtureId').value = fixtureId;
+    document.getElementById('ssLeague').value    = league.name || '';
+    document.getElementById('ssDate').value      = fixture.date ? formatDate(fixture.date) : '—';
+    document.getElementById('ssHomeTeam').value  = fixture.homeSchoolName  || '';
+    document.getElementById('ssVisitTeam').value = fixture.awaySchoolName  || '';
+
+    const genderSel   = document.getElementById('ssGender');
+    const ageGroupSel = document.getElementById('ssAgeGroup');
+    genderSel.value   = ss.gender   || '';
+    ageGroupSel.value = ss.ageGroup || '';
+
+    document.getElementById('scoreSheetTitle').textContent =
+      `📋 Score Sheet — ${fixture.homeSchoolName} vs ${fixture.awaySchoolName}`;
+
+    // Build singles rows (4)
+    const singlesData = ss.singles || Array.from({ length: 4 }, () => ({}));
+    document.getElementById('ssSinglesBody').innerHTML = singlesData.map((r, i) =>
+      `<tr>
+        <td style="padding:.25rem .3rem;border:1px solid #ddd">
+          <input class="search-input ss-input" style="width:100%;padding:.25rem .4rem"
+            data-section="singles" data-idx="${i}" data-field="homePlayer"
+            value="${esc(r.homePlayer || '')}" placeholder="Player name">
+        </td>
+        <td style="padding:.25rem .3rem;border:1px solid #ddd">
+          <input class="search-input ss-input" style="width:100%;padding:.25rem .4rem"
+            data-section="singles" data-idx="${i}" data-field="visitorPlayer"
+            value="${esc(r.visitorPlayer || '')}" placeholder="Player name">
+        </td>
+        <td style="padding:.25rem .3rem;border:1px solid #ddd;text-align:center">
+          <input class="search-input ss-input ss-games" style="width:60px;text-align:center;padding:.25rem .3rem"
+            type="number" min="0" max="99"
+            data-section="singles" data-idx="${i}" data-field="homeGames"
+            value="${r.homeGames !== null && r.homeGames !== undefined ? r.homeGames : ''}">
+        </td>
+        <td style="padding:.25rem .3rem;border:1px solid #ddd;text-align:center">
+          <input class="search-input ss-input ss-games" style="width:60px;text-align:center;padding:.25rem .3rem"
+            type="number" min="0" max="99"
+            data-section="singles" data-idx="${i}" data-field="visitorGames"
+            value="${r.visitorGames !== null && r.visitorGames !== undefined ? r.visitorGames : ''}">
+        </td>
+      </tr>`
+    ).join('');
+
+    // Build doubles rows (2)
+    const doublesData = ss.doubles || Array.from({ length: 2 }, () => ({}));
+    document.getElementById('ssDoublesBody').innerHTML = doublesData.map((r, i) =>
+      `<tr>
+        <td style="padding:.25rem .3rem;border:1px solid #ddd">
+          <input class="search-input ss-input" style="width:100%;padding:.25rem .4rem"
+            data-section="doubles" data-idx="${i}" data-field="homePlayer"
+            value="${esc(r.homePlayer || '')}" placeholder="Players (e.g. Smith / Jones)">
+        </td>
+        <td style="padding:.25rem .3rem;border:1px solid #ddd">
+          <input class="search-input ss-input" style="width:100%;padding:.25rem .4rem"
+            data-section="doubles" data-idx="${i}" data-field="visitorPlayer"
+            value="${esc(r.visitorPlayer || '')}" placeholder="Players">
+        </td>
+        <td style="padding:.25rem .3rem;border:1px solid #ddd;text-align:center">
+          <input class="search-input ss-input ss-games" style="width:60px;text-align:center;padding:.25rem .3rem"
+            type="number" min="0" max="99"
+            data-section="doubles" data-idx="${i}" data-field="homeGames"
+            value="${r.homeGames !== null && r.homeGames !== undefined ? r.homeGames : ''}">
+        </td>
+        <td style="padding:.25rem .3rem;border:1px solid #ddd;text-align:center">
+          <input class="search-input ss-input ss-games" style="width:60px;text-align:center;padding:.25rem .3rem"
+            type="number" min="0" max="99"
+            data-section="doubles" data-idx="${i}" data-field="visitorGames"
+            value="${r.visitorGames !== null && r.visitorGames !== undefined ? r.visitorGames : ''}">
+        </td>
+      </tr>`
+    ).join('');
+
+    // Signatures
+    document.getElementById('ssHomeSig').value  = ss.homeSignature  || '';
+    document.getElementById('ssVisitSig').value = ss.visitorSignature || '';
+
+    _ssRecalcTotals();
+
+    // Wire live recalc on any game-score change
+    document.getElementById('ssSinglesBody').querySelectorAll('.ss-games').forEach(inp => {
+      inp.addEventListener('input', _ssRecalcTotals);
+    });
+    document.getElementById('ssDoublesBody').querySelectorAll('.ss-games').forEach(inp => {
+      inp.addEventListener('input', _ssRecalcTotals);
+    });
+
+    Modal.open('scoreSheetModal');
+  }
+
+  /** Recalculate and display Singles, Doubles, and Grand totals in the modal. */
+  function _ssRecalcTotals() {
+    const sumInputs = selector => {
+      let total = 0, hasAny = false;
+      document.querySelectorAll(selector).forEach(inp => {
+        const v = parseInt(inp.value);
+        if (!isNaN(v)) { total += v; hasAny = true; }
+      });
+      return hasAny ? total : null;
+    };
+
+    const sH = sumInputs('#ssSinglesBody [data-field="homeGames"]');
+    const sV = sumInputs('#ssSinglesBody [data-field="visitorGames"]');
+    const dH = sumInputs('#ssDoublesBody [data-field="homeGames"]');
+    const dV = sumInputs('#ssDoublesBody [data-field="visitorGames"]');
+
+    document.getElementById('ssSinglesHomeTotal').textContent  = sH !== null ? sH : '—';
+    document.getElementById('ssSinglesVisitTotal').textContent = sV !== null ? sV : '—';
+    document.getElementById('ssDoublesHomeTotal').textContent  = dH !== null ? dH : '—';
+    document.getElementById('ssDoublesVisitTotal').textContent = dV !== null ? dV : '—';
+
+    const gH = (sH !== null || dH !== null) ? ((sH || 0) + (dH || 0)) : null;
+    const gV = (sV !== null || dV !== null) ? ((sV || 0) + (dV || 0)) : null;
+    document.getElementById('ssGrandHomeTotal').textContent  = gH !== null ? gH : '—';
+    document.getElementById('ssGrandVisitTotal').textContent = gV !== null ? gV : '—';
+  }
+
+  /** Collect the form, persist to fixture.scoreSheet, and update homeScore/awayScore. */
+  function saveScoreSheet() {
+    const leagueId  = document.getElementById('ssLeagueId').value;
+    const fixtureId = document.getElementById('ssFixtureId').value;
+    const league    = DB.getLeagues().find(l => l.id === leagueId);
+    if (!league) return;
+    const fixture   = (league.fixtures || []).find(f => f.id === fixtureId);
+    if (!fixture) return;
+
+    // Collect rows
+    const collectRows = (section, count) =>
+      Array.from({ length: count }, (_, i) => {
+        const val = field => {
+          const el = document.querySelector(`[data-section="${section}"][data-idx="${i}"][data-field="${field}"]`);
+          return el ? el.value.trim() : '';
+        };
+        const gH = parseInt(val('homeGames'));
+        const gV = parseInt(val('visitorGames'));
+        return {
+          homePlayer:    val('homePlayer'),
+          visitorPlayer: val('visitorPlayer'),
+          homeGames:    isNaN(gH) ? null : gH,
+          visitorGames: isNaN(gV) ? null : gV,
+        };
+      });
+
+    const singles = collectRows('singles', 4);
+    const doubles = collectRows('doubles', 2);
+
+    const sumGames = (rows, field) => rows.reduce((s, r) => s + (r[field] !== null ? r[field] : 0), 0);
+    const grandHome  = sumGames(singles, 'homeGames')    + sumGames(doubles, 'homeGames');
+    const grandVisit = sumGames(singles, 'visitorGames') + sumGames(doubles, 'visitorGames');
+    const hasGames   = singles.some(r => r.homeGames !== null || r.visitorGames !== null) ||
+                       doubles.some(r => r.homeGames !== null || r.visitorGames !== null);
+
+    fixture.scoreSheet = {
+      gender:           document.getElementById('ssGender').value,
+      ageGroup:         document.getElementById('ssAgeGroup').value,
+      singles,
+      doubles,
+      homeSignature:    document.getElementById('ssHomeSig').value.trim(),
+      visitorSignature: document.getElementById('ssVisitSig').value.trim(),
+      savedAt:          new Date().toISOString(),
+    };
+
+    // Update the overall match score from the grand totals when games were entered
+    if (hasGames) {
+      fixture.homeScore = grandHome;
+      fixture.awayScore = grandVisit;
+      // The entering team auto-verifies their side
+      const profile    = Auth.getProfile();
+      const mySchoolId = profile ? profile.schoolId : null;
+      fixture.masterVerified   = false;
+      fixture.homeTeamVerified = false;
+      fixture.awayTeamVerified = false;
+      if (mySchoolId && !Auth.isAdmin()) {
+        if (mySchoolId === fixture.homeSchoolId)      fixture.homeTeamVerified = true;
+        else if (mySchoolId === fixture.awaySchoolId) fixture.awayTeamVerified = true;
+      }
+      recalcStandings(league);
+    }
+
+    DB.updateLeague(league);
+    DB.writeAudit('scoresheet_saved', 'league',
+      `Score sheet saved: ${fixture.homeSchoolName} vs ${fixture.awaySchoolName}`,
+      leagueId, league.name);
+    toast('Score sheet saved ✓', 'success');
+    Modal.close('scoreSheetModal');
+    render();
+  }
+
+  // Wire the Save button (once, on module init — safe to call repeatedly)
+  function _initScoreSheetModal() {
+    const btn = document.getElementById('scoreSheetSaveBtn');
+    if (btn && !btn.dataset.bound) {
+      btn.addEventListener('click', saveScoreSheet);
+      btn.dataset.bound = '1';
+    }
+  }
+
   return { init, refresh, render, renderAdmin, openLeagueModal, openLeagueDetail, saveScore, verifyScore,
-           openEntriesModal, renderPendingEntries };
+           openEntriesModal, renderPendingEntries, openScoreSheet };
 })();

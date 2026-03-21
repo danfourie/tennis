@@ -268,6 +268,13 @@ const MySchool = (() => {
       });
     });
 
+    // Score sheet button
+    container.querySelectorAll('.ms-scoresheet-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        Leagues.openScoreSheet(btn.dataset.lid, btn.dataset.fid);
+      });
+    });
+
     // Verify score listeners
     container.querySelectorAll('.ms-verify-btn').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -644,6 +651,19 @@ const MySchool = (() => {
          </div>`
       : '';
 
+    // ── Score sheet button ──
+    const hasScoreSheet  = !!(f.scoreSheet && (
+      (f.scoreSheet.singles || []).some(r => r.homePlayer || r.visitorPlayer || r.homeGames !== null) ||
+      (f.scoreSheet.doubles || []).some(r => r.homePlayer || r.visitorPlayer || r.homeGames !== null)
+    ));
+    const scoreSheetBtn  = Auth.isLoggedIn()
+      ? `<button class="btn btn-xs ${hasScoreSheet ? 'btn-secondary' : 'btn-outline'} ms-scoresheet-btn"
+           data-lid="${leagueId}" data-fid="${esc(f.id)}"
+           title="${hasScoreSheet ? 'View / edit score sheet' : 'Fill in full score sheet'}">
+           📋 ${hasScoreSheet ? 'Score Sheet ✓' : 'Score Sheet'}
+         </button>`
+      : (hasScoreSheet ? `<span class="badge badge-gray" style="font-size:.72rem">📋 Score sheet on file</span>` : '');
+
     return `<div class="myschool-fixture ${isHome ? 'home-fixture' : 'away-fixture'}${isClash && !f.clashOkayed ? ' ms-fixture-clash' : ''}">
       <div class="fixture-meta">
         <span class="fixture-date">${f.date ? formatDate(f.date) : '—'}</span>
@@ -661,7 +681,14 @@ const MySchool = (() => {
       </div>
       ${verifyHtml}
       ${clashHtml}
-      ${notifBtnHtml}
+      <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.3rem">
+        ${scoreSheetBtn}
+        ${notifBtnHtml ? `<button class="btn btn-xs btn-secondary ms-notif-btn"
+             data-lid="${leagueId}" data-fid="${esc(f.id)}"
+             data-home="${esc(f.homeSchoolId || '')}" data-away="${esc(f.awaySchoolId || '')}"
+             data-hname="${esc(f.homeSchoolName || '')}" data-aname="${esc(f.awaySchoolName || '')}"
+             data-has-score="${hasScore ? '1' : '0'}">🔔 Notify</button>` : ''}
+      </div>
     </div>`;
   }
 
