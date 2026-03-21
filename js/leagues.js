@@ -424,7 +424,15 @@ const Leagues = (() => {
           <button class="btn btn-sm btn-secondary" data-admin-fixtures="${l.id}">📋 Manage Fixtures</button>
           <button class="btn btn-sm btn-secondary" data-admin-league-edit="${l.id}">✏️ Edit</button>
           <button class="btn btn-sm btn-secondary" data-league-notif="${l.id}">🔔 Notify</button>
-          <button class="btn btn-sm btn-warning"   data-reset-fixtures="${l.id}">🔄 Reset Fixtures</button>
+          ${totalFixtures > 0 && !l.drawConfirmed && played === 0
+            ? `<button class="btn btn-sm btn-success" data-confirm-draw="${l.id}">✅ Confirm Draw</button>`
+            : l.drawConfirmed
+              ? `<span class="badge badge-green" title="Draw confirmed — reset fixtures to unlock">🔒 Draw Confirmed</span>`
+              : ''}
+          <button class="btn btn-sm btn-warning" data-reset-fixtures="${l.id}"
+            ${l.drawConfirmed || played > 0 ? 'disabled title="Cannot reset: draw confirmed or league has started"' : ''}>
+            🔄 Reset Fixtures
+          </button>
           <button class="btn btn-sm btn-danger"    data-admin-league-del="${l.id}">Delete</button>
         </div>
       </div>`;
@@ -442,12 +450,24 @@ const Leagues = (() => {
     container.querySelectorAll('[data-admin-league-del]').forEach(btn => {
       btn.addEventListener('click', () => deleteLeague(btn.dataset.adminLeagueDel));
     });
+    container.querySelectorAll('[data-confirm-draw]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const l = DB.getLeagues().find(x => x.id === btn.dataset.confirmDraw);
+        if (!l) return;
+        if (!confirm(`Confirm the draw for "${l.name}"?\n\nThis locks the fixtures. Reset Fixtures will be disabled until you explicitly reset.`)) return;
+        DB.updateLeague({ ...l, drawConfirmed: true });
+        toast(`Draw confirmed for ${l.name}`, 'success');
+        renderAdmin();
+      });
+    });
+
     container.querySelectorAll('[data-reset-fixtures]').forEach(btn => {
       btn.addEventListener('click', () => {
         const l = DB.getLeagues().find(x => x.id === btn.dataset.resetFixtures);
         if (!l) return;
-        if (!confirm(`Reset all fixtures for "${l.name}"?\n\nThis clears fixtures and standings so you can regenerate from scratch.`)) return;
-        DB.updateLeague({ ...l, fixtures: [], standings: [] });
+        if (l.drawConfirmed || (l.fixtures || []).some(f => f.homeScore !== null && f.homeScore !== undefined)) return;
+        if (!confirm(`Reset all fixtures for "${l.name}"?\n\nThis clears fixtures, standings and draw confirmation so you can regenerate from scratch.`)) return;
+        DB.updateLeague({ ...l, fixtures: [], standings: [], drawConfirmed: false });
         toast(`Fixtures cleared for ${l.name}`, 'success');
         renderAdmin();
       });
