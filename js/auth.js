@@ -198,6 +198,7 @@ const Auth = (() => {
       if (typeof Leagues     !== 'undefined') Leagues.refresh();
       if (typeof Tournaments !== 'undefined') Tournaments.refresh();
       if (typeof MySchool    !== 'undefined') MySchool.refresh();
+      if (typeof MyVenue     !== 'undefined') MyVenue.refresh();
       if (typeof Admin       !== 'undefined') Admin.refresh();
     }, 0);
   }

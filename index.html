@@ -21,6 +21,7 @@
         <button class="nav-btn" data-view="leagues">Leagues</button>
         <button class="nav-btn" data-view="tournaments">Tournaments</button>
         <button class="nav-btn hidden" data-view="myschool">🏫 My School</button>
+        <button class="nav-btn hidden" data-view="myvenue">🏟 My Venue</button>
         <button class="nav-btn admin-only hidden" data-view="admin">Admin</button>
       </nav>
       <div class="header-actions">
@@ -103,6 +104,18 @@
         </div>
       </div>
       <div id="myschoolContent"></div>
+    </section>
+
+    <!-- My Venue View (shown to school-linked users whose school has a home venue) -->
+    <section id="view-myvenue" class="view hidden">
+      <div class="view-header">
+        <h2 id="myvenueTitle">My Venue</h2>
+        <div style="display:flex;gap:.25rem">
+          <button id="mvViewAll"      class="btn btn-sm btn-primary"   title="Show all fixtures at this venue">All</button>
+          <button id="mvViewUpcoming" class="btn btn-sm btn-secondary" title="Show only upcoming fixtures">Upcoming</button>
+        </div>
+      </div>
+      <div id="myvenueContent"></div>
     </section>
 
     <!-- Admin View -->
@@ -835,14 +848,15 @@
 
   <!-- App Scripts -->
   <script src="js/firebase-config.js"></script>
-  <script src="js/data.js?v=20260324"></script>
-  <script src="js/auth.js?v=20260324"></script>
-  <script src="js/notifications.js?v=20260324"></script>
-  <script src="js/calendar.js?v=20260324"></script>
-  <script src="js/leagues.js?v=20260324"></script>
-  <script src="js/tournaments.js?v=20260324"></script>
-  <script src="js/admin.js?v=20260324"></script>
-  <script src="js/myschool.js?v=20260324"></script>
-  <script src="js/app.js?v=20260324"></script>
+  <script src="js/data.js?v=20260325"></script>
+  <script src="js/auth.js?v=20260325"></script>
+  <script src="js/notifications.js?v=20260325"></script>
+  <script src="js/calendar.js?v=20260325"></script>
+  <script src="js/leagues.js?v=20260325"></script>
+  <script src="js/tournaments.js?v=20260325"></script>
+  <script src="js/admin.js?v=20260325"></script>
+  <script src="js/myschool.js?v=20260325"></script>
+  <script src="js/myvenue.js?v=20260325"></script>
+  <script src="js/app.js?v=20260325"></script>
 </body>
 </html>
