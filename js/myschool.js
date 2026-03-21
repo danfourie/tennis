@@ -657,7 +657,8 @@ const MySchool = (() => {
       (f.scoreSheet.doubles || []).some(r => r.homePlayer || r.visitorPlayer || r.homeGames !== null)
     ));
     const scoreSheetBtn  = Auth.isLoggedIn()
-      ? `<button class="btn btn-xs ${hasScoreSheet ? 'btn-secondary' : 'btn-outline'} ms-scoresheet-btn"
+      ? `<span class="text-muted" style="font-size:.78rem;align-self:center">Full Scoresheet:</span>
+         <button class="btn btn-xs ${hasScoreSheet ? 'btn-secondary' : 'btn-outline'} ms-scoresheet-btn"
            data-lid="${leagueId}" data-fid="${esc(f.id)}"
            title="${hasScoreSheet ? 'View / edit score sheet' : 'Fill in full score sheet'}">
            📋 ${hasScoreSheet ? 'Score Sheet ✓' : 'Score Sheet'}
