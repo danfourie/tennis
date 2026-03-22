@@ -1590,6 +1590,16 @@ const Leagues = (() => {
         });
         inp.addEventListener('change', () => {
           saveScore(league.id, inp.dataset.fixture, inp.dataset.field, inp.value);
+          // Programmatic `.value =` assignment (used by the auto-fill above) does NOT
+          // fire a `change` event, so the partner field's score would never reach
+          // Firestore. Detect it here and save it explicitly.
+          const partnerField = inp.dataset.field === 'homeScore' ? 'awayScore' : 'homeScore';
+          const partner = body.querySelector(
+            `.score-input[data-fixture="${inp.dataset.fixture}"][data-field="${partnerField}"]`
+          );
+          if (partner && partner.value !== '') {
+            saveScore(league.id, inp.dataset.fixture, partnerField, partner.value);
+          }
           openLeagueDetail(id, isAdmin);
         });
       });
