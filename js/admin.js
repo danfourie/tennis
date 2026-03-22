@@ -363,18 +363,29 @@ const Admin = (() => {
     });
 
     el.querySelectorAll('[data-user-delete]').forEach(btn => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', async () => {
         const userUid = btn.dataset.userDelete;
         const user    = DB.getUsers().find(u => u.uid === userUid);
         if (!confirm(`Remove ${user ? (user.displayName || user.email) : 'this user'}? They will lose access.`)) return;
-        DB.deleteUserProfile(userUid);
-        DB.writeAudit(
-          'user_removed', 'user',
-          `User profile removed: ${user ? esc(user.displayName || user.email) : userUid}`,
-          userUid, user ? (user.displayName || user.email) : userUid
-        );
-        toast('User removed');
-        renderUsers();
+        btn.disabled = true;
+        btn.textContent = 'Removing…';
+        try {
+          // Await the Firestore delete before re-fetching, otherwise loadUsers()
+          // returns the old snapshot (race condition) and the user reappears.
+          await DB.deleteUserProfile(userUid);
+          DB.writeAudit(
+            'user_removed', 'user',
+            `User profile removed: ${user ? esc(user.displayName || user.email) : userUid}`,
+            userUid, user ? (user.displayName || user.email) : userUid
+          );
+          toast('User removed');
+          renderUsers();
+        } catch (err) {
+          console.error('[Admin] delete user failed:', err);
+          toast('Could not remove user — permission denied', 'error');
+          btn.disabled = false;
+          btn.textContent = 'Remove';
+        }
       });
     });
 

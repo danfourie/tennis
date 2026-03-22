@@ -228,7 +228,9 @@ const DB = {
 
   deleteUserProfile(uid) {
     _cache.users = _cache.users.filter(u => u.uid !== uid);
-    _doc('users', uid).delete().catch(console.error);
+    // Return the Promise so callers can await the Firestore delete before re-fetching.
+    // Without this, renderUsers() re-fetches before the delete completes and the user reappears.
+    return _doc('users', uid).delete();
   },
 
   // ── Notifications ─────────────────────────────────────────

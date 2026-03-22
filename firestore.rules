@@ -135,7 +135,8 @@ service cloud.firestore {
             && request.auth.uid == uid
             && request.resource.data.role == resource.data.role);
 
-      allow delete: if isMaster();
+      // Admin and master can both remove user profiles from the admin panel
+      allow delete: if isAdminRole();
     }
 
     // ── Audit Log ────────────────────────────────────────────────────────────
