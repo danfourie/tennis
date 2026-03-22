@@ -63,6 +63,15 @@ const Auth = (() => {
         _role    = _profile.role || 'user';
         console.log('[Auth] profile loaded — uid:', uid, '| role:', _role);
         if (typeof NotificationService !== 'undefined') NotificationService.loadForCurrentUser();
+
+        // ── Record login timestamp (fire-and-forget; never blocks the UI) ──────
+        // Keep a rolling log of the last 20 session-start timestamps so admins
+        // can see registration date + full login history per user.
+        const now      = new Date().toISOString();
+        const loginLog = [now, ...(_profile.loginLog || [])].slice(0, 20);
+        ref.update({ lastLoginAt: now, loginLog }).catch(() => {});
+        _profile.lastLoginAt = now;
+        _profile.loginLog    = loginLog;
       } else {
         // Profile missing — create it now (happens when Firestore rules blocked
         // the write during registration, or when the DB was empty at first run).

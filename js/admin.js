@@ -8,6 +8,14 @@ const Admin = (() => {
   // ── Active sub-tab tracking ───────────────────────────────────
   let _activeTab = 'overview';
 
+  /** Format an ISO timestamp as "22 Mar 2026, 14:30" */
+  function _fmtDateTime(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    return d.toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' }) +
+           ', ' + d.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' });
+  }
+
   // Validate a phone field that may contain multiple numbers separated by / or ,
   // Each individual number (stripped of spaces) must be 10 digits starting with 0.
   function _validPhone(val) {
@@ -268,6 +276,21 @@ const Admin = (() => {
         const isSelf    = u.uid === currentUid;
         const roleIcon  = u.role === 'master' ? '🔑' : u.role === 'admin' ? '🛡️' : '👤';
 
+        const loginHistoryHtml = (u.loginLog && u.loginLog.length > 0)
+          ? `<details style="margin-top:.3rem">
+               <summary style="font-size:.74rem;color:var(--primary);cursor:pointer;user-select:none">
+                 🕒 Login history (${u.loginLog.length})
+               </summary>
+               <div style="padding:.3rem 0 .1rem .75rem;border-left:2px solid var(--border);margin-top:.25rem">
+                 ${u.loginLog.map((ts, i) =>
+                   `<div style="font-size:.74rem;color:var(--text-muted);padding:.1rem 0">
+                      ${i === 0 ? '<strong>' : ''}${_fmtDateTime(ts)}${i === 0 ? '</strong> <em style="font-size:.7rem">(latest)</em>' : ''}
+                    </div>`
+                 ).join('')}
+               </div>
+             </details>`
+          : '';
+
         return `<div class="admin-list-item" data-role="${esc(u.role || 'user')}" data-school="${esc(schoolKey)}">
           <div>
             <strong>${roleIcon} ${esc(u.displayName || u.email)}</strong>
@@ -276,8 +299,14 @@ const Admin = (() => {
             <div class="text-muted">
               <span class="role-badge ${u.role === 'master' ? 'master' : u.role === 'admin' ? 'admin' : 'user'}">${u.role}</span>
               ${school ? ` · <span style="color:${school.color}">●</span> ${esc(school.name)}` : ''}
-              ${u.createdAt ? ` · Joined ${new Date(u.createdAt).toLocaleDateString('en-ZA',{day:'numeric',month:'short',year:'numeric'})}` : ''}
+              ${u.createdAt ? ` · Registered: ${_fmtDateTime(u.createdAt)}` : ''}
             </div>
+            ${u.lastLoginAt
+              ? `<div class="text-muted" style="font-size:.78rem;margin-top:.1rem">
+                   🟢 Last login: <strong>${_fmtDateTime(u.lastLoginAt)}</strong>
+                 </div>`
+              : '<div class="text-muted" style="font-size:.78rem;margin-top:.1rem">🔘 No login recorded yet</div>'}
+            ${loginHistoryHtml}
           </div>
           <div class="item-actions">
             <label style="font-size:.75rem;color:var(--text-muted);margin-right:.25rem">Role:</label>
