@@ -485,8 +485,9 @@ const Calendar = (() => {
         const school   = schoolId ? DB.getSchools().find(s => s.id === schoolId) : null;
         if (selectedSlots.size === 0) { toast('Select at least one time slot', 'error'); return; }
 
+        let bookedCount = 0;
         selectedSlots.forEach(sl => {
-          DB.addBooking({
+          const result = DB.addBooking({
             venueId, courtIndex, date: dateStr, timeSlot: sl,
             type, schoolId: schoolId || null,
             label:      label || (school ? school.name : type),
@@ -494,13 +495,16 @@ const Calendar = (() => {
             notes,
             status:     'confirmed',
           });
+          if (!result) toast(`${sl} is already booked — skipped`, 'error');
+          else bookedCount++;
         });
+        if (bookedCount === 0) { render(); return; }
         DB.writeAudit('booking_created', 'booking',
           `Booked: ${label || type} on ${dateStr} (${[...selectedSlots].join(', ')}) at ${venue.name} Court ${courtIndex + 1}`,
           null, label || type);
         Modal.close('bookingModal');
         render();
-        toast(`${selectedSlots.size} slot(s) booked`, 'success');
+        toast(`${bookedCount} slot(s) booked`, 'success');
       };
 
     } else if (Auth.isLoggedIn()) {
@@ -584,8 +588,9 @@ const Calendar = (() => {
         const prof     = Auth.getProfile();
         if (selectedSlots.size === 0) { toast('Select at least one time slot', 'error'); return; }
 
+        let requestedCount = 0;
         selectedSlots.forEach(sl => {
-          DB.addBooking({
+          const result = DB.addBooking({
             venueId, courtIndex, date: dateStr, timeSlot: sl,
             type, schoolId: schoolId || null,
             label:           label || (school ? school.name : type),
@@ -596,13 +601,16 @@ const Calendar = (() => {
             requestedByName: prof ? (prof.displayName || prof.email) : (user ? user.email : 'Unknown'),
             requestedAt:     new Date().toISOString(),
           });
+          if (!result) toast(`${sl} already has a booking — skipped`, 'error');
+          else requestedCount++;
         });
         DB.writeAudit('booking_requested', 'booking',
           `Request submitted by ${prof ? (prof.displayName || prof.email) : 'user'}: ${label || type} on ${dateStr} at ${venue.name} Court ${courtIndex + 1}`,
           null, label || type);
+        if (requestedCount === 0) { render(); return; }
         Modal.close('bookingModal');
         render();
-        toast(`${selectedSlots.size} slot request(s) submitted for approval`, 'success');
+        toast(`${requestedCount} slot request(s) submitted for approval`, 'success');
       };
 
     } else {

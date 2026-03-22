@@ -515,9 +515,11 @@
             <input type="date" id="leagueEntryDeadline">
           </div>
           <div class="form-group">
-            <!-- spacer -->
+            <label>Score Total <span class="form-hint-inline">(match total games, default 67)</span></label>
+            <input type="number" id="leagueScoreTotal" value="67" min="1" max="999" style="width:100px">
           </div>
         </div>
+        <div id="leagueNameWarning" style="display:none;color:var(--danger,#dc2626);font-size:.85rem;margin-bottom:.5rem;padding:.4rem .6rem;background:#fef2f2;border-radius:4px"></div>
         <div class="form-group">
           <label>Participating Schools</label>
           <div id="leagueSchoolsCheckboxes" class="checkbox-grid"></div>
@@ -967,15 +969,15 @@
 
   <!-- App Scripts -->
   <script src="js/firebase-config.js"></script>
-  <script src="js/data.js?v=20260328"></script>
-  <script src="js/auth.js?v=20260328"></script>
-  <script src="js/notifications.js?v=20260328"></script>
-  <script src="js/calendar.js?v=20260328"></script>
-  <script src="js/leagues.js?v=20260328"></script>
-  <script src="js/tournaments.js?v=20260328"></script>
-  <script src="js/admin.js?v=20260328"></script>
-  <script src="js/myschool.js?v=20260328"></script>
-  <script src="js/myvenue.js?v=20260328"></script>
-  <script src="js/app.js?v=20260328"></script>
+  <script src="js/data.js?v=20260329"></script>
+  <script src="js/auth.js?v=20260329"></script>
+  <script src="js/notifications.js?v=20260329"></script>
+  <script src="js/calendar.js?v=20260329"></script>
+  <script src="js/leagues.js?v=20260329"></script>
+  <script src="js/tournaments.js?v=20260329"></script>
+  <script src="js/admin.js?v=20260329"></script>
+  <script src="js/myschool.js?v=20260329"></script>
+  <script src="js/myvenue.js?v=20260329"></script>
+  <script src="js/app.js?v=20260329"></script>
 </body>
 </html>

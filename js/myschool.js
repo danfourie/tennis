@@ -362,10 +362,12 @@ const MySchool = (() => {
     }
 
     // Score-entry listeners
-    const SCORE_TOTAL = 67;
     container.querySelectorAll('.my-score-input').forEach(inp => {
       // Live auto-fill: if partner is blank or was the previous auto-calc, update it
       inp.addEventListener('input', () => {
+        // Use per-league scoreTotal setting (defaults to 67)
+        const league2 = DB.getLeagues().find(l => l.id === inp.dataset.league);
+        const SCORE_TOTAL = (league2 && league2.scoreTotal) ? league2.scoreTotal : 67;
         const val = parseInt(inp.value);
         if (isNaN(val) || val < 0) return;
         const partnerField = inp.dataset.field === 'homeScore' ? 'awayScore' : 'homeScore';

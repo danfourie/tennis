@@ -763,12 +763,29 @@ const Leagues = (() => {
           <div>${dot}<strong>${esc(e.teamLabel || e.schoolId)}</strong>
             <span class="badge badge-amber" style="font-size:.72rem;margin-left:.3rem">pending</span>
           </div>
-          <div class="text-muted" style="font-size:.82rem">${esc(league ? league.name : e.leagueId)} · submitted ${_relativeEntryTime(e.enteredAt)}</div>
+          <div class="text-muted" style="font-size:.82rem">${esc(league ? league.name : e.leagueId)}${league && league.division ? ' · ' + esc(league.division) : ''} · submitted ${_relativeEntryTime(e.enteredAt)}</div>
         </div>
-        <button class="btn btn-xs btn-secondary" data-overview-entries="${esc(e.leagueId)}">Review</button>
+        <div style="display:flex;gap:.3rem;flex-wrap:wrap">
+          <button class="btn btn-xs btn-primary"   data-quick-approve="${esc(e.id)}" data-quick-league="${esc(e.leagueId)}">✅ Approve</button>
+          <button class="btn btn-xs btn-danger"    data-quick-reject="${esc(e.id)}"  data-quick-league="${esc(e.leagueId)}">✕ Reject</button>
+          <button class="btn btn-xs btn-secondary" data-overview-entries="${esc(e.leagueId)}">Details</button>
+        </div>
       </div>`;
     }).join('');
 
+    el.querySelectorAll('[data-quick-approve]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        _approveEntry(btn.dataset.quickApprove, btn.dataset.quickLeague);
+        renderPendingEntries();
+      });
+    });
+    el.querySelectorAll('[data-quick-reject]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (!confirm('Reject this entry?')) return;
+        _rejectEntry(btn.dataset.quickReject, btn.dataset.quickLeague);
+        renderPendingEntries();
+      });
+    });
     el.querySelectorAll('[data-overview-entries]').forEach(btn => {
       btn.addEventListener('click', () => openEntriesModal(btn.dataset.overviewEntries));
     });
@@ -797,7 +814,37 @@ const Leagues = (() => {
     document.getElementById('leaguePlayingDay').value        = l !== null ? (l.playingDay !== undefined ? l.playingDay : 5) : 5;
     document.getElementById('leagueMatchTime').value         = l ? (l.matchTime      || '14:00') : '14:00';
     document.getElementById('leagueEntryDeadline').value    = l ? (l.entryDeadline  || '')      : '';
+    document.getElementById('leagueScoreTotal').value        = l ? (l.scoreTotal     || 67)      : 67;
     document.getElementById('leagueEditId').value            = l ? l.id : '';
+
+    // League name+division uniqueness warning
+    const _checkNameWarning = () => {
+      const name = document.getElementById('leagueName').value.trim();
+      const div  = document.getElementById('leagueDivision').value.trim();
+      const editId = document.getElementById('leagueEditId').value;
+      const warn = document.getElementById('leagueNameWarning');
+      if (!warn) return;
+      const conflict = DB.getLeagues().find(x =>
+        x.id !== editId &&
+        x.name.toLowerCase() === name.toLowerCase() &&
+        (x.division || '').toLowerCase() === div.toLowerCase()
+      );
+      if (conflict) {
+        warn.style.display = '';
+        warn.textContent = `⚠️ Another league with the name "${name}" in division "${div || '(none)'}" already exists. Consider making the name unique (e.g. include the division abbreviation).`;
+      } else {
+        warn.style.display = 'none';
+        warn.textContent = '';
+      }
+    };
+    ['leagueName', 'leagueDivision'].forEach(id => {
+      const el2 = document.getElementById(id);
+      if (el2 && !el2.dataset.warnBound) {
+        el2.addEventListener('input', _checkNameWarning);
+        el2.dataset.warnBound = '1';
+      }
+    });
+    _checkNameWarning();
 
     const neutralSel = document.getElementById('leagueNeutralVenue');
     neutralSel.innerHTML = `<option value="">None</option>` +
@@ -921,6 +968,7 @@ const Leagues = (() => {
     const playingDay     = parseInt(document.getElementById('leaguePlayingDay').value);
     const matchTime      = document.getElementById('leagueMatchTime').value || '14:00';
     const division       = document.getElementById('leagueDivision').value.trim();
+    const scoreTotal     = parseInt(document.getElementById('leagueScoreTotal')?.value) || 67;
 
     // ── Details-only save (updates settings + participants, no fixture regen) ──
     if (detailsOnly) {
@@ -955,7 +1003,7 @@ const Leagues = (() => {
       const updated = {
         ...existing,
         name, division, startDate, endDate, entryDeadline,
-        homeMatches, neutralVenueId, playingDay, matchTime,
+        homeMatches, neutralVenueId, playingDay, matchTime, scoreTotal,
         participants: newParticipants,
         schoolIds:    newSchoolIds,
         standings:    mergedStandings,
@@ -1014,6 +1062,7 @@ const Leagues = (() => {
       neutralVenueId,
       playingDay,
       matchTime,
+      scoreTotal,
       fixtures:  generatedFixtures,
       standings: generateStandings(participants),
     };
@@ -1503,7 +1552,7 @@ const Leagues = (() => {
 
     // Score editing — any logged-in user
     if (Auth.isLoggedIn()) {
-      const SCORE_TOTAL = 67;
+      const SCORE_TOTAL = league.scoreTotal || 67;
       body.querySelectorAll('.score-input').forEach(inp => {
         inp.addEventListener('input', () => {
           const val = parseInt(inp.value);
@@ -1637,15 +1686,30 @@ const Leagues = (() => {
           toast('Cannot recalculate — scores have already been entered for this league. Edit individual fixtures manually.', 'error');
           return;
         }
-        if (!confirm('Recalculate all fixtures?\n\nThe scheduler will try to avoid venue clashes by spreading fixtures across different weeks when needed. Existing manual edits will be lost.')) return;
+        if (!confirm('Recalculate fixtures?\n\nManually-set venue, date and time edits will be preserved where possible. Only unedited fixtures will be rescheduled.')) return;
         const parts = _getParticipants(league);
+        // Snapshot manually-edited fields before regenerating
+        const manualOverrides = {};
+        (league.fixtures || []).forEach(f => {
+          manualOverrides[`${f.homeParticipantId}|${f.awayParticipantId}`] = {
+            venueId: f.venueId, venueName: f.venueName,
+            date: f.date, timeSlot: f.timeSlot, courtIndex: f.courtIndex,
+          };
+        });
+        let newFixtures;
         try {
-          league.fixtures = generateFixtures(parts, league.homeMatches ?? 1, league.startDate, league.neutralVenueId, league.playingDay, league.matchTime, league.id, league.endDate);
+          newFixtures = generateFixtures(parts, league.homeMatches ?? 1, league.startDate, league.neutralVenueId, league.playingDay, league.matchTime, league.id, league.endDate);
         } catch (err) {
           console.error('generateFixtures error (recalc):', err);
           toast('Error recalculating fixtures: ' + err.message, 'error');
           return;
         }
+        // Merge back manual overrides for matching home/away pair
+        newFixtures.forEach(f => {
+          const key = `${f.homeParticipantId}|${f.awayParticipantId}`;
+          if (manualOverrides[key]) Object.assign(f, manualOverrides[key]);
+        });
+        league.fixtures  = newFixtures;
         league.standings = generateStandings(parts);
         DB.updateLeague(league);
         DB.writeAudit('fixtures_recalculated', 'league', `Fixtures recalculated (clash-aware) for ${league.name}`, league.id, league.name);
@@ -1662,7 +1726,12 @@ const Leagues = (() => {
     });
 
     const footer = document.getElementById('leagueDetailFooter');
-    footer.innerHTML = `<button class="btn btn-secondary" data-modal="leagueDetailModal">Close</button>`;
+    footer.innerHTML = `
+      <button class="btn btn-secondary" data-modal="leagueDetailModal">Close</button>
+      <button class="btn btn-outline-primary" id="exportFixturesBtn">⬇ Export Fixtures CSV</button>
+      <button class="btn btn-outline-primary" id="exportStandingsBtn">⬇ Export Standings CSV</button>`;
+    document.getElementById('exportFixturesBtn').addEventListener('click', () => _exportFixturesCSV(league));
+    document.getElementById('exportStandingsBtn').addEventListener('click', () => _exportStandingsCSV(league));
 
     Modal.open('leagueDetailModal');
   }
@@ -2304,6 +2373,34 @@ const Leagues = (() => {
       btn.addEventListener('click', saveScoreSheet);
       btn.dataset.bound = '1';
     }
+  }
+
+  // ── CSV Export helpers ────────────────────────────────────────
+  function _csvRow(cells) {
+    return cells.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',');
+  }
+  function _downloadCSV(filename, rows) {
+    const blob = new Blob([rows.join('\r\n')], { type: 'text/csv' });
+    const a    = document.createElement('a');
+    a.href     = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+  function _exportFixturesCSV(league) {
+    const rows = [_csvRow(['Round','Date','Time','Home','Away','Venue','Home Score','Away Score','Verified'])];
+    (league.fixtures || []).forEach(f => {
+      const verified = f.masterVerified ? 'Master' : (f.homeTeamVerified && f.awayTeamVerified) ? 'Both teams' : f.homeTeamVerified ? 'Home only' : f.awayTeamVerified ? 'Away only' : 'No';
+      rows.push(_csvRow([f.round, f.date, f.timeSlot, f.homeSchoolName, f.awaySchoolName, f.venueName, f.homeScore ?? '', f.awayScore ?? '', verified]));
+    });
+    _downloadCSV(`${league.name.replace(/[^a-z0-9]/gi,'_')}_fixtures.csv`, rows);
+  }
+  function _exportStandingsCSV(league) {
+    const rows = [_csvRow(['Position','Team','Played','Won','Drawn','Lost','Points'])];
+    (league.standings || []).forEach((s, i) => {
+      rows.push(_csvRow([i + 1, s.name, s.played, s.won, s.drawn, s.lost, s.points]));
+    });
+    _downloadCSV(`${league.name.replace(/[^a-z0-9]/gi,'_')}_standings.csv`, rows);
   }
 
   return { init, refresh, render, renderAdmin, openLeagueModal, openLeagueDetail, saveScore, verifyScore,

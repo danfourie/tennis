@@ -85,6 +85,15 @@ const DB = {
   getBookings() { return _cache.bookings; },
 
   addBooking(booking) {
+    // Prevent duplicate: same venue + court + date + time already booked/pending
+    const duplicate = _cache.bookings.find(b =>
+      b.venueId     === booking.venueId &&
+      b.courtIndex  === booking.courtIndex &&
+      b.date        === booking.date &&
+      b.timeSlot    === booking.timeSlot &&
+      b.status      !== 'rejected'
+    );
+    if (duplicate) return null;  // caller should check for null and toast
     booking.id = booking.id || uid();
     _cache.bookings.push(booking);
     _doc('bookings', booking.id).set(booking).catch(console.error);
@@ -308,37 +317,37 @@ const DB = {
    * Only fixtures that have a venueId and date are considered.
    */
   detectFixtureClashes() {
-    const all = [];
+    // Group all fixtures by venueId + date
+    const groups = {};
     for (const league of _cache.leagues) {
       for (const f of (league.fixtures || [])) {
-        if (f.venueId && f.date) all.push({ fixture: f, league, leagueId: league.id });
+        if (!f.venueId || !f.date) continue;
+        const key = `${f.venueId}|${f.date}`;
+        if (!groups[key]) groups[key] = [];
+        groups[key].push({ fixture: f, league, leagueId: league.id });
       }
     }
 
     const clashes = [];
-    for (let i = 0; i < all.length; i++) {
-      for (let j = i + 1; j < all.length; j++) {
-        const a = all[i], b = all[j];
-        if (a.fixture.venueId !== b.fixture.venueId) continue;
-        if (a.fixture.date    !== b.fixture.date)    continue;
+    for (const [key, entries] of Object.entries(groups)) {
+      if (entries.length < 2) continue;
 
-        // Per-fixture court count and duration
-        const aCourts = a.fixture.courtsBooked || 3;
-        const bCourts = b.fixture.courtsBooked || 3;
-        const aDur    = aCourts >= 3 ? 180 : 240;
-        const bDur    = bCourts >= 3 ? 180 : 240;
+      // Look up venue court capacity
+      const venueId   = entries[0].fixture.venueId;
+      const venue     = _cache.venues.find(v => v.id === venueId);
+      const capacity  = venue ? (venue.courts || 4) : 4;
 
-        // Court-range overlap
-        const aBase = parseInt(a.fixture.courtIndex ?? 0);
-        const bBase = parseInt(b.fixture.courtIndex ?? 0);
-        if (aBase + aCourts <= bBase || bBase + bCourts <= aBase) continue;
+      // Sum total courts needed at this venue+date
+      const totalCourts = entries.reduce((sum, e) => sum + (e.fixture.courtsBooked || 3), 0);
 
-        // Time-window overlap
-        const aTime = timeToMins(a.fixture.timeSlot || '14:00');
-        const bTime = timeToMins(b.fixture.timeSlot || '14:00');
-        if (aTime + aDur <= bTime || bTime + bDur <= aTime) continue;
-
-        clashes.push({ a, b });
+      // Only flag as clashes when demand exceeds venue capacity
+      if (totalCourts > capacity) {
+        // Add every pair in the over-capacity group
+        for (let i = 0; i < entries.length; i++) {
+          for (let j = i + 1; j < entries.length; j++) {
+            clashes.push({ a: entries[i], b: entries[j] });
+          }
+        }
       }
     }
     return clashes;

@@ -19,6 +19,12 @@ service cloud.firestore {
       return exists(ref) ? get(ref).data.role : null;
     }
 
+    // Returns the schoolId linked to the signed-in user's profile.
+    function getUserSchoolId() {
+      let ref = /databases/$(database)/documents/users/$(request.auth.uid);
+      return exists(ref) ? get(ref).data.schoolId : null;
+    }
+
     // True when the signed-in user has role == 'master'.
     function isMaster() {
       return request.auth != null && getRole() == 'master';
@@ -36,20 +42,30 @@ service cloud.firestore {
 
     // ── Venues ───────────────────────────────────────────────────────────────
     match /venues/{docId} {
-      allow read:  if true;
+      allow read: if true;
       allow write: if isMaster();
+      // School contacts may update their own school's home venue (courts, name, etc.)
+      allow update: if isSignedIn() && getUserSchoolId() != null
+        && get(/databases/$(database)/documents/schools/$(getUserSchoolId())).data.venueId == docId;
     }
 
     // ── Schools ──────────────────────────────────────────────────────────────
     match /schools/{docId} {
-      allow read:  if true;
+      allow read: if true;
       allow write: if isMaster();
+      // School contacts may update their own school record (organisers, contact details)
+      allow update: if isSignedIn() && getUserSchoolId() == docId;
     }
 
     // ── Closures ─────────────────────────────────────────────────────────────
     match /closures/{docId} {
-      allow read:  if true;
+      allow read: if true;
       allow write: if isMaster();
+      // School contacts may manage closures for their own venue
+      allow create: if isSignedIn() && getUserSchoolId() != null
+        && get(/databases/$(database)/documents/schools/$(getUserSchoolId())).data.venueId == request.resource.data.venueId;
+      allow delete: if isSignedIn() && getUserSchoolId() != null
+        && get(/databases/$(database)/documents/schools/$(getUserSchoolId())).data.venueId == resource.data.venueId;
     }
 
     // ── Settings ─────────────────────────────────────────────────────────────
@@ -60,7 +76,8 @@ service cloud.firestore {
 
     // ── Bookings ─────────────────────────────────────────────────────────────
     match /bookings/{docId} {
-      allow read: if true;
+      // Bookings are only visible to signed-in users (not world-readable)
+      allow read: if isSignedIn();
 
       allow create: if isMaster()
         || (isSignedIn()
@@ -83,7 +100,12 @@ service cloud.firestore {
       allow read:   if true;
       allow create: if isMaster();
       allow delete: if isMaster();
-      allow update: if isSignedIn();
+      // Admin/master can change anything; school contacts may only update
+      // the fixtures and standings arrays (score entry, verifications).
+      allow update: if isAdminRole()
+        || (isSignedIn()
+            && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['fixtures', 'standings']));
     }
 
     // ── Tournaments ──────────────────────────────────────────────────────────
@@ -91,7 +113,10 @@ service cloud.firestore {
       allow read:   if true;
       allow create: if isMaster();
       allow delete: if isMaster();
-      allow update: if isSignedIn();
+      allow update: if isAdminRole()
+        || (isSignedIn()
+            && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['fixtures', 'standings', 'results']));
     }
 
     // ── Users ────────────────────────────────────────────────────────────────
@@ -151,9 +176,10 @@ service cloud.firestore {
       allow read:   if request.auth != null && resource.data.uid == request.auth.uid;
       allow read:   if isAdminRole();
 
-      // Self-create (reminder checks) or admin broadcast
-      allow create: if isSignedIn() && request.resource.data.uid == request.auth.uid;
-      allow create: if isAdminRole();
+      // Any signed-in user can create a notification for any recipient uid.
+      // This is required for school-to-school messaging (reschedule requests,
+      // score verification asks, opponent notifications) and self-reminders.
+      allow create: if isSignedIn();
 
       // Only the recipient may mark a notification read
       allow update: if request.auth != null
