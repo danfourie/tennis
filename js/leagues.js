@@ -19,6 +19,10 @@ const Leagues = (() => {
   let _pubDivFilter   = '';
   let _adminDivFilter = '';
 
+  // ── Detail modal state (for live-refresh when modal is open) ─
+  let _currentDetailId      = null;
+  let _currentDetailIsAdmin = false;
+
   /** Populate a division <select> from current leagues, preserving selection. */
   function _populateDivFilter(id, currentVal) {
     const sel = document.getElementById(id);
@@ -52,6 +56,13 @@ const Leagues = (() => {
     // If admin leagues tab is visible, refresh it too
     const adminPanel = document.getElementById('subtab-leagues');
     if (adminPanel && !adminPanel.classList.contains('hidden')) renderAdmin();
+    // Live-refresh the detail modal if it is currently open (so score/standings
+    // changes made in another session appear immediately without closing/reopening).
+    // Pass recalc=false to avoid a Firestore write loop (onSnapshot → write → onSnapshot…).
+    const detailModal = document.getElementById('leagueDetailModal');
+    if (detailModal && !detailModal.classList.contains('hidden') && _currentDetailId) {
+      openLeagueDetail(_currentDetailId, _currentDetailIsAdmin, false);
+    }
   }
 
   // ════════════════════════════════════════════════════════════
@@ -1519,16 +1530,24 @@ const Leagues = (() => {
     </div>`;
   }
 
-  function openLeagueDetail(id, isAdmin = false) {
+  function openLeagueDetail(id, isAdmin = false, recalc = true) {
     const league = DB.getLeagues().find(l => l.id === id);
     if (!league) return;
     const schools = DB.getSchools();
 
+    // Track which detail is open so refresh() can live-update it
+    _currentDetailId      = id;
+    _currentDetailIsAdmin = isAdmin;
+
     document.getElementById('leagueDetailTitle').textContent = league.name;
     const body = document.getElementById('leagueDetailBody');
 
-    recalcStandings(league);
-    DB.updateLeague(league);
+    // Only recalc+persist when opened by user action (recalc=true).
+    // Skip when called from refresh() to avoid an onSnapshot write-loop.
+    if (recalc) {
+      recalcStandings(league);
+      DB.updateLeague(league);
+    }
 
     body.innerHTML = `
       <div class="modal-tabs">
