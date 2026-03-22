@@ -367,11 +367,11 @@ const DB = {
 
   // ── Load all public collections from Firestore ────────────
   async loadAll() {
-    const [venues, schools, bookings, leagues, tournaments, closures, leagueEntries, settingsDoc] =
+    // Load all public collections (readable without authentication)
+    const [venues, schools, leagues, tournaments, closures, leagueEntries, settingsDoc] =
       await Promise.all([
         _col('venues').get(),
         _col('schools').get(),
-        _col('bookings').get(),
         _col('leagues').get(),
         _col('tournaments').get(),
         _col('closures').get(),
@@ -381,15 +381,31 @@ const DB = {
 
     _cache.venues         = venues.docs.map(d => d.data());
     _cache.schools        = schools.docs.map(d => d.data()).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-    _cache.bookings       = bookings.docs.map(d => d.data());
     _cache.leagues        = leagues.docs.map(d => d.data());
     _cache.tournaments    = tournaments.docs.map(d => d.data());
     _cache.closures       = closures.docs.map(d => d.data());
     _cache.leagueEntries  = leagueEntries.docs.map(d => d.data());
     if (settingsDoc.exists) _cache.settings = settingsDoc.data();
 
+    // Bookings require sign-in — loaded separately after auth (see loadBookings)
+    _cache.bookings = [];
+
     // Seed demo data if this is a brand-new project
     if (_cache.venues.length === 0) await this._seed();
+  },
+
+  // Clear bookings cache on logout (bookings require sign-in to read)
+  clearBookings() { _cache.bookings = []; },
+
+  // Load bookings after the user is authenticated (requires sign-in rule)
+  async loadBookings() {
+    try {
+      const snap = await _col('bookings').get();
+      _cache.bookings = snap.docs.map(d => d.data());
+    } catch (err) {
+      console.warn('[DB] loadBookings failed (not signed in?):', err.message);
+      _cache.bookings = [];
+    }
   },
 
   // ── Real-time subscriptions ───────────────────────────────

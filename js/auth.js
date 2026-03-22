@@ -34,10 +34,15 @@ const Auth = (() => {
       _user = user;
       if (user) {
         await _loadProfile(user.uid);
+        // Bookings require authentication — load now that the user is signed in
+        await DB.loadBookings();
+        if (typeof Calendar !== 'undefined') Calendar.refresh();
       } else {
         _profile = null;
         _role    = null;
+        DB.clearBookings();
         if (typeof NotificationService !== 'undefined') NotificationService.unload();
+        if (typeof Calendar !== 'undefined') Calendar.refresh();
       }
       _updateUI();
       _refreshViews();
