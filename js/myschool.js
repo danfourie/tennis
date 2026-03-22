@@ -89,6 +89,9 @@ const MySchool = (() => {
     const school = DB.getSchools().find(s => s.id === schoolId);
     _updateBanner(school);
 
+    // Sync My Venue nav now that impersonation context is set
+    if (typeof MyVenue !== 'undefined') MyVenue.refresh();
+
     // Make sure the My School nav button is visible before clicking it
     const navBtn = document.querySelector('[data-view="myschool"]');
     if (navBtn) {
@@ -104,6 +107,7 @@ const MySchool = (() => {
     _impersonateSchoolId = null;
     _updateBanner(null);
     _syncNav();
+    if (typeof MyVenue !== 'undefined') MyVenue.refresh();
     // Return to admin if the user is an admin, else calendar
     if (Auth.isAdmin()) {
       document.querySelector('[data-view="admin"]')?.click();
@@ -113,6 +117,9 @@ const MySchool = (() => {
   }
 
   function isImpersonating() { return _impersonateSchoolId !== null; }
+
+  /** Returns the school ID currently in view (impersonated takes priority over logged-in user's own school). */
+  function getActiveSchoolId() { return _activeSchoolId(); }
 
   function refresh() {
     _syncNav();
@@ -275,7 +282,7 @@ const MySchool = (() => {
         if (isNaN(n) || n < 1) { toast('Enter a valid court count', 'error'); return; }
         const v = DB.getVenues().find(x => x.id === school.venueId);
         if (!v) { toast('No venue linked to this school', 'error'); return; }
-        DB.updateVenue({ ...v, courts: n });
+        DB.updateVenue({ ...v, courts: n }).catch(console.warn);
         toast('Court count updated ✓', 'success');
         _render();
       });
@@ -292,6 +299,7 @@ const MySchool = (() => {
         if (!start) { toast('Select a start date', 'error'); return; }
         DB.addClosure({ venueId: school.venueId, startDate: start, endDate: end, reason, courtIndex: '' });
         toast('Blocked date added ✓', 'success');
+        Calendar.refresh();
         _render();
       });
     }
@@ -300,8 +308,9 @@ const MySchool = (() => {
     container.querySelectorAll('.ms-closure-del').forEach(btn => {
       btn.addEventListener('click', () => {
         if (!_guardOwnSchool()) return;
-        DB.deleteClosure(btn.dataset.id);
+        DB.deleteClosure(btn.dataset.id).catch(console.warn);
         toast('Blocked date removed', 'success');
+        Calendar.refresh();
         _render();
       });
     });
@@ -344,7 +353,7 @@ const MySchool = (() => {
           const phone = row.querySelector('.ms-org-phone')?.value.trim() || '';
           if (name || email) organizers.push({ name, email, phone });
         });
-        DB.updateSchool({ ...school, organizers });
+        DB.updateSchool({ ...school, organizers }).catch(console.warn);
         toast('Organisers saved ✓', 'success');
         _render();
       });
@@ -895,5 +904,5 @@ const MySchool = (() => {
       </div>`;
   }
 
-  return { init, refresh, impersonate, stopImpersonation, isImpersonating };
+  return { init, refresh, impersonate, stopImpersonation, isImpersonating, getActiveSchoolId };
 })();

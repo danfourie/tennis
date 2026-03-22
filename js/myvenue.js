@@ -14,8 +14,8 @@ const MyVenue = (() => {
 
   // ── helpers ─────────────────────────────────────────────────
   function _activeSchoolId() {
-    const profile = Auth.getProfile();
-    return profile ? profile.schoolId : null;
+    // Delegate to MySchool so impersonation context is respected
+    return MySchool.getActiveSchoolId();
   }
 
   // ── nav button ───────────────────────────────────────────────

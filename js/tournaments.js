@@ -156,18 +156,19 @@ const Tournaments = (() => {
     // Generate draw
     t.draw = generateDraw(t);
 
+    Modal.close('tournamentModal');
     if (id) {
-      DB.updateTournament(t);
+      const savePromise = DB.updateTournament(t);
       DB.writeAudit('tournament_updated', 'tournament', `Updated tournament: ${name}`, t.id, name);
-      toast('Tournament updated', 'success');
+      render();
+      savePromise.then(() => toast('Tournament updated', 'success'))
+                 .catch(e => { console.error('Tournament update failed:', e); toast('Save failed — ' + (e.message || 'permission denied'), 'error'); render(); });
     } else {
       DB.addTournament(t);
       DB.writeAudit('tournament_created', 'tournament', `Created tournament: ${name}`, t.id, name);
       toast('Tournament created', 'success');
+      render();
     }
-
-    Modal.close('tournamentModal');
-    render();
   }
 
   function _defaultPlayers(n) {
@@ -729,7 +730,7 @@ const Tournaments = (() => {
       }
     }
 
-    DB.updateTournament(t);
+    DB.updateTournament(t).catch(console.warn);
     DB.writeAudit('score_updated', 'tournament', `Match score entered: ${score}`, t.id, t.name);
     toast('Score saved', 'success');
   }
@@ -834,21 +835,27 @@ const Tournaments = (() => {
     t.players = players;
     t.numPlayers = players.length;
     t.draw = generateDraw(t);
-    DB.updateTournament(t);
+    DB.updateTournament(t).catch(console.warn);
 
     Modal.close('playersModal');
     openDrawModal(t.id);
     toast('Players saved & draw regenerated', 'success');
   }
 
-  function deleteTournament(id) {
+  async function deleteTournament(id) {
     if (!confirm('Delete this tournament?')) return;
     const t = DB.getTournaments().find(x => x.id === id);
     DB.writeAudit('tournament_deleted', 'tournament', `Deleted tournament: ${t ? t.name : id}`, id, t ? t.name : null);
-    DB.deleteTournament(id);
-    render();
-    renderAdmin();
-    toast('Tournament deleted');
+    const deletePromise = DB.deleteTournament(id);
+    render(); renderAdmin();
+    try {
+      await deletePromise;
+      toast('Tournament deleted', 'success');
+    } catch (e) {
+      console.error('Tournament delete failed:', e);
+      toast('Delete failed — ' + (e.message || 'permission denied'), 'error');
+      render(); renderAdmin();
+    }
   }
 
   // ════════════════════════════════════════════════════════════

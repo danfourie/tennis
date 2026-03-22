@@ -62,6 +62,19 @@ function navigate(view) {
   if (navBtn) navBtn.classList.add('active');
 }
 
+function applyTournamentVisibility() {
+  const enabled = DB.getSettings().tournamentPageEnabled !== false; // default true
+  const navBtn = document.querySelector('[data-view="tournaments"]');
+  if (navBtn) navBtn.classList.toggle('hidden', !enabled);
+  // If the user is currently on the tournaments page and it gets disabled, send them to calendar
+  if (!enabled) {
+    const tourView = document.getElementById('view-tournaments');
+    if (tourView && !tourView.classList.contains('hidden')) {
+      navigate('calendar');
+    }
+  }
+}
+
 // ================================================================
 // LOADING OVERLAY
 // ================================================================
@@ -122,6 +135,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (typeof MySchool !== 'undefined') MySchool.refresh();
         if (typeof MyVenue  !== 'undefined') MyVenue.refresh();
       }
+      // Global settings changes (e.g. tournament page toggle) — apply immediately
+      if (collection === 'settings') applyTournamentVisibility();
     });
 
     // ── Initialise UI modules ───────────────────────────────
@@ -142,6 +157,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   setLoading(false);
 
+  // Apply global feature flags from settings
+  applyTournamentVisibility();
+
   // ── Navigation ─────────────────────────────────────────────
   document.querySelectorAll('.nav-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -149,6 +167,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (view === 'admin' && !Auth.isAdmin()) return;
       navigate(view);
       // Trigger render for views that need it on activation
+      if (view === 'calendar') Calendar.refresh();
       if (view === 'myschool') MySchool.refresh();
       if (view === 'myvenue')  MyVenue.refresh();
     });

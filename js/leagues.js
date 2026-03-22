@@ -1,5 +1,5 @@
-// BUILD: 20260321-fix
-console.log('[leagues.js] BUILD 20260321-fix loaded');
+// BUILD: 20260322-excluded-dates
+console.log('[leagues.js] BUILD 20260322-excluded-dates loaded');
 /**
  * leagues.js — School league management.
  *   Public view  : render()       → #leaguesList        (read-only / score entry)
@@ -22,6 +22,9 @@ const Leagues = (() => {
   // ── Detail modal state (for live-refresh when modal is open) ─
   let _currentDetailId      = null;
   let _currentDetailIsAdmin = false;
+
+  // ── Excluded dates for the currently-open league modal ──────
+  let _excludedDates = [];
 
   /** Populate a division <select> from current leagues, preserving selection. */
   function _populateDivFilter(id, currentVal) {
@@ -47,6 +50,21 @@ const Leagues = (() => {
     if (pubDivSel) pubDivSel.addEventListener('change', e => { _pubDivFilter = e.target.value; render(); });
     const admDivSel = document.getElementById('adminLeaguesDivFilter');
     if (admDivSel) admDivSel.addEventListener('change', e => { _adminDivFilter = e.target.value; renderAdmin(); });
+    // Excluded dates: Add Date button
+    const addExcludedBtn = document.getElementById('leagueAddExcludedDate');
+    if (addExcludedBtn) {
+      addExcludedBtn.addEventListener('click', () => {
+        const picker = document.getElementById('leagueExcludedDatePicker');
+        const val = picker ? picker.value : '';
+        if (!val) return;
+        if (!_excludedDates.includes(val)) {
+          _excludedDates.push(val);
+          _excludedDates.sort();
+          _renderExcludedDateTags();
+        }
+        if (picker) picker.value = '';
+      });
+    }
     _initScoreSheetModal();
     render();
   }
@@ -802,6 +820,24 @@ const Leagues = (() => {
     });
   }
 
+  function _renderExcludedDateTags() {
+    const list = document.getElementById('leagueExcludedDatesList');
+    if (!list) return;
+    if (_excludedDates.length === 0) {
+      list.innerHTML = '<span style="color:var(--text-muted,#6b7280);font-size:.85rem">No excluded dates</span>';
+      return;
+    }
+    list.innerHTML = _excludedDates.map(d =>
+      `<span class="badge badge-amber" style="display:inline-flex;align-items:center;gap:.25rem">${esc(formatDate(d))}<button type="button" data-remove-date="${esc(d)}" style="background:none;border:none;cursor:pointer;font-weight:bold;padding:0 0 0 .1rem;font-size:1rem;line-height:1;color:inherit">&times;</button></span>`
+    ).join('');
+    list.querySelectorAll('[data-remove-date]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        _excludedDates = _excludedDates.filter(d => d !== btn.dataset.removeDate);
+        _renderExcludedDateTags();
+      });
+    });
+  }
+
   function _relativeEntryTime(iso) {
     if (!iso) return '';
     const d = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
@@ -827,6 +863,10 @@ const Leagues = (() => {
     document.getElementById('leagueEntryDeadline').value    = l ? (l.entryDeadline  || '')      : '';
     document.getElementById('leagueScoreTotal').value        = l ? (l.scoreTotal     || 67)      : 67;
     document.getElementById('leagueEditId').value            = l ? l.id : '';
+
+    // Excluded dates
+    _excludedDates = l ? [...(l.excludedDates || [])] : [];
+    _renderExcludedDateTags();
 
     // League name+division uniqueness warning
     const _checkNameWarning = () => {
@@ -980,6 +1020,7 @@ const Leagues = (() => {
     const matchTime      = document.getElementById('leagueMatchTime').value || '14:00';
     const division       = document.getElementById('leagueDivision').value.trim();
     const scoreTotal     = parseInt(document.getElementById('leagueScoreTotal')?.value) || 67;
+    const excludedDates  = [..._excludedDates];
 
     // ── Details-only save (updates settings + participants, no fixture regen) ──
     if (detailsOnly) {
@@ -1015,6 +1056,7 @@ const Leagues = (() => {
         ...existing,
         name, division, startDate, endDate, entryDeadline,
         homeMatches, neutralVenueId, playingDay, matchTime, scoreTotal,
+        excludedDates: [..._excludedDates],
         participants: newParticipants,
         schoolIds:    newSchoolIds,
         standings:    mergedStandings,
@@ -1053,7 +1095,7 @@ const Leagues = (() => {
 
     let generatedFixtures;
     try {
-      generatedFixtures = generateFixtures(participants, homeMatches, startDate, neutralVenueId, playingDay, matchTime, id || null, endDate);
+      generatedFixtures = generateFixtures(participants, homeMatches, startDate, neutralVenueId, playingDay, matchTime, id || null, endDate, excludedDates);
     } catch (err) {
       console.error('generateFixtures error:', err);
       toast('Error generating fixtures: ' + err.message, 'error');
@@ -1067,6 +1109,7 @@ const Leagues = (() => {
       startDate,
       endDate,
       entryDeadline,
+      excludedDates,
       schoolIds,
       participants,
       homeMatches,
@@ -1158,7 +1201,7 @@ const Leagues = (() => {
    * @param {string} [leagueId]          ID of the league being (re)generated
    * @param {string} [endDateStr]        YYYY-MM-DD hard cap — no fixture beyond this date
    */
-  function generateFixtures(participants, homeMatchesPerPair, startDateStr, neutralVenueId, playingDay, matchTime, leagueId, endDateStr) {
+  function generateFixtures(participants, homeMatchesPerPair, startDateStr, neutralVenueId, playingDay, matchTime, leagueId, endDateStr, excludedDates) {
     if (!participants || participants.length < 2) return [];
 
     const COURTS_PER_MATCH = 3;
@@ -1283,6 +1326,50 @@ const Leagues = (() => {
     // Hard end-date cap (null = no cap)
     const endDateObj = endDateStr ? parseDate(endDateStr) : null;
 
+    // Build list of valid playing dates: weekly from baseDate, skipping excluded dates
+    // and dates where any home venue in the round has a full-venue full-day closure.
+    const excludedSet = new Set(excludedDates || []);
+
+    /** True if ANY venue used as a home ground (or the neutral venue) in this round
+     *  has an all-day, all-court closure covering dateStr. */
+    function _roundVenueClosed(round, dateStr) {
+      const venueIds = new Set();
+      round.forEach(m => {
+        const vid = m.home.venueId || neutralVenueId;
+        if (vid) venueIds.add(vid);
+      });
+      const closures = DB.getClosures();
+      for (const venueId of venueIds) {
+        const closed = closures.some(c => {
+          if (c.venueId !== venueId) return false;
+          if (dateStr < c.startDate || dateStr > c.endDate) return false;
+          // Only whole-venue closures (courtIndex null/'') — court-specific may still leave room
+          if (c.courtIndex !== null && c.courtIndex !== undefined && c.courtIndex !== '') return false;
+          // Only full-day closures — time-specific closures don't block the whole day
+          if (c.timeStart && c.timeEnd) return false;
+          return true;
+        });
+        if (closed) return true;
+      }
+      return false;
+    }
+
+    const validPlayingDates = [];
+    let _cd = new Date(baseDate);
+    for (let _i = 0; validPlayingDates.length < allRounds.length && _i < allRounds.length + 200; _i++) {
+      const roundIdx = validPlayingDates.length;
+      const ds = toDateStr(_cd);
+      if (!excludedSet.has(ds) && !_roundVenueClosed(allRounds[roundIdx], ds)) {
+        validPlayingDates.push(ds);
+      }
+      _cd = addDays(_cd, 7);
+    }
+    // Safety fallback (more excluded/closed dates than buffer allows)
+    while (validPlayingDates.length < allRounds.length) {
+      validPlayingDates.push(toDateStr(_cd));
+      _cd = addDays(_cd, 7);
+    }
+
     // ── Venue slot tracker ───────────────────────────────────────
     // venueUsage[venueId][date] = [ courtStart, … ] of already-claimed blocks
     const venueUsage = {};
@@ -1344,7 +1431,7 @@ const Leagues = (() => {
 
         // All fixtures in a round share the same date — never push to another week.
         // Venue clashes within a round are flagged for the master to resolve.
-        const roundDate   = toDateStr(addDays(baseDate, roundIdx * 7));
+        const roundDate   = validPlayingDates[roundIdx] || toDateStr(addDays(baseDate, roundIdx * 7));
         let assignedDate  = roundDate;
         let assignedCourt = 0;
 
@@ -1727,7 +1814,7 @@ const Leagues = (() => {
         });
         let newFixtures;
         try {
-          newFixtures = generateFixtures(parts, league.homeMatches ?? 1, league.startDate, league.neutralVenueId, league.playingDay, league.matchTime, league.id, league.endDate);
+          newFixtures = generateFixtures(parts, league.homeMatches ?? 1, league.startDate, league.neutralVenueId, league.playingDay, league.matchTime, league.id, league.endDate, league.excludedDates);
         } catch (err) {
           console.error('generateFixtures error (recalc):', err);
           toast('Error recalculating fixtures: ' + err.message, 'error');
@@ -2093,14 +2180,22 @@ const Leagues = (() => {
   // ════════════════════════════════════════════════════════════
   // DELETE
   // ════════════════════════════════════════════════════════════
-  function deleteLeague(id) {
+  async function deleteLeague(id) {
     if (!confirm('Delete this league and all its fixtures?')) return;
     const league = DB.getLeagues().find(l => l.id === id);
     DB.writeAudit('league_deleted', 'league', `Deleted league: ${league ? league.name : id}`, id, league ? league.name : null);
-    DB.deleteLeague(id);
+    const deletePromise = DB.deleteLeague(id);  // optimistically removes from cache
     render();
     renderAdmin();
-    toast('League deleted');
+    try {
+      await deletePromise;
+      toast('League deleted', 'success');
+    } catch(e) {
+      console.error('League delete failed:', e);
+      toast('Delete failed — ' + (e.message || 'permission denied'), 'error');
+      render();      // re-render after onSnapshot revert restores the league
+      renderAdmin();
+    }
   }
 
   /**
