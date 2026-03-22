@@ -440,10 +440,11 @@ const NotificationService = (() => {
   // ── Pending reminder checks (on login) ───────────────────────
   async function checkPendingReminders() {
     const profile = Auth.getProfile();
-    if (!profile || !profile.schoolId) return;
-
+    if (!profile) return;
+    // Admin/master users have no schoolId — they still need reminders for
+    // leagues they manage, so we don't gate on schoolId here.
     const myUid      = profile.uid;
-    const mySchoolId = profile.schoolId;
+    const mySchoolId = profile.schoolId || null;
     const today      = toDateStr(new Date());
     const in7days    = toDateStr(addDays(new Date(), 7));
 

@@ -390,7 +390,14 @@ const DB = {
     const watch = (colName, cacheKey) => {
       const unsub = _col(colName).onSnapshot(
         snap => {
-          _cache[cacheKey] = snap.docs.map(d => d.data());
+          const serverDocs = snap.docs.map(d => d.data());
+          // Preserve any optimistic local entries not yet confirmed by Firestore
+          // (they have an id that doesn't appear in the server snapshot yet).
+          // This prevents newly added bookings/entries from disappearing while
+          // Firestore processes the write.
+          const serverIds = new Set(serverDocs.map(d => d.id).filter(Boolean));
+          const localOnly = (_cache[cacheKey] || []).filter(d => d.id && !serverIds.has(d.id));
+          _cache[cacheKey] = [...serverDocs, ...localOnly];
           if (onUpdate) onUpdate(colName);
         },
         err => console.warn(`Firestore listener [${colName}]:`, err)

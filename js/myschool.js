@@ -234,6 +234,13 @@ const MySchool = (() => {
       html += myLeagues.map(l => _leagueSection(l, schoolId)).join('');
     }
 
+    // ── My School Settings (own school only, or admin) ───────────
+    const currentProfile = Auth.getProfile();
+    const isOwnSchool = currentProfile && currentProfile.schoolId === schoolId;
+    if ((isOwnSchool || Auth.isAdmin()) && !_impersonateSchoolId) {
+      html += _settingsSection(school, venue);
+    }
+
     // When impersonating, append a panel showing all notifications sent to this school
     if (_impersonateSchoolId) {
       html += `<div class="card" style="margin-top:1.25rem">
@@ -249,6 +256,100 @@ const MySchool = (() => {
 
     container.innerHTML = html;
 
+    // ── Settings event handlers ───────────────────────────────────
+    const _guardOwnSchool = () => {
+      const p = Auth.getProfile();
+      if (!Auth.isAdmin() && (!p || p.schoolId !== schoolId)) {
+        toast('You can only edit your own school settings', 'error');
+        return false;
+      }
+      return true;
+    };
+
+    // Courts: save
+    const courtsSaveBtn = document.getElementById('ms-courts-save');
+    if (courtsSaveBtn) {
+      courtsSaveBtn.addEventListener('click', () => {
+        if (!_guardOwnSchool()) return;
+        const n = parseInt(document.getElementById('ms-courts-input').value);
+        if (isNaN(n) || n < 1) { toast('Enter a valid court count', 'error'); return; }
+        const v = DB.getVenues().find(x => x.id === school.venueId);
+        if (!v) { toast('No venue linked to this school', 'error'); return; }
+        DB.updateVenue({ ...v, courts: n });
+        toast('Court count updated ✓', 'success');
+        _render();
+      });
+    }
+
+    // Blocked dates: add
+    const blockAddBtn = document.getElementById('ms-block-add');
+    if (blockAddBtn) {
+      blockAddBtn.addEventListener('click', () => {
+        if (!_guardOwnSchool()) return;
+        const start  = document.getElementById('ms-block-start').value;
+        const end    = document.getElementById('ms-block-end').value || start;
+        const reason = document.getElementById('ms-block-reason').value.trim();
+        if (!start) { toast('Select a start date', 'error'); return; }
+        DB.addClosure({ venueId: school.venueId, startDate: start, endDate: end, reason, courtIndex: '' });
+        toast('Blocked date added ✓', 'success');
+        _render();
+      });
+    }
+
+    // Blocked dates: delete
+    container.querySelectorAll('.ms-closure-del').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (!_guardOwnSchool()) return;
+        DB.deleteClosure(btn.dataset.id);
+        toast('Blocked date removed', 'success');
+        _render();
+      });
+    });
+
+    // Organisers: add row
+    const orgAddBtn = document.getElementById('ms-org-add');
+    if (orgAddBtn) {
+      orgAddBtn.addEventListener('click', () => {
+        const list = document.getElementById('ms-org-list');
+        const idx  = list.querySelectorAll('.ms-org-row').length;
+        const row  = document.createElement('div');
+        row.className = 'ms-org-row';
+        row.dataset.orgIdx = idx;
+        row.style.cssText = 'display:flex;gap:.5rem;align-items:center;margin-bottom:.4rem;flex-wrap:wrap';
+        row.innerHTML = `
+          <input class="ms-org-name" type="text" placeholder="Name" style="flex:1;min-width:120px" data-org="${idx}">
+          <input class="ms-org-email" type="email" placeholder="Email" style="flex:1;min-width:140px" data-org="${idx}">
+          <input class="ms-org-phone" type="tel" placeholder="Phone" style="flex:1;min-width:100px" data-org="${idx}">
+          <button class="btn btn-xs btn-danger ms-org-del" data-org="${idx}" title="Remove">✕</button>`;
+        row.querySelector('.ms-org-del').addEventListener('click', () => row.remove());
+        list.appendChild(row);
+      });
+    }
+
+    // Organisers: delete existing row
+    container.querySelectorAll('.ms-org-del').forEach(btn => {
+      btn.addEventListener('click', () => btn.closest('.ms-org-row').remove());
+    });
+
+    // Organisers: save
+    const orgSaveBtn = document.getElementById('ms-org-save');
+    if (orgSaveBtn) {
+      orgSaveBtn.addEventListener('click', () => {
+        if (!_guardOwnSchool()) return;
+        const rows = document.querySelectorAll('#ms-org-list .ms-org-row');
+        const organizers = [];
+        rows.forEach(row => {
+          const name  = row.querySelector('.ms-org-name')?.value.trim() || '';
+          const email = row.querySelector('.ms-org-email')?.value.trim() || '';
+          const phone = row.querySelector('.ms-org-phone')?.value.trim() || '';
+          if (name || email) organizers.push({ name, email, phone });
+        });
+        DB.updateSchool({ ...school, organizers });
+        toast('Organisers saved ✓', 'success');
+        _render();
+      });
+    }
+
     // If impersonating, load school notifications asynchronously
     if (_impersonateSchoolId) {
       NotificationService.renderSchoolNotifications(_impersonateSchoolId, 'schoolNotifList');
@@ -261,7 +362,25 @@ const MySchool = (() => {
     }
 
     // Score-entry listeners
+    const SCORE_TOTAL = 67;
     container.querySelectorAll('.my-score-input').forEach(inp => {
+      // Live auto-fill: if partner is blank or was the previous auto-calc, update it
+      inp.addEventListener('input', () => {
+        const val = parseInt(inp.value);
+        if (isNaN(val) || val < 0) return;
+        const partnerField = inp.dataset.field === 'homeScore' ? 'awayScore' : 'homeScore';
+        const partner = container.querySelector(
+          `.my-score-input[data-fixture="${inp.dataset.fixture}"][data-field="${partnerField}"]`
+        );
+        if (!partner) return;
+        const prevAuto = parseInt(partner.dataset.autoVal);
+        const partnerVal = parseInt(partner.value);
+        // Only auto-fill if partner is empty or still shows the last auto value
+        if (partner.value === '' || (!isNaN(prevAuto) && partnerVal === prevAuto)) {
+          const auto = SCORE_TOTAL - val;
+          if (auto >= 0) { partner.value = auto; partner.dataset.autoVal = auto; }
+        }
+      });
       inp.addEventListener('change', () => {
         Leagues.saveScore(inp.dataset.league, inp.dataset.fixture, inp.dataset.field, inp.value);
         _render();
@@ -528,7 +647,8 @@ const MySchool = (() => {
 
     if (recent.length > 0) {
       html += `<div class="myschool-section-label">📊 Recent Results</div>`;
-      html += recent.map(f => _fixtureRow(f, league.id, myParticipantIds, false, clashedIds)).join('');
+      // canEdit=true — score stays editable until master verifies (locked inside _fixtureRow)
+      html += recent.map(f => _fixtureRow(f, league.id, myParticipantIds, true, clashedIds)).join('');
     }
 
     if (upcoming.length === 0 && recent.length === 0) {
@@ -552,8 +672,9 @@ const MySchool = (() => {
     const aColor     = awaySchool ? awaySchool.color : '#666';
 
     // ── Score ──
+    const isLocked = !!(f.masterVerified);   // admin closed this score — no more edits
     let scoreHtml;
-    if (canEdit && Auth.isLoggedIn()) {
+    if (canEdit && Auth.isLoggedIn() && !isLocked) {
       scoreHtml = `
         <input class="my-score-input score-input" type="number" min="0" max="99"
           value="${hasScore ? f.homeScore : ''}"
@@ -691,6 +812,85 @@ const MySchool = (() => {
              data-has-score="${hasScore ? '1' : '0'}">🔔 Notify</button>` : ''}
       </div>
     </div>`;
+  }
+
+  // ── My School Settings section ────────────────────────────────
+  function _settingsSection(school, venue) {
+    const closures = venue
+      ? DB.getClosures().filter(c => c.venueId === venue.id && !c.courtIndex)
+          .sort((a, b) => (a.startDate || '').localeCompare(b.startDate || ''))
+      : [];
+
+    const orgs = (school.organizers && school.organizers.length)
+      ? school.organizers
+      : (school.contact ? [{ name: school.contact, email: school.email || '', phone: school.phone || '' }] : [{ name: '', email: '', phone: '' }]);
+
+    const orgRows = orgs.map((o, i) => `
+      <div class="ms-org-row" data-org-idx="${i}" style="display:flex;gap:.5rem;align-items:center;margin-bottom:.4rem;flex-wrap:wrap">
+        <input class="ms-org-name" type="text" placeholder="Name" value="${esc(o.name || '')}"
+          style="flex:1;min-width:120px" data-org="${i}">
+        <input class="ms-org-email" type="email" placeholder="Email" value="${esc(o.email || '')}"
+          style="flex:1;min-width:140px" data-org="${i}">
+        <input class="ms-org-phone" type="tel" placeholder="Phone" value="${esc(o.phone || '')}"
+          style="flex:1;min-width:100px" data-org="${i}">
+        <button class="btn btn-xs btn-danger ms-org-del" data-org="${i}" title="Remove organiser">✕</button>
+      </div>`).join('');
+
+    const closureRows = closures.map(c => `
+      <div class="ms-closure-row" style="display:flex;gap:.5rem;align-items:center;margin-bottom:.3rem;flex-wrap:wrap">
+        <span style="font-size:.85rem">${formatDate(c.startDate)}${c.endDate && c.endDate !== c.startDate ? ' → ' + formatDate(c.endDate) : ''}</span>
+        ${c.reason ? `<span class="text-muted" style="font-size:.8rem">${esc(c.reason)}</span>` : ''}
+        <button class="btn btn-xs btn-danger ms-closure-del" data-id="${c.id}" title="Remove block">✕</button>
+      </div>`).join('');
+
+    return `
+      <div class="card" id="ms-settings-card" style="margin-top:1.25rem">
+        <div class="card-header">
+          <div class="card-title">⚙️ My School Settings</div>
+        </div>
+        <div class="card-body" style="display:flex;flex-direction:column;gap:1rem">
+
+          <!-- Courts available -->
+          <div>
+            <label style="font-weight:600;display:block;margin-bottom:.4rem">🎾 Courts available at venue</label>
+            <div style="display:flex;gap:.5rem;align-items:center">
+              <input id="ms-courts-input" type="number" min="1" max="20"
+                value="${venue ? (venue.courts || '') : ''}"
+                placeholder="${venue ? '' : 'No venue linked'}"
+                ${venue ? '' : 'disabled'}
+                style="width:80px">
+              <button class="btn btn-sm btn-primary" id="ms-courts-save"
+                ${venue ? '' : 'disabled'}>Save</button>
+              ${!venue ? `<span class="text-muted" style="font-size:.8rem">Link a venue in Admin first</span>` : ''}
+            </div>
+          </div>
+
+          <!-- Block dates -->
+          <div>
+            <label style="font-weight:600;display:block;margin-bottom:.4rem">🚫 Blocked dates (courts unavailable)</label>
+            <div id="ms-closures-list">${closureRows || '<span class="text-muted" style="font-size:.85rem">No blocked dates.</span>'}</div>
+            ${venue ? `
+            <div style="display:flex;gap:.5rem;align-items:center;margin-top:.5rem;flex-wrap:wrap">
+              <input type="date" id="ms-block-start" style="flex:1;min-width:130px">
+              <span class="text-muted">to</span>
+              <input type="date" id="ms-block-end" style="flex:1;min-width:130px">
+              <input type="text" id="ms-block-reason" placeholder="Reason (optional)" style="flex:2;min-width:140px">
+              <button class="btn btn-sm btn-secondary" id="ms-block-add">+ Add</button>
+            </div>` : `<span class="text-muted" style="font-size:.8rem">Link a venue in Admin to manage blocked dates.</span>`}
+          </div>
+
+          <!-- Organisers -->
+          <div>
+            <label style="font-weight:600;display:block;margin-bottom:.4rem">👤 Organisers &amp; contact details</label>
+            <div id="ms-org-list">${orgRows}</div>
+            <div style="display:flex;gap:.5rem;margin-top:.4rem">
+              <button class="btn btn-sm btn-secondary" id="ms-org-add">+ Add organiser</button>
+              <button class="btn btn-sm btn-primary" id="ms-org-save">Save organisers</button>
+            </div>
+          </div>
+
+        </div>
+      </div>`;
   }
 
   return { init, refresh, impersonate, stopImpersonation, isImpersonating };

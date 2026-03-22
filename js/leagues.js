@@ -1119,6 +1119,15 @@ const Leagues = (() => {
         color:         school.color,
       };
     }).filter(Boolean);
+
+    // Randomise team order so the draw is not biased by registration order.
+    // A school registered first (e.g. AHMP) would otherwise always draw
+    // a first-round home game — the shuffle distributes this fairly.
+    for (let i = teams.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [teams[i], teams[j]] = [teams[j], teams[i]];
+    }
+
     // Stamp each team with its stable position so the H/A index formula
     // works via direct property access — no indexOf or Map lookup needed.
     teams.forEach((t, i) => { t._balanceIdx = i; });
@@ -1494,7 +1503,23 @@ const Leagues = (() => {
 
     // Score editing — any logged-in user
     if (Auth.isLoggedIn()) {
+      const SCORE_TOTAL = 67;
       body.querySelectorAll('.score-input').forEach(inp => {
+        inp.addEventListener('input', () => {
+          const val = parseInt(inp.value);
+          if (isNaN(val) || val < 0) return;
+          const partnerField = inp.dataset.field === 'homeScore' ? 'awayScore' : 'homeScore';
+          const partner = body.querySelector(
+            `.score-input[data-fixture="${inp.dataset.fixture}"][data-field="${partnerField}"]`
+          );
+          if (!partner) return;
+          const prevAuto = parseInt(partner.dataset.autoVal);
+          const partnerVal = parseInt(partner.value);
+          if (partner.value === '' || (!isNaN(prevAuto) && partnerVal === prevAuto)) {
+            const auto = SCORE_TOTAL - val;
+            if (auto >= 0) { partner.value = auto; partner.dataset.autoVal = auto; }
+          }
+        });
         inp.addEventListener('change', () => {
           saveScore(league.id, inp.dataset.fixture, inp.dataset.field, inp.value);
           openLeagueDetail(id, isAdmin);
