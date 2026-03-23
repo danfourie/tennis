@@ -128,7 +128,7 @@ const Admin = (() => {
     if (_activeTab === 'leagues')       Leagues.renderAdmin();
     if (_activeTab === 'tournaments')   Tournaments.renderAdmin();
     if (_activeTab === 'users')         renderUsers();
-    if (_activeTab === 'settings')      renderAuditLog();
+    if (_activeTab === 'settings')      { renderGlobalSettings(); renderAuditLog(); }
     if (_activeTab === 'notifications') NotificationService.renderComposer();
   }
 
