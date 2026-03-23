@@ -2222,10 +2222,13 @@ const Leagues = (() => {
     const fixture = (league.fixtures || []).find(f => f.id === fixtureId);
     if (!fixture) return;
     const oldVal  = fixture[field];
-    // Empty string = clear the score entirely (null); otherwise parse as integer.
-    fixture[field] = (rawValue === '' || rawValue === null || rawValue === undefined)
+    // Empty string / null / undefined / unparseable string (e.g. the literal
+    // "null" that appears when an input renders a null value attribute) → clear
+    // to null. parseInt("null") = NaN, so guard against that too.
+    const _parsed = parseInt(rawValue);
+    fixture[field] = (rawValue === '' || rawValue === null || rawValue === undefined || isNaN(_parsed))
       ? null
-      : parseInt(rawValue);
+      : _parsed;
 
     // Any score change resets all verification — the process starts fresh.
     fixture.masterVerified   = false;

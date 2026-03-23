@@ -793,12 +793,11 @@ const MySchool = (() => {
       }
     }
 
-    // A fixture is only "played" (→ Recent Results) when BOTH scores are present.
-    // If only one score has been entered the fixture stays in Upcoming so the
-    // second score can be filled in before it moves.
-    const _bothScores = f =>
-      (f.homeScore !== null && f.homeScore !== undefined) &&
-      (f.awayScore !== null && f.awayScore !== undefined);
+    // A fixture is only "played" (→ Recent Results) when BOTH scores are valid numbers.
+    // Guards against null, undefined, and NaN (NaN arises when "null" string is
+    // rendered into an input value and parseInt("null") is called on it).
+    const _isValidScore = v => v !== null && v !== undefined && !isNaN(v);
+    const _bothScores   = f => _isValidScore(f.homeScore) && _isValidScore(f.awayScore);
 
     const allUpcoming = myFixtures
       .filter(f => !_bothScores(f))
@@ -893,14 +892,19 @@ const MySchool = (() => {
     const isLocked = !!(f.masterVerified);   // admin closed this score — no more edits
     let scoreHtml;
     if (canEdit && Auth.isLoggedIn() && !isLocked) {
+      // Use separate guards for each score — don't assume awayScore is set
+      // just because homeScore is. Rendering null/undefined as a value attribute
+      // produces the literal string "null" which confuses parseInt later.
+      const homeVal = (f.homeScore !== null && f.homeScore !== undefined && !isNaN(f.homeScore)) ? f.homeScore : '';
+      const awayVal = (f.awayScore !== null && f.awayScore !== undefined && !isNaN(f.awayScore)) ? f.awayScore : '';
       scoreHtml = `
         <input class="my-score-input score-input" type="number" min="0" max="99"
-          value="${hasScore ? f.homeScore : ''}"
+          value="${homeVal}"
           data-league="${leagueId}" data-fixture="${f.id}" data-field="homeScore"
           style="width:54px;text-align:center">
         <span style="color:var(--neutral);margin:0 .2rem">—</span>
         <input class="my-score-input score-input" type="number" min="0" max="99"
-          value="${hasScore ? f.awayScore : ''}"
+          value="${awayVal}"
           data-league="${leagueId}" data-fixture="${f.id}" data-field="awayScore"
           style="width:54px;text-align:center">`;
     } else if (hasScore) {
