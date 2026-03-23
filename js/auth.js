@@ -69,7 +69,9 @@ const Auth = (() => {
     try {
       const db  = firebase.firestore();
       const ref = db.collection('users').doc(uid);
-      const doc = await ref.get();
+      // Force a server read so that if an admin deleted this profile on another
+      // device the stale offline-cache copy is never used to grant access.
+      const doc = await ref.get({ source: 'server' });
 
       if (doc.exists) {
         _profile = doc.data();

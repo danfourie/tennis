@@ -656,6 +656,9 @@ const NotificationService = (() => {
       general_message:             '📢',
       team_registration_reminder:  '📝',
       league_entry:                '📝',
+      booking_request:             '📩',
+      booking_approved:            '✅',
+      booking_rejected:            '❌',
     };
     return icons[type] || '🔔';
   }

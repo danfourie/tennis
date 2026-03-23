@@ -146,6 +146,42 @@ const MyVenue = (() => {
       </div>
     </div>`;
 
+    // ── Pending booking requests ─────────────────────────────────
+    const pendingBookings = DB.getBookings().filter(b =>
+      b.status === 'pending' && b.venueId === school.venueId
+    );
+    if (pendingBookings.length > 0) {
+      html += `<div class="card" style="margin-bottom:1.5rem;border-left:4px solid var(--warning,#f59e0b)">
+        <div class="card-header">
+          <div class="card-title" style="margin:0">📩 Pending Booking Requests
+            <span class="badge" style="background:#fef9c3;color:#854d0e;margin-left:.5rem">${pendingBookings.length}</span>
+          </div>
+        </div>
+        <div class="card-body" style="padding:.25rem .75rem .75rem">`;
+      pendingBookings
+        .slice()
+        .sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.timeSlot || '').localeCompare(b.timeSlot || ''))
+        .forEach(b => {
+          html += `<div class="admin-list-item" style="align-items:flex-start;gap:.75rem" data-booking-id="${esc(b.id)}">
+            <div style="flex:1;min-width:0">
+              <div style="font-weight:600">${esc(b.label || b.type || 'Booking')}</div>
+              <div class="text-muted" style="font-size:.82rem">
+                📅 ${b.date ? formatDate(b.date) : '—'}
+                ${b.timeSlot ? ` ⏰ ${esc(b.timeSlot)}` : ''}
+                🎾 Court ${(typeof b.courtIndex === 'number') ? b.courtIndex + 1 : '—'}
+              </div>
+              ${b.requestedByName ? `<div class="text-muted" style="font-size:.8rem">Requested by: ${esc(b.requestedByName)}${b.schoolName ? ' · ' + esc(b.schoolName) : ''}</div>` : ''}
+              ${b.notes ? `<div class="text-muted" style="font-size:.8rem;font-style:italic">${esc(b.notes)}</div>` : ''}
+            </div>
+            <div style="display:flex;gap:.4rem;flex-shrink:0;align-items:center">
+              <button class="btn btn-sm btn-danger mv-reject-btn" data-id="${esc(b.id)}">Reject</button>
+              <button class="btn btn-sm btn-primary mv-approve-btn" data-id="${esc(b.id)}">Approve ✓</button>
+            </div>
+          </div>`;
+        });
+      html += `</div></div>`;
+    }
+
     // One card per date
     sortedDates.forEach(date => {
       const entries   = fixturesByDate.get(date);
@@ -221,6 +257,55 @@ const MyVenue = (() => {
     });
 
     container.innerHTML = html;
+
+    // ── Pending booking action handlers ───────────────────────────
+    container.querySelectorAll('.mv-approve-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.id;
+        const booking = DB.getBookings().find(b => b.id === id);
+        btn.disabled = true; btn.textContent = 'Approving…';
+        DB.approveBooking(id);
+        DB.writeAudit('booking_approved', 'booking',
+          `Approved request by ${booking ? esc(booking.requestedByName || 'user') : 'user'}: ${booking ? esc(booking.label || '') : ''} on ${booking ? booking.date : ''}`,
+          id, booking ? booking.label || '' : '');
+        if (booking && booking.requestedBy && typeof NotificationService !== 'undefined') {
+          NotificationService.send({
+            type:          'booking_approved',
+            title:         'Booking Request Approved ✅',
+            body:          `Your request to book ${esc(booking.label || venue.name)} on ${booking.date ? formatDate(booking.date) : ''} has been approved.`,
+            recipientUids: [booking.requestedBy],
+          });
+        }
+        toast('Booking approved ✓', 'success');
+      });
+    });
+
+    container.querySelectorAll('.mv-reject-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.id;
+        const booking = DB.getBookings().find(b => b.id === id);
+        btn.disabled = true; btn.textContent = 'Rejecting…';
+        try {
+          await DB.rejectBooking(id);
+          DB.writeAudit('booking_rejected', 'booking',
+            `Rejected request by ${booking ? esc(booking.requestedByName || 'user') : 'user'}: ${booking ? esc(booking.label || '') : ''} on ${booking ? booking.date : ''}`,
+            id, booking ? booking.label || '' : '');
+          if (booking && booking.requestedBy && typeof NotificationService !== 'undefined') {
+            NotificationService.send({
+              type:          'booking_rejected',
+              title:         'Booking Request Rejected',
+              body:          `Your request to book ${esc(booking.label || venue.name)} on ${booking.date ? formatDate(booking.date) : ''} has been declined.`,
+              recipientUids: [booking.requestedBy],
+            });
+          }
+          toast('Request rejected');
+        } catch (err) {
+          console.error('Reject booking failed:', err);
+          btn.disabled = false; btn.textContent = 'Reject';
+          toast('Failed to reject booking — please try again', 'error');
+        }
+      });
+    });
   }
 
   return { init, refresh };

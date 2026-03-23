@@ -130,8 +130,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (['venues', 'schools', 'closures', 'leagueEntries', 'leagues'].includes(collection)) Admin.refresh();
       if (['leagues', 'leagueEntries', 'schools', 'venues'].includes(collection))  Leagues.refresh();
       if (['tournaments', 'venues'].includes(collection))                          Tournaments.refresh();
-      // MySchool and MyVenue must refresh when league scores / school data change
-      if (['leagues', 'schools', 'venues', 'closures'].includes(collection)) {
+      // MySchool and MyVenue must refresh when league scores / school / booking data change
+      if (['leagues', 'schools', 'venues', 'closures', 'bookings'].includes(collection)) {
         if (typeof MySchool !== 'undefined') MySchool.refresh();
         if (typeof MyVenue  !== 'undefined') MyVenue.refresh();
       }
