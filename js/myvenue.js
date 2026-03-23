@@ -138,30 +138,40 @@ const MyVenue = (() => {
       </div>
     </div>`;
 
-    // ── Pending booking requests (always shown, even if no fixtures) ──────
+    // ── Bookings needing school attention: pending requests + admin-scheduled ──
+    // 'pending'       = request from another school, needs approve/reject
+    // no status/null  = admin-scheduled directly, school should confirm or delete
     const allBookings = DB.getBookings();
-    const pendingBookings = allBookings.filter(b =>
-      b.status === 'pending' && b.venueId === school.venueId
+    const actionableBookings = allBookings.filter(b =>
+      b.venueId === school.venueId && b.status !== 'confirmed' && b.status !== 'rejected'
     );
+    const actionCount = actionableBookings.length;
     html += `<div class="card" style="margin-bottom:1.5rem;border-left:4px solid var(--warning,#f59e0b)">
       <div class="card-header">
-        <div class="card-title" style="margin:0">📩 Pending Booking Requests
-          ${pendingBookings.length > 0 ? `<span class="badge" style="background:#fef9c3;color:#854d0e;margin-left:.5rem">${pendingBookings.length}</span>` : ''}
+        <div class="card-title" style="margin:0">📩 Bookings Awaiting Confirmation
+          ${actionCount > 0 ? `<span class="badge" style="background:#fef9c3;color:#854d0e;margin-left:.5rem">${actionCount}</span>` : ''}
         </div>
       </div>
       <div class="card-body" style="padding:.25rem .75rem .75rem">`;
-    if (pendingBookings.length === 0) {
-      const venueBookings = allBookings.filter(b => b.venueId === school.venueId);
-      const statusSummary = venueBookings.map(b => b.status || 'no-status').join(', ') || 'none';
-      html += `<p class="text-muted" style="padding:.4rem 0;margin:0">No pending requests — total loaded: ${allBookings.length}, at this venue: ${venueBookings.length} (statuses: ${esc(statusSummary)})</p>`;
+    if (actionCount === 0) {
+      html += `<p class="text-muted" style="padding:.4rem 0;margin:0">All bookings confirmed ✓</p>`;
     } else {
-      pendingBookings
+      actionableBookings
         .slice()
         .sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.timeSlot || '').localeCompare(b.timeSlot || ''))
         .forEach(b => {
-          html += `<div class="admin-list-item" style="align-items:flex-start;gap:.75rem" data-booking-id="${esc(b.id)}">
+          const isPendingRequest = b.status === 'pending';
+          const statusBadge = isPendingRequest
+            ? `<span class="badge" style="background:#fef9c3;color:#854d0e;font-size:.7rem">Request</span>`
+            : `<span class="badge" style="background:#e0f2fe;color:#0369a1;font-size:.7rem">Admin-scheduled</span>`;
+          const rejectLabel = isPendingRequest ? 'Reject' : 'Delete';
+          const approveLabel = isPendingRequest ? 'Approve ✓' : 'Confirm ✓';
+          html += `<div class="admin-list-item" style="align-items:flex-start;gap:.75rem">
             <div style="flex:1;min-width:0">
-              <div style="font-weight:600">${esc(b.label || b.type || 'Booking')}</div>
+              <div style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap">
+                <span style="font-weight:600">${esc(b.label || b.type || 'Booking')}</span>
+                ${statusBadge}
+              </div>
               <div class="text-muted" style="font-size:.82rem">
                 📅 ${b.date ? formatDate(b.date) : '—'}
                 ${b.timeSlot ? ` ⏰ ${esc(b.timeSlot)}` : ''}
@@ -171,8 +181,8 @@ const MyVenue = (() => {
               ${b.notes ? `<div class="text-muted" style="font-size:.8rem;font-style:italic">${esc(b.notes)}</div>` : ''}
             </div>
             <div style="display:flex;gap:.4rem;flex-shrink:0;align-items:center">
-              <button class="btn btn-sm btn-danger mv-reject-btn" data-id="${esc(b.id)}">Reject</button>
-              <button class="btn btn-sm btn-primary mv-approve-btn" data-id="${esc(b.id)}">Approve ✓</button>
+              <button class="btn btn-sm btn-danger mv-reject-btn" data-id="${esc(b.id)}" data-label="${esc(rejectLabel)}">${esc(rejectLabel)}</button>
+              <button class="btn btn-sm btn-primary mv-approve-btn" data-id="${esc(b.id)}" data-label="${esc(approveLabel)}">${esc(approveLabel)}</button>
             </div>
           </div>`;
         });
