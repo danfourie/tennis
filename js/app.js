@@ -127,7 +127,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // ── Subscribe to real-time updates ──────────────────────
     DB.subscribeAll(collection => {
       if (['venues', 'bookings', 'closures'].includes(collection))             Calendar.refresh();
-      if (['venues', 'schools', 'closures', 'leagueEntries'].includes(collection)) Admin.refresh();
+      if (['venues', 'schools', 'closures', 'leagueEntries', 'leagues'].includes(collection)) Admin.refresh();
       if (['leagues', 'leagueEntries', 'schools', 'venues'].includes(collection))  Leagues.refresh();
       if (['tournaments', 'venues'].includes(collection))                          Tournaments.refresh();
       // MySchool and MyVenue must refresh when league scores / school data change
