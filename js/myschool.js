@@ -793,14 +793,21 @@ const MySchool = (() => {
       }
     }
 
+    // A fixture is only "played" (→ Recent Results) when BOTH scores are present.
+    // If only one score has been entered the fixture stays in Upcoming so the
+    // second score can be filled in before it moves.
+    const _bothScores = f =>
+      (f.homeScore !== null && f.homeScore !== undefined) &&
+      (f.awayScore !== null && f.awayScore !== undefined);
+
     const allUpcoming = myFixtures
-      .filter(f => f.homeScore === null || f.homeScore === undefined)
+      .filter(f => !_bothScores(f))
       .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
 
     const upcoming = _fixtureView === 'next' ? allUpcoming.slice(0, 1) : allUpcoming;
 
     const recent = _fixtureView === 'next' ? [] : myFixtures
-      .filter(f => f.homeScore !== null && f.homeScore !== undefined)
+      .filter(_bothScores)
       .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
       .slice(0, 5);
 
