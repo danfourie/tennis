@@ -1,3 +1,6 @@
+# Claude Code internal files (worktrees, plans, settings)
+.claude/
+
 # Excel files
 *.xlsx
 *.xls
