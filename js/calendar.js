@@ -391,28 +391,46 @@ const Calendar = (() => {
         footer.innerHTML = `
           <button class="btn btn-secondary" data-modal="bookingModal">Close</button>
           <button class="btn btn-danger" id="deleteBookingBtn">Delete Booking</button>`;
-        document.getElementById('deleteBookingBtn').onclick = () => {
-          DB.deleteBooking(booking.id);
-          DB.writeAudit('booking_deleted', 'booking',
-            `Booking deleted: ${esc(booking.label || '')} on ${dateStr}`,
-            booking.id, booking.label || '');
-          Modal.close('bookingModal');
-          render();
-          toast('Booking deleted', 'success');
+        document.getElementById('deleteBookingBtn').onclick = async () => {
+          const btn = document.getElementById('deleteBookingBtn');
+          if (btn) { btn.disabled = true; btn.textContent = 'Deleting…'; }
+          try {
+            await DB.deleteBooking(booking.id);
+            DB.writeAudit('booking_deleted', 'booking',
+              `Booking deleted: ${esc(booking.label || '')} on ${dateStr}`,
+              booking.id, booking.label || '');
+            Modal.close('bookingModal');
+            render();
+            toast('Booking deleted', 'success');
+          } catch (err) {
+            console.error('Delete booking failed:', err);
+            if (btn) { btn.disabled = false; btn.textContent = 'Delete Booking'; }
+            toast('Failed to delete booking — please try again', 'error');
+            render();
+          }
         };
       } else if (isOwnRequest) {
         // Owner: cancel own pending request
         footer.innerHTML = `
           <button class="btn btn-secondary" data-modal="bookingModal">Close</button>
           <button class="btn btn-danger" id="cancelRequestBtn">Cancel My Request</button>`;
-        document.getElementById('cancelRequestBtn').onclick = () => {
-          DB.deleteBooking(booking.id);
-          DB.writeAudit('booking_cancelled', 'booking',
-            `Request cancelled by requester: ${esc(booking.label || '')} on ${dateStr}`,
-            booking.id, booking.label || '');
-          Modal.close('bookingModal');
-          render();
-          toast('Request cancelled');
+        document.getElementById('cancelRequestBtn').onclick = async () => {
+          const btn = document.getElementById('cancelRequestBtn');
+          if (btn) { btn.disabled = true; btn.textContent = 'Cancelling…'; }
+          try {
+            await DB.deleteBooking(booking.id);
+            DB.writeAudit('booking_cancelled', 'booking',
+              `Request cancelled by requester: ${esc(booking.label || '')} on ${dateStr}`,
+              booking.id, booking.label || '');
+            Modal.close('bookingModal');
+            render();
+            toast('Request cancelled');
+          } catch (err) {
+            console.error('Cancel booking failed:', err);
+            if (btn) { btn.disabled = false; btn.textContent = 'Cancel My Request'; }
+            toast('Failed to cancel request — please try again', 'error');
+            render();
+          }
         };
       } else {
         footer.innerHTML = `<button class="btn btn-secondary" data-modal="bookingModal">Close</button>`;
@@ -617,6 +635,19 @@ const Calendar = (() => {
           `Request submitted by ${prof ? (prof.displayName || prof.email) : 'user'}: ${label || type} on ${dateStr} at ${venue.name} Court ${courtIndex + 1}`,
           null, label || type);
         if (requestedCount === 0) { render(); return; }
+
+        // Notify all users of the venue-owning school
+        const ownerSchool = DB.getSchools().find(s => s.venueId === venueId);
+        if (ownerSchool && typeof NotificationService !== 'undefined') {
+          const requesterName = prof ? (prof.displayName || prof.email) : 'A user';
+          const slotList = [...selectedSlots].join(', ');
+          NotificationService.sendToSchool(ownerSchool.id, {
+            type:  'booking_request',
+            title: `New booking request at ${venue.name}`,
+            body:  `${requesterName} has requested to book Court ${courtIndex + 1} on ${formatDate(dateStr)} (${slotList}). Please approve or reject in My Venue.`,
+          });
+        }
+
         Modal.close('bookingModal');
         render();
         toast(`${requestedCount} slot request(s) submitted for approval`, 'success');
