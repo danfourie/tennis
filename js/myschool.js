@@ -942,5 +942,24 @@ const MySchool = (() => {
       </div>`;
   }
 
-  return { init, refresh, impersonate, stopImpersonation, isImpersonating, getActiveSchoolId };
+  // Public helper: navigate to My School and expand the settings card.
+  // Called from other views (e.g. My Venue ⚙️ Settings shortcut).
+  function openSettings() {
+    // If the My School view is not currently visible, navigate to it first.
+    const view = document.getElementById('view-myschool');
+    if (view && view.classList.contains('hidden')) {
+      document.querySelector('[data-view="myschool"]')?.click();
+    }
+    // Wait one tick for _render() to complete, then open the settings card.
+    setTimeout(() => {
+      const body    = document.getElementById('ms-settings-body');
+      const chevron = document.getElementById('ms-settings-chevron');
+      const card    = document.getElementById('ms-settings-card');
+      if (body) body.style.display = 'flex';
+      if (chevron) chevron.style.transform = 'rotate(180deg)';
+      if (card)  card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 50);
+  }
+
+  return { init, refresh, impersonate, stopImpersonation, isImpersonating, getActiveSchoolId, openSettings };
 })();

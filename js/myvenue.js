@@ -128,14 +128,20 @@ const MyVenue = (() => {
     const sortedDates = [...fixturesByDate.keys()].sort();
 
     // Venue header
-    let html = `<div class="myschool-header">
-      <div style="font-size:2rem">🏟</div>
-      <div>
-        <div class="myschool-school-name">${esc(venue.name)}</div>
-        ${venue.address ? `<div class="text-muted">📍 ${esc(venue.address)}</div>` : ''}
-        ${totalCourts  ? `<div class="text-muted">🎾 ${totalCourts} court${totalCourts !== 1 ? 's' : ''} available</div>` : ''}
-        <div class="text-muted">Home venue for: <strong>${esc(school.name)}</strong></div>
+    let html = `<div class="myschool-header" style="justify-content:space-between;align-items:flex-start">
+      <div style="display:flex;gap:.75rem;align-items:flex-start">
+        <div style="font-size:2rem;line-height:1">🏟</div>
+        <div>
+          <div class="myschool-school-name">${esc(venue.name)}</div>
+          ${venue.address ? `<div class="text-muted">📍 ${esc(venue.address)}</div>` : ''}
+          ${totalCourts  ? `<div class="text-muted">🎾 ${totalCourts} court${totalCourts !== 1 ? 's' : ''} available</div>` : ''}
+          <div class="text-muted">Home venue for: <strong>${esc(school.name)}</strong></div>
+        </div>
       </div>
+      <button class="btn btn-sm btn-secondary" id="mv-settings-shortcut"
+          title="Open school &amp; venue settings" style="flex-shrink:0;white-space:nowrap">
+        ⚙️ Settings
+      </button>
     </div>`;
 
     // ── All bookings at this venue (excluding rejected) ──────────────────────
@@ -289,6 +295,13 @@ const MyVenue = (() => {
 
   // ── Wire approve/reject handlers after render ─────────────────
   function _wireBookingHandlers(container, venue) {
+    // Settings shortcut — navigate to My School and open the settings card
+    const settingsShortcut = container.querySelector('#mv-settings-shortcut');
+    if (settingsShortcut) {
+      settingsShortcut.addEventListener('click', () => {
+        if (typeof MySchool !== 'undefined') MySchool.openSettings();
+      });
+    }
     container.querySelectorAll('.mv-approve-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const id = btn.dataset.id;
