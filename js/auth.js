@@ -126,7 +126,18 @@ const Auth = (() => {
   // ── Sign-in ────────────────────────────────────────────────
   async function login(email, password) {
     try {
-      await firebase.auth().signInWithEmailAndPassword(email, password);
+      const cred = await firebase.auth().signInWithEmailAndPassword(email, password);
+
+      // Check that a Firestore profile exists. Admin may have removed the user
+      // profile while their Firebase Auth account still exists. Force a server
+      // fetch (source:'server') to bypass any offline/local cache.
+      const db  = firebase.firestore();
+      const doc = await db.collection('users').doc(cred.user.uid).get({ source: 'server' });
+      if (!doc.exists) {
+        await firebase.auth().signOut();
+        return { ok: false, error: 'Your account has been removed. Please register to request access again.' };
+      }
+
       return { ok: true };
     } catch (err) {
       return { ok: false, error: _authMsg(err) };

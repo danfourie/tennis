@@ -79,17 +79,21 @@ service cloud.firestore {
       // Bookings are only visible to signed-in users (not world-readable)
       allow read: if isSignedIn();
 
-      allow create: if isMaster()
+      // Admin/master can create any booking; users can only create their own pending requests
+      allow create: if isAdminRole()
         || (isSignedIn()
             && request.resource.data.status == 'pending'
             && request.resource.data.requestedBy == request.auth.uid);
 
-      allow update: if isMaster()
+      // Admin/master can update any booking (approve/reject/reschedule);
+      // users can only update their own pending bookings
+      allow update: if isAdminRole()
         || (isSignedIn()
             && resource.data.requestedBy == request.auth.uid
             && resource.data.status == 'pending');
 
-      allow delete: if isMaster()
+      // Admin/master can delete any booking; users can withdraw their own pending ones
+      allow delete: if isAdminRole()
         || (isSignedIn()
             && resource.data.requestedBy == request.auth.uid
             && resource.data.status == 'pending');
