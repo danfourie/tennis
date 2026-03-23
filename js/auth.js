@@ -34,6 +34,19 @@ const Auth = (() => {
       _user = user;
       if (user) {
         await _loadProfile(user.uid);
+
+        // _loadProfile signs out deleted users — _profile will be null in that case.
+        // Guard against continuing as if authenticated.
+        if (!_profile) {
+          _user = null;
+          if (typeof toast === 'function') {
+            toast('Your account has been removed. Please register again.', 'error');
+          }
+          _updateUI();
+          _refreshViews();
+          return;
+        }
+
         // Bookings require authentication — load now that the user is signed in
         await DB.loadBookings();
         if (typeof Calendar !== 'undefined') Calendar.refresh();
@@ -102,8 +115,11 @@ const Auth = (() => {
         if (typeof NotificationService !== 'undefined') NotificationService.loadForCurrentUser();
       }
     } catch (err) {
-      console.warn('[Auth] Could not load/create user profile:', err.code, err.message);
-      _role = 'user';
+      // Sign out on any unexpected error — do not fall back to a permissive role.
+      console.warn('[Auth] Could not load user profile:', err.code, err.message);
+      _profile = null;
+      _role    = null;
+      firebase.auth().signOut().catch(() => {});
     }
   }
 
