@@ -151,7 +151,9 @@ const MyVenue = (() => {
       </div>
       <div class="card-body" style="padding:.25rem .75rem .75rem">`;
     if (pendingBookings.length === 0) {
-      html += `<p class="text-muted" style="padding:.4rem 0;margin:0">No pending requests — total bookings loaded: ${allBookings.length}</p>`;
+      const venueBookings = allBookings.filter(b => b.venueId === school.venueId);
+      const statusSummary = venueBookings.map(b => b.status || 'no-status').join(', ') || 'none';
+      html += `<p class="text-muted" style="padding:.4rem 0;margin:0">No pending requests — total loaded: ${allBookings.length}, at this venue: ${venueBookings.length} (statuses: ${esc(statusSummary)})</p>`;
     } else {
       pendingBookings
         .slice()
