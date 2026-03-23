@@ -406,28 +406,46 @@ const MySchool = (() => {
 
     // Score-entry listeners
     container.querySelectorAll('.my-score-input').forEach(inp => {
-      // Live auto-fill: if partner is blank or was the previous auto-calc, update it
+      // Auto-fill partner field when one score is typed.
+      // We do NOT save on 'change' here — saving happens only when the
+      // "✓ Save" button is clicked so the re-render doesn't wipe the
+      // auto-filled partner value before the user can confirm it.
       inp.addEventListener('input', () => {
-        // Use per-league scoreTotal setting (defaults to 67)
-        const league2 = DB.getLeagues().find(l => l.id === inp.dataset.league);
+        const league2     = DB.getLeagues().find(l => l.id === inp.dataset.league);
         const SCORE_TOTAL = (league2 && league2.scoreTotal) ? league2.scoreTotal : 67;
-        const val = parseInt(inp.value);
+        const val         = parseInt(inp.value);
         if (isNaN(val) || val < 0) return;
         const partnerField = inp.dataset.field === 'homeScore' ? 'awayScore' : 'homeScore';
         const partner = container.querySelector(
           `.my-score-input[data-fixture="${inp.dataset.fixture}"][data-field="${partnerField}"]`
         );
         if (!partner) return;
-        const prevAuto = parseInt(partner.dataset.autoVal);
+        const prevAuto   = parseInt(partner.dataset.autoVal);
         const partnerVal = parseInt(partner.value);
-        // Only auto-fill if partner is empty or still shows the last auto value
         if (partner.value === '' || (!isNaN(prevAuto) && partnerVal === prevAuto)) {
           const auto = SCORE_TOTAL - val;
-          if (auto >= 0) { partner.value = auto; partner.dataset.autoVal = auto; }
+          if (auto >= 0) { partner.value = auto; partner.dataset.autoVal = String(auto); }
         }
       });
-      inp.addEventListener('change', () => {
-        Leagues.saveScore(inp.dataset.league, inp.dataset.fixture, inp.dataset.field, inp.value);
+    });
+
+    // Save Score button — saves both scores atomically so the page only
+    // re-renders once both values are committed, keeping the auto-fill intact.
+    container.querySelectorAll('.ms-save-score-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const lid = btn.dataset.league;
+        const fid = btn.dataset.fixture;
+        const homeInp = container.querySelector(`.my-score-input[data-fixture="${fid}"][data-field="homeScore"]`);
+        const awayInp = container.querySelector(`.my-score-input[data-fixture="${fid}"][data-field="awayScore"]`);
+        if (!homeInp || !awayInp) return;
+        if (homeInp.value === '' || awayInp.value === '') {
+          toast('Please enter both scores before saving', 'error');
+          return;
+        }
+        // Save both fields; Leagues.saveScore mutates the in-memory fixture
+        // object so calling it twice is safe — second call sees the first update.
+        Leagues.saveScore(lid, fid, 'homeScore', homeInp.value);
+        Leagues.saveScore(lid, fid, 'awayScore', awayInp.value);
         _render();
       });
     });
@@ -906,7 +924,10 @@ const MySchool = (() => {
         <input class="my-score-input score-input" type="number" min="0" max="99"
           value="${awayVal}"
           data-league="${leagueId}" data-fixture="${f.id}" data-field="awayScore"
-          style="width:54px;text-align:center">`;
+          style="width:54px;text-align:center">
+        <button class="btn btn-xs btn-primary ms-save-score-btn"
+          data-league="${leagueId}" data-fixture="${f.id}"
+          title="Save both scores">✓ Save</button>`;
     } else if (hasScore) {
       const outcome   = isHome
         ? (f.homeScore > f.awayScore ? 'W' : f.homeScore < f.awayScore ? 'L' : 'D')
