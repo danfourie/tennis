@@ -63,7 +63,7 @@ function navigate(view) {
 }
 
 function applyTournamentVisibility() {
-  const enabled = DB.getSettings().tournamentPageEnabled !== false; // default true
+  const enabled = DB.getSettings().tournamentPageEnabled === true; // default OFF — only show if explicitly enabled
   const navBtn = document.querySelector('[data-view="tournaments"]');
   if (navBtn) navBtn.classList.toggle('hidden', !enabled);
   // If the user is currently on the tournaments page and it gets disabled, send them to calendar

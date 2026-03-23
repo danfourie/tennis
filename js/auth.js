@@ -241,6 +241,10 @@ const Auth = (() => {
       const hasSchool = loggedIn && _profile && _profile.schoolId;
       mySchoolBtn.classList.toggle('hidden', !hasSchool);
     }
+
+    // Re-apply global feature-flag visibility (e.g. Tournaments tab) so that
+    // auth state changes don't accidentally override the setting.
+    if (typeof applyTournamentVisibility === 'function') applyTournamentVisibility();
   }
 
   function _refreshViews() {

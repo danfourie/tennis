@@ -523,7 +523,7 @@ const Admin = (() => {
     const panel = document.getElementById('globalSettingsPanel');
     if (!panel) return;
     const settings = DB.getSettings();
-    const enabled = settings.tournamentPageEnabled !== false; // default true
+    const enabled = settings.tournamentPageEnabled === true; // default OFF
     panel.innerHTML = `
       <div class="feature-toggle-row">
         <label class="toggle-switch" title="Toggle Tournament page visibility for all users">
