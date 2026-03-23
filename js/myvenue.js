@@ -327,33 +327,23 @@ const MyVenue = (() => {
             `${wasCancelling ? 'Cancelled' : 'Rejected'} booking: ${booking ? esc(booking.label || '') : ''} on ${booking ? booking.date : ''}`,
             id, booking ? booking.label || '' : '');
           if (booking && typeof NotificationService !== 'undefined') {
-            // Build recipient list:
-            //  1. requestedBy — always present for new bookings (admin path now also sets it).
-            //  2. Fallback for legacy bookings without requestedBy: notify all users of the
-            //     booking's school (catches the "admin booked on behalf of school" case).
-            const currentUid = Auth.getUser()?.uid;
-            let recipientUids = [];
+            const notifPayload = {
+              type:  wasCancelling ? 'booking_cancelled' : 'booking_rejected',
+              title: wasCancelling ? 'Booking Cancelled' : 'Booking Request Rejected',
+              body:  wasCancelling
+                ? `Your confirmed booking for ${esc(booking.label || venue.name)} on ${booking.date ? formatDate(booking.date) : ''} has been cancelled.`
+                : `Your request to book ${esc(booking.label || venue.name)} on ${booking.date ? formatDate(booking.date) : ''} has been declined.`,
+            };
             if (booking.requestedBy) {
-              // Don't notify the person who is doing the cancelling (they know already)
-              if (booking.requestedBy !== currentUid) {
-                recipientUids.push(booking.requestedBy);
-              }
+              // Always notify the original requester, even if they are also the one
+              // cancelling (e.g. admin acting in a dual role as school organiser) —
+              // they need a record of the cancellation in their notification feed.
+              NotificationService.send({ ...notifPayload, recipientUids: [booking.requestedBy] });
             } else if (booking.schoolId) {
-              // Legacy booking — no requestedBy stored; notify school contacts instead
-              const schoolUsers = DB.getUsers().filter(
-                u => u.schoolId === booking.schoolId && u.uid !== currentUid
-              );
-              recipientUids = schoolUsers.map(u => u.uid);
-            }
-            if (recipientUids.length > 0) {
-              NotificationService.send({
-                type:          wasCancelling ? 'booking_cancelled' : 'booking_rejected',
-                title:         wasCancelling ? 'Booking Cancelled' : 'Booking Request Rejected',
-                body:          wasCancelling
-                  ? `Your confirmed booking for ${esc(booking.label || venue.name)} on ${booking.date ? formatDate(booking.date) : ''} has been cancelled by the venue.`
-                  : `Your request to book ${esc(booking.label || venue.name)} on ${booking.date ? formatDate(booking.date) : ''} has been declined.`,
-                recipientUids,
-              });
+              // Legacy booking has no requestedBy (created before that field was added).
+              // sendToSchool() calls _ensureUsers() internally so it works even when
+              // DB.getUsers() is empty (i.e. users not yet loaded by the admin panel).
+              NotificationService.sendToSchool(booking.schoolId, notifPayload);
             }
           }
           toast(wasCancelling ? 'Booking cancelled' : 'Request rejected');
