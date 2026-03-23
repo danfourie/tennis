@@ -189,17 +189,32 @@ const MySchool = (() => {
     });
 
     // Show school header
-    let html = `<div class="myschool-header">
-      <span class="color-dot" style="background:${school.color};width:20px;height:20px;flex-shrink:0"></span>
-      <div>
-        <div class="myschool-school-name">${esc(school.name)}</div>
-        ${school.team  ? `<div class="text-muted">${esc(school.team)}</div>` : ''}
-        ${venue        ? `<div class="text-muted">🏟 ${esc(venue.name)}</div>` : ''}
-        ${(school.organizers && school.organizers.length
-            ? school.organizers.map(o => `<div class="text-muted">👤 ${esc(o.name)}${o.email ? ' · ' + esc(o.email) : ''}${o.phone ? ' · ' + esc(o.phone) : ''}</div>`).join('')
-            : school.contact ? `<div class="text-muted">👤 ${esc(school.contact)}${school.email ? ' · ' + esc(school.email) : ''}${school.phone ? ' · ' + esc(school.phone) : ''}</div>` : '')}
+    const currentProfile = Auth.getProfile();
+    const isOwnSchool    = currentProfile && currentProfile.schoolId === schoolId;
+    const canSeeSettings = (isOwnSchool || Auth.isAdmin()) && !_impersonateSchoolId;
+
+    let html = `<div class="myschool-header" style="justify-content:space-between;align-items:flex-start">
+      <div style="display:flex;gap:.75rem;align-items:flex-start">
+        <span class="color-dot" style="background:${school.color};width:20px;height:20px;flex-shrink:0;margin-top:.2rem"></span>
+        <div>
+          <div class="myschool-school-name">${esc(school.name)}</div>
+          ${school.team  ? `<div class="text-muted">${esc(school.team)}</div>` : ''}
+          ${venue        ? `<div class="text-muted">🏟 ${esc(venue.name)}</div>` : ''}
+          ${(school.organizers && school.organizers.length
+              ? school.organizers.map(o => `<div class="text-muted">👤 ${esc(o.name)}${o.email ? ' · ' + esc(o.email) : ''}${o.phone ? ' · ' + esc(o.phone) : ''}</div>`).join('')
+              : school.contact ? `<div class="text-muted">👤 ${esc(school.contact)}${school.email ? ' · ' + esc(school.email) : ''}${school.phone ? ' · ' + esc(school.phone) : ''}</div>` : '')}
+        </div>
       </div>
+      ${canSeeSettings ? `<button class="btn btn-sm btn-secondary" id="ms-settings-shortcut"
+          title="Open school settings" style="flex-shrink:0;white-space:nowrap">
+          ⚙️ Settings
+        </button>` : ''}
     </div>`;
+
+    // ── My School Settings — top of page, collapsed by default ──
+    if (canSeeSettings) {
+      html += _settingsSection(school, venue);
+    }
 
     // ── Pending entries (awaiting approval) ──────────────────────
     if (pendingByLeague.size > 0) {
@@ -241,13 +256,6 @@ const MySchool = (() => {
       html += myLeagues.map(l => _leagueSection(l, schoolId)).join('');
     }
 
-    // ── My School Settings (own school only, or admin) ───────────
-    const currentProfile = Auth.getProfile();
-    const isOwnSchool = currentProfile && currentProfile.schoolId === schoolId;
-    if ((isOwnSchool || Auth.isAdmin()) && !_impersonateSchoolId) {
-      html += _settingsSection(school, venue);
-    }
-
     // When impersonating, append a panel showing all notifications sent to this school
     if (_impersonateSchoolId) {
       html += `<div class="card" style="margin-top:1.25rem">
@@ -262,6 +270,32 @@ const MySchool = (() => {
     }
 
     container.innerHTML = html;
+
+    // ── Settings collapse toggle + shortcut button ────────────────
+    function _openSettings() {
+      const body    = document.getElementById('ms-settings-body');
+      const chevron = document.getElementById('ms-settings-chevron');
+      if (!body) return;
+      body.style.display    = 'flex';
+      if (chevron) chevron.style.transform = 'rotate(180deg)';
+      document.getElementById('ms-settings-card')
+        .scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    const settingsToggle = document.getElementById('ms-settings-toggle');
+    if (settingsToggle) {
+      settingsToggle.addEventListener('click', () => {
+        const body    = document.getElementById('ms-settings-body');
+        const chevron = document.getElementById('ms-settings-chevron');
+        if (!body) return;
+        const isOpen = body.style.display !== 'none';
+        body.style.display         = isOpen ? 'none' : 'flex';
+        if (chevron) chevron.style.transform = isOpen ? '' : 'rotate(180deg)';
+      });
+    }
+    const settingsShortcut = document.getElementById('ms-settings-shortcut');
+    if (settingsShortcut) {
+      settingsShortcut.addEventListener('click', _openSettings);
+    }
 
     // ── Settings event handlers ───────────────────────────────────
     const _guardOwnSchool = () => {
@@ -856,10 +890,14 @@ const MySchool = (() => {
 
     return `
       <div class="card" id="ms-settings-card" style="margin-top:1.25rem">
-        <div class="card-header">
-          <div class="card-title">⚙️ My School Settings</div>
+        <div class="card-header" id="ms-settings-toggle"
+          style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;user-select:none"
+          title="Click to expand / collapse settings">
+          <div class="card-title" style="margin:0">⚙️ My School Settings</div>
+          <span id="ms-settings-chevron" style="font-size:1rem;transition:transform .2s">▼</span>
         </div>
-        <div class="card-body" style="display:flex;flex-direction:column;gap:1rem">
+        <div class="card-body" id="ms-settings-body"
+          style="display:none;flex-direction:column;gap:1rem">
 
           <!-- Courts available -->
           <div>
