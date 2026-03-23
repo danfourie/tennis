@@ -73,23 +73,32 @@ const Auth = (() => {
         _profile.lastLoginAt = now;
         _profile.loginLog    = loginLog;
       } else {
-        // Profile missing — create it now (happens when Firestore rules blocked
-        // the write during registration, or when the DB was empty at first run).
-        console.warn('[Auth] No profile found for uid:', uid, '— creating one now');
-        const snap   = await db.collection('users').limit(1).get();
-        const role   = snap.empty ? 'master' : 'user';
+        // Profile missing. Only auto-create when this is the very first user
+        // (empty users collection = first-ever registration). For all other cases
+        // the user was deleted by an admin — sign them out immediately.
+        const snap = await db.collection('users').limit(1).get();
+        if (!snap.empty) {
+          // Other users exist → this account was deleted. Sign out.
+          console.warn('[Auth] No profile found for uid:', uid, '— account was deleted. Signing out.');
+          await firebase.auth().signOut();
+          _profile = null;
+          _role    = null;
+          return;
+        }
+        // No users at all → first-ever user becomes master.
+        console.warn('[Auth] No profile found for uid:', uid, '— first user, creating master account.');
         const fbUser = firebase.auth().currentUser;
         _profile = {
           uid,
           email:       fbUser ? fbUser.email       : '',
           displayName: fbUser ? (fbUser.displayName || fbUser.email) : '',
-          role,
+          role:        'master',
           schoolId:    null,
           createdAt:   new Date().toISOString(),
         };
         await ref.set(_profile);
-        _role = role;
-        console.log('[Auth] profile created — role:', _role);
+        _role = 'master';
+        console.log('[Auth] first master profile created');
         if (typeof NotificationService !== 'undefined') NotificationService.loadForCurrentUser();
       }
     } catch (err) {

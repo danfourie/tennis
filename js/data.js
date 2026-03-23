@@ -105,7 +105,7 @@ const DB = {
   },
   deleteBooking(id) {
     _cache.bookings = _cache.bookings.filter(b => b.id !== id);
-    _doc('bookings', id).delete().catch(console.error);
+    return _doc('bookings', id).delete();
   },
   getBookingsForCell(venueId, courtIndex, dateStr) {
     return _cache.bookings.filter(b =>
@@ -127,7 +127,7 @@ const DB = {
     this.updateBooking(booking);
   },
   rejectBooking(id) {
-    this.deleteBooking(id);
+    return this.deleteBooking(id);
   },
 
   // ── Leagues ───────────────────────────────────────────────

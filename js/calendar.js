@@ -368,14 +368,23 @@ const Calendar = (() => {
           render();
           toast('Booking approved ✓', 'success');
         };
-        document.getElementById('rejectBookingBtn').onclick = () => {
-          DB.rejectBooking(booking.id);
-          DB.writeAudit('booking_rejected', 'booking',
-            `Rejected request by ${esc(booking.requestedByName || 'user')}: ${esc(booking.label || '')} on ${dateStr}`,
-            booking.id, booking.label || '');
-          Modal.close('bookingModal');
-          render();
-          toast('Request rejected');
+        document.getElementById('rejectBookingBtn').onclick = async () => {
+          const btn = document.getElementById('rejectBookingBtn');
+          if (btn) { btn.disabled = true; btn.textContent = 'Rejecting…'; }
+          try {
+            await DB.rejectBooking(booking.id);
+            DB.writeAudit('booking_rejected', 'booking',
+              `Rejected request by ${esc(booking.requestedByName || 'user')}: ${esc(booking.label || '')} on ${dateStr}`,
+              booking.id, booking.label || '');
+            Modal.close('bookingModal');
+            render();
+            toast('Request rejected');
+          } catch (err) {
+            console.error('Reject booking failed:', err);
+            if (btn) { btn.disabled = false; btn.textContent = 'Reject'; }
+            toast('Failed to reject booking — please try again', 'error');
+            render(); // revert optimistic UI
+          }
         };
       } else if (canManage) {
         // Admin / venue organiser: delete confirmed booking
