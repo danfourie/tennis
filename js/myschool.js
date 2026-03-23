@@ -556,30 +556,196 @@ const MySchool = (() => {
     // Request alternate venue
     container.querySelectorAll('.ms-altvenue-btn').forEach(btn => {
       btn.addEventListener('click', () => {
-        const lid      = btn.dataset.lid;
-        const fid      = btn.dataset.fid;
-        const oppId    = btn.dataset.oppId;
-        const oppName  = btn.dataset.oppName;
-        const date     = btn.dataset.date;
-        const venue    = btn.dataset.venue;
-        const dateStr  = date ? formatDate(date) : 'TBA';
-        NotificationService.openContextModal({
-          title: '🏟 Alternative Venue Request',
-          types: [{
-            value: 'alt_venue',
-            label: 'Alternative Venue Update',
-            subject: `Alternative venue request – fixture on ${dateStr}`,
-            body: `We would like to use an alternative venue for the fixture originally scheduled at ${venue || 'TBA'} on ${dateStr}. Please advise on availability.`,
-            recipientLabel: `Sends to: ${oppName || 'opposition'} users + all admin users`,
-            sendFn: async (title, body) => {
-              if (oppId) await NotificationService.sendToSchool(oppId, { type: 'fixture_changed', title, body, leagueId: lid, fixtureId: fid });
-              await NotificationService.sendToMasters({ type: 'fixture_changed', title, body, leagueId: lid, fixtureId: fid });
-              _submitChangeRequest(lid, fid, 'venue', { note: body });
-            },
-          }],
+        _openAltVenueModal({
+          lid:          btn.dataset.lid,
+          fid:          btn.dataset.fid,
+          date:         btn.dataset.date,
+          currentVenue: btn.dataset.venue,
+          oppId:        btn.dataset.oppId,
+          oppName:      btn.dataset.oppName,
         });
       });
     });
+  }
+
+  // ── Venue availability helper ─────────────────────────────────
+  // Returns each venue with how many courts are free on a given date.
+  function _getVenueAvailability(date) {
+    if (!date) return [];
+    const usageMap = {}; // venueId → total courtsBooked on that date
+    for (const league of DB.getLeagues()) {
+      for (const f of (league.fixtures || [])) {
+        if (!f.venueId || f.date !== date) continue;
+        usageMap[f.venueId] = (usageMap[f.venueId] || 0) + (f.courtsBooked || 3);
+      }
+    }
+    return DB.getVenues().map(v => {
+      const courtsUsed  = usageMap[v.id] || 0;
+      const totalCourts = v.courts || 0;
+      // freeCount = null means capacity is unknown (courts not configured)
+      const freeCount   = totalCourts > 0 ? totalCourts - courtsUsed : null;
+      return { venue: v, totalCourts, courtsUsed, freeCount };
+    });
+  }
+
+  // ── Alternative venue request modal ──────────────────────────
+  function _openAltVenueModal({ lid, fid, date, currentVenue, oppId, oppName }) {
+    // Remove stale modal if any
+    document.getElementById('ms-altvenueModal')?.remove();
+
+    const schools        = DB.getSchools();
+    const mySchoolId     = _activeSchoolId();
+    const mySchool       = schools.find(s => s.id === mySchoolId);
+    const venueAvailList = _getVenueAvailability(date);
+
+    // Build one row per venue that belongs to a school in the system.
+    // Sort: most free courts first, then unknown capacity, then full/overbooked.
+    const rows = venueAvailList
+      .map(entry => {
+        const hostSchool = schools.find(s => s.venueId === entry.venue.id);
+        return { ...entry, hostSchool };
+      })
+      .filter(e => e.hostSchool && e.hostSchool.id !== mySchoolId) // exclude own venue
+      .sort((a, b) => {
+        const fa = a.freeCount === null ? 0 : a.freeCount;
+        const fb = b.freeCount === null ? 0 : b.freeCount;
+        return fb - fa; // most free courts first
+      })
+      .map(({ venue, totalCourts, courtsUsed, freeCount, hostSchool }) => {
+        let icon, availText, disabled = '';
+        if (freeCount === null) {
+          icon      = '⚪';
+          availText = 'Capacity not set — contact school to confirm';
+        } else if (freeCount <= 0) {
+          icon      = '🔴';
+          availText = `Full — ${courtsUsed} court${courtsUsed !== 1 ? 's' : ''} booked of ${totalCourts}`;
+          disabled  = ''; // still allow requesting — they may have flexibility
+        } else if (freeCount === 1) {
+          icon      = '🟡';
+          availText = `1 of ${totalCourts} courts free`;
+        } else {
+          icon      = '🟢';
+          availText = `${freeCount} of ${totalCourts} courts free`;
+        }
+        return `
+          <label style="display:flex;align-items:flex-start;gap:.6rem;padding:.55rem .65rem;
+                         border:1px solid var(--border,#e5e7eb);border-radius:8px;cursor:pointer;
+                         margin-bottom:.4rem;transition:background .15s"
+                 onmouseover="this.style.background='var(--surface2,#f8fafc)'"
+                 onmouseout="this.style.background=''">
+            <input type="radio" name="altVenueSchool" value="${esc(hostSchool.id)}"
+              data-venue-id="${esc(venue.id)}" data-venue-name="${esc(venue.name)}"
+              data-school-name="${esc(hostSchool.name)}"
+              style="margin-top:.2rem;flex-shrink:0" ${disabled}>
+            <div style="flex:1;min-width:0">
+              <div style="font-weight:600;font-size:.9rem">${esc(venue.name)}</div>
+              <div class="text-muted" style="font-size:.8rem">🏫 ${esc(hostSchool.name)}</div>
+            </div>
+            <span style="font-size:.82rem;white-space:nowrap;padding-top:.1rem">
+              ${icon} ${availText}
+            </span>
+          </label>`;
+      }).join('');
+
+    const overlay = document.createElement('div');
+    overlay.id = 'ms-altvenueModal';
+    overlay.style.cssText = [
+      'position:fixed;inset:0;z-index:9999',
+      'background:rgba(0,0,0,.45)',
+      'display:flex;align-items:center;justify-content:center;padding:1rem',
+    ].join(';');
+
+    overlay.innerHTML = `
+      <div style="background:var(--surface,#fff);border-radius:12px;max-width:500px;
+                  width:100%;max-height:90vh;overflow-y:auto;padding:1.5rem;
+                  box-shadow:0 8px 32px rgba(0,0,0,.22)">
+        <h3 style="margin:0 0 .2rem">🏟 Request Alternative Venue</h3>
+        <p class="text-muted" style="margin:0 0 1rem;font-size:.85rem">
+          Fixture at <strong>${esc(currentVenue || 'current venue')}</strong>
+          on <strong>${date ? formatDate(date) : '—'}</strong>
+          vs <strong>${esc(oppName || 'opposition')}</strong>
+        </p>
+
+        <p style="font-size:.83rem;margin:0 0 .6rem">
+          Select a school to request hosting. Availability is based on fixtures
+          already scheduled at each venue on this date.
+        </p>
+
+        <div id="ms-avVenueList">
+          ${rows || '<p class="text-muted" style="font-size:.85rem">No other venues found in the system.</p>'}
+        </div>
+
+        <div style="margin-top:.9rem">
+          <label style="font-weight:600;display:block;margin-bottom:.3rem;font-size:.88rem">
+            Message to the host school <span class="text-muted" style="font-weight:400">(optional)</span>
+          </label>
+          <textarea id="ms-avNote" rows="3"
+            placeholder="e.g. Our venue is double-booked on this date. Could you host this match?"
+            style="width:100%;box-sizing:border-box;resize:vertical;padding:.5rem;
+                   border:1px solid var(--border,#e5e7eb);border-radius:6px;
+                   font-family:inherit;font-size:.88rem"></textarea>
+        </div>
+
+        <p class="text-muted" style="font-size:.78rem;margin:.6rem 0 0">
+          ℹ️ The notification goes directly to the selected school's contacts.
+          No admin approval is required — the two schools can arrange this directly.
+        </p>
+
+        <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:1rem">
+          <button class="btn btn-secondary" id="ms-avCancel">Cancel</button>
+          <button class="btn btn-primary"   id="ms-avSend">Send Request 📨</button>
+        </div>
+      </div>`;
+
+    document.body.appendChild(overlay);
+
+    // Close on backdrop click or Cancel
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+    document.getElementById('ms-avCancel').onclick = () => overlay.remove();
+
+    document.getElementById('ms-avSend').onclick = async () => {
+      const selected = overlay.querySelector('input[name="altVenueSchool"]:checked');
+      if (!selected) { toast('Please select a venue to request', 'error'); return; }
+
+      const targetSchoolId   = selected.value;
+      const targetSchoolName = selected.dataset.schoolName;
+      const targetVenueId    = selected.dataset.venueId;
+      const targetVenueName  = selected.dataset.venueName;
+      const note             = document.getElementById('ms-avNote').value.trim();
+      const myName           = mySchool ? mySchool.name : 'A school';
+      const dateStr          = date ? formatDate(date) : '—';
+
+      const notifTitle = `🏟 Venue Hosting Request — ${dateStr}`;
+      const notifBody  = `${myName} is requesting to use ${targetVenueName} as an alternative venue `
+        + `for their match vs ${oppName || 'their opposition'} on ${dateStr}.\n\n`
+        + (note ? note + '\n\n' : '')
+        + `Please reply if you can accommodate this fixture.`;
+
+      const sendBtn = document.getElementById('ms-avSend');
+      sendBtn.disabled = true; sendBtn.textContent = 'Sending…';
+
+      try {
+        await NotificationService.sendToSchool(targetSchoolId, {
+          type:      'venue_hosting_request',
+          title:     notifTitle,
+          body:      notifBody,
+          leagueId:  lid,
+          fixtureId: fid,
+        });
+
+        _submitChangeRequest(lid, fid, 'venue', {
+          requestedVenueId: targetVenueId,
+          note: note || `Requested hosting from ${targetSchoolName} (${targetVenueName})`,
+        });
+
+        toast(`Request sent to ${targetSchoolName} ✓`, 'success');
+        overlay.remove();
+      } catch (err) {
+        console.error('[MySchool] alt venue request failed:', err);
+        toast('Failed to send — please try again', 'error');
+        sendBtn.disabled = false; sendBtn.textContent = 'Send Request 📨';
+      }
+    };
   }
 
   /** Submit a fixture change request (reschedule or alt-venue) on behalf of the school. */
@@ -787,7 +953,7 @@ const MySchool = (() => {
             <button class="btn btn-xs btn-secondary ms-altvenue-btn"
             data-lid="${leagueId}" data-fid="${esc(f.id)}"
             data-opp-id="${esc(oppSchoolId || '')}" data-opp-name="${esc(oppSchoolName || '')}"
-            data-date="${esc(f.date || '')}" data-venue="${esc(f.venueName || '')}">🏟 Alt. Venue</button>`;
+            data-date="${esc(f.date || '')}" data-venue="${esc(f.venueName || '')}">🏟 Request Host Venue</button>`;
         }
         clashHtml = `<div class="fixture-clash-badge">⚠️ Potential venue clash on this day ${requestBtns}</div>`;
         if (hasRequest) {
@@ -796,7 +962,7 @@ const MySchool = (() => {
             ? ((DB.getVenues().find(v => v.id === cr.requestedVenueId) || {}).name || cr.requestedVenueId)
             : null;
           const detail = cr.type === 'venue'
-            ? `Alt. venue: ${vName}`
+            ? `Host venue requested: ${vName || 'pending'}`
             : `Reschedule: ${cr.requestedDate || '?'}${cr.requestedTime ? ' ' + cr.requestedTime : ''}`;
           clashHtml += `<div class="change-request-badge">
             📨 Your request: ${detail}${cr.note ? ` — <em>${esc(cr.note)}</em>` : ''}
