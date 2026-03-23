@@ -134,7 +134,7 @@ const Admin = (() => {
   }
 
   // ════════════════════════════════════════════════════════════
-  // PENDING RESULTS (no score entered, or score not yet verified)
+  // PENDING RESULTS (no score entered, or score not yet master/dual-verified)
   // ════════════════════════════════════════════════════════════
   function renderPendingResults() {
     const el = document.getElementById('pendingResultsList');
@@ -147,10 +147,11 @@ const Admin = (() => {
     DB.getLeagues().forEach(league => {
       (league.fixtures || []).forEach(f => {
         if (!f.date || f.date >= today) return;
-        const hasScore = f.homeScore !== null && f.homeScore !== undefined;
+        const hasScore   = f.homeScore !== null && f.homeScore !== undefined;
+        const isVerified = !!(f.masterVerified || (f.homeTeamVerified && f.awayTeamVerified));
         if (!hasScore) {
           noScore.push({ fixture: f, league });
-        } else if (!f.verified) {
+        } else if (!isVerified) {
           unverified.push({ fixture: f, league });
         }
       });
