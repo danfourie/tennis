@@ -8,7 +8,8 @@
       "Bash(find ~/Desktop -maxdepth 5 -name *.html)",
       "Bash(find ~/Documents -maxdepth 5 -name *.html)",
       "Bash(find ~/.claude -name *.jsonl)",
-      "Bash(wc -l \"/c/Users/User/OneDrive - CreoX/Danie Design File/Claude Code Projects/Tennis/js\"/*.js)"
+      "Bash(wc -l \"/c/Users/User/OneDrive - CreoX/Danie Design File/Claude Code Projects/Tennis/js\"/*.js)",
+      "mcp__Claude_Preview__preview_start"
     ]
   }
 }

@@ -404,49 +404,64 @@ const MySchool = (() => {
       }
     }
 
-    // Score-entry listeners
+    // Score-entry listeners — auto-fill + button colour update.
+    // Saving only happens when the "Submit Score" button is clicked so
+    // the re-render never wipes the auto-filled partner value.
     container.querySelectorAll('.my-score-input').forEach(inp => {
-      // Auto-fill partner field when one score is typed.
-      // We do NOT save on 'change' here — saving happens only when the
-      // "✓ Save" button is clicked so the re-render doesn't wipe the
-      // auto-filled partner value before the user can confirm it.
+      const _updateSubmitBtn = () => {
+        const fid  = inp.dataset.fixture;
+        const btn  = container.querySelector(`.ms-save-score-btn[data-fixture="${fid}"]`);
+        if (!btn) return;
+        const homeInp = container.querySelector(`.my-score-input[data-fixture="${fid}"][data-field="homeScore"]`);
+        const awayInp = container.querySelector(`.my-score-input[data-fixture="${fid}"][data-field="awayScore"]`);
+        const bothFilled = homeInp && awayInp && homeInp.value !== '' && awayInp.value !== '';
+        // Blue = not ready; Green = both values present, ready to submit
+        btn.className = `btn btn-xs ms-save-score-btn ${bothFilled ? 'btn-success' : 'btn-primary'}`;
+      };
+
       inp.addEventListener('input', () => {
         const league2     = DB.getLeagues().find(l => l.id === inp.dataset.league);
         const SCORE_TOTAL = (league2 && league2.scoreTotal) ? league2.scoreTotal : 67;
         const val         = parseInt(inp.value);
-        if (isNaN(val) || val < 0) return;
-        const partnerField = inp.dataset.field === 'homeScore' ? 'awayScore' : 'homeScore';
-        const partner = container.querySelector(
-          `.my-score-input[data-fixture="${inp.dataset.fixture}"][data-field="${partnerField}"]`
-        );
-        if (!partner) return;
-        const prevAuto   = parseInt(partner.dataset.autoVal);
-        const partnerVal = parseInt(partner.value);
-        if (partner.value === '' || (!isNaN(prevAuto) && partnerVal === prevAuto)) {
-          const auto = SCORE_TOTAL - val;
-          if (auto >= 0) { partner.value = auto; partner.dataset.autoVal = String(auto); }
+        if (!isNaN(val) && val >= 0) {
+          const partnerField = inp.dataset.field === 'homeScore' ? 'awayScore' : 'homeScore';
+          const partner = container.querySelector(
+            `.my-score-input[data-fixture="${inp.dataset.fixture}"][data-field="${partnerField}"]`
+          );
+          if (partner) {
+            const prevAuto   = parseInt(partner.dataset.autoVal);
+            const partnerVal = parseInt(partner.value);
+            if (partner.value === '' || (!isNaN(prevAuto) && partnerVal === prevAuto)) {
+              const auto = SCORE_TOTAL - val;
+              if (auto >= 0) { partner.value = auto; partner.dataset.autoVal = String(auto); }
+            }
+          }
         }
+        _updateSubmitBtn();
       });
     });
 
-    // Save Score button — saves both scores atomically so the page only
-    // re-renders once both values are committed, keeping the auto-fill intact.
+    // Submit Score button — saves both scores atomically.
+    // Blue while unsubmitted; green once both fields are filled.
+    // Flashes "Score Submitted ✓" on success before re-rendering.
     container.querySelectorAll('.ms-save-score-btn').forEach(btn => {
       btn.addEventListener('click', () => {
-        const lid = btn.dataset.league;
-        const fid = btn.dataset.fixture;
+        const lid     = btn.dataset.league;
+        const fid     = btn.dataset.fixture;
         const homeInp = container.querySelector(`.my-score-input[data-fixture="${fid}"][data-field="homeScore"]`);
         const awayInp = container.querySelector(`.my-score-input[data-fixture="${fid}"][data-field="awayScore"]`);
         if (!homeInp || !awayInp) return;
         if (homeInp.value === '' || awayInp.value === '') {
-          toast('Please enter both scores before saving', 'error');
+          toast('Please enter both scores before submitting', 'error');
           return;
         }
-        // Save both fields; Leagues.saveScore mutates the in-memory fixture
-        // object so calling it twice is safe — second call sees the first update.
         Leagues.saveScore(lid, fid, 'homeScore', homeInp.value);
         Leagues.saveScore(lid, fid, 'awayScore', awayInp.value);
-        _render();
+        // Flash green confirmation, then re-render
+        btn.className   = 'btn btn-xs btn-success ms-save-score-btn';
+        btn.textContent = 'Score Submitted ✓';
+        btn.disabled    = true;
+        setTimeout(() => _render(), 800);
       });
     });
 
@@ -927,7 +942,7 @@ const MySchool = (() => {
           style="width:54px;text-align:center">
         <button class="btn btn-xs btn-primary ms-save-score-btn"
           data-league="${leagueId}" data-fixture="${f.id}"
-          title="Save both scores">✓ Save</button>`;
+          title="Submit both scores">📨 Submit Score</button>`;
     } else if (hasScore) {
       const outcome   = isHome
         ? (f.homeScore > f.awayScore ? 'W' : f.homeScore < f.awayScore ? 'L' : 'D')

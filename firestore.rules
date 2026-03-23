@@ -85,18 +85,25 @@ service cloud.firestore {
             && request.resource.data.status == 'pending'
             && request.resource.data.requestedBy == request.auth.uid);
 
-      // Admin/master can update any booking (approve/reject/reschedule);
-      // users can only update their own pending bookings
+      // Admin/master can update any booking; users can update their own pending bookings;
+      // venue owners can approve/reject any pending booking at their venue
       allow update: if isAdminRole()
         || (isSignedIn()
             && resource.data.requestedBy == request.auth.uid
-            && resource.data.status == 'pending');
+            && resource.data.status == 'pending')
+        || (isSignedIn()
+            && getUserSchoolId() != null
+            && get(/databases/$(database)/documents/schools/$(getUserSchoolId())).data.venueId == resource.data.venueId);
 
-      // Admin/master can delete any booking; users can withdraw their own pending ones
+      // Admin/master can delete any booking; users can withdraw their own pending ones;
+      // venue owners can reject (delete) pending bookings at their venue
       allow delete: if isAdminRole()
         || (isSignedIn()
             && resource.data.requestedBy == request.auth.uid
-            && resource.data.status == 'pending');
+            && resource.data.status == 'pending')
+        || (isSignedIn()
+            && getUserSchoolId() != null
+            && get(/databases/$(database)/documents/schools/$(getUserSchoolId())).data.venueId == resource.data.venueId);
     }
 
     // ── Leagues ──────────────────────────────────────────────────────────────
