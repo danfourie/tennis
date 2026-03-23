@@ -409,14 +409,23 @@ const MySchool = (() => {
     // the re-render never wipes the auto-filled partner value.
     container.querySelectorAll('.my-score-input').forEach(inp => {
       const _updateSubmitBtn = () => {
-        const fid  = inp.dataset.fixture;
-        const btn  = container.querySelector(`.ms-save-score-btn[data-fixture="${fid}"]`);
+        const fid     = inp.dataset.fixture;
+        const btn     = container.querySelector(`.ms-save-score-btn[data-fixture="${fid}"]`);
         if (!btn) return;
         const homeInp = container.querySelector(`.my-score-input[data-fixture="${fid}"][data-field="homeScore"]`);
         const awayInp = container.querySelector(`.my-score-input[data-fixture="${fid}"][data-field="awayScore"]`);
-        const bothFilled = homeInp && awayInp && homeInp.value !== '' && awayInp.value !== '';
-        // Blue = not ready; Green = both values present, ready to submit
-        btn.className = `btn btn-xs ms-save-score-btn ${bothFilled ? 'btn-success' : 'btn-primary'}`;
+        if (!homeInp || !awayInp) return;
+        // Compare current values against the last-saved values stamped on the button
+        const savedHome    = btn.dataset.savedHome ?? '';
+        const savedAway    = btn.dataset.savedAway ?? '';
+        const alreadySaved = savedHome !== '' && savedAway !== '';
+        const unchanged    = alreadySaved &&
+                             homeInp.value === savedHome &&
+                             awayInp.value === savedAway;
+        // Green = matches saved (already submitted); Blue = changed or unsaved
+        btn.disabled    = false;
+        btn.textContent = unchanged ? '✓ Submitted' : '📨 Submit Score';
+        btn.className   = `btn btn-xs ms-save-score-btn ${unchanged ? 'btn-success' : 'btn-primary'}`;
       };
 
       inp.addEventListener('input', () => {
@@ -457,6 +466,9 @@ const MySchool = (() => {
         }
         Leagues.saveScore(lid, fid, 'homeScore', homeInp.value);
         Leagues.saveScore(lid, fid, 'awayScore', awayInp.value);
+        // Stamp the saved values so future edits can detect changes
+        btn.dataset.savedHome = homeInp.value;
+        btn.dataset.savedAway = awayInp.value;
         // Flash green confirmation, then re-render
         btn.className   = 'btn btn-xs btn-success ms-save-score-btn';
         btn.textContent = 'Score Submitted ✓';
@@ -930,6 +942,7 @@ const MySchool = (() => {
       // produces the literal string "null" which confuses parseInt later.
       const homeVal = (f.homeScore !== null && f.homeScore !== undefined && !isNaN(f.homeScore)) ? f.homeScore : '';
       const awayVal = (f.awayScore !== null && f.awayScore !== undefined && !isNaN(f.awayScore)) ? f.awayScore : '';
+      const alreadySaved = homeVal !== '' && awayVal !== '';
       scoreHtml = `
         <input class="my-score-input score-input" type="number" min="0" max="99"
           value="${homeVal}"
@@ -940,9 +953,10 @@ const MySchool = (() => {
           value="${awayVal}"
           data-league="${leagueId}" data-fixture="${f.id}" data-field="awayScore"
           style="width:54px;text-align:center">
-        <button class="btn btn-xs btn-primary ms-save-score-btn"
+        <button class="btn btn-xs ${alreadySaved ? 'btn-success' : 'btn-primary'} ms-save-score-btn"
           data-league="${leagueId}" data-fixture="${f.id}"
-          title="Submit both scores">📨 Submit Score</button>`;
+          data-saved-home="${homeVal}" data-saved-away="${awayVal}"
+          title="Submit both scores">${alreadySaved ? '✓ Submitted' : '📨 Submit Score'}</button>`;
     } else if (hasScore) {
       const outcome   = isHome
         ? (f.homeScore > f.awayScore ? 'W' : f.homeScore < f.awayScore ? 'L' : 'D')
