@@ -139,17 +139,20 @@ const MyVenue = (() => {
     </div>`;
 
     // ── Pending booking requests (always shown, even if no fixtures) ──────
-    const pendingBookings = DB.getBookings().filter(b =>
+    const allBookings = DB.getBookings();
+    const pendingBookings = allBookings.filter(b =>
       b.status === 'pending' && b.venueId === school.venueId
     );
-    if (pendingBookings.length > 0) {
-      html += `<div class="card" style="margin-bottom:1.5rem;border-left:4px solid var(--warning,#f59e0b)">
-        <div class="card-header">
-          <div class="card-title" style="margin:0">📩 Pending Booking Requests
-            <span class="badge" style="background:#fef9c3;color:#854d0e;margin-left:.5rem">${pendingBookings.length}</span>
-          </div>
+    html += `<div class="card" style="margin-bottom:1.5rem;border-left:4px solid var(--warning,#f59e0b)">
+      <div class="card-header">
+        <div class="card-title" style="margin:0">📩 Pending Booking Requests
+          ${pendingBookings.length > 0 ? `<span class="badge" style="background:#fef9c3;color:#854d0e;margin-left:.5rem">${pendingBookings.length}</span>` : ''}
         </div>
-        <div class="card-body" style="padding:.25rem .75rem .75rem">`;
+      </div>
+      <div class="card-body" style="padding:.25rem .75rem .75rem">`;
+    if (pendingBookings.length === 0) {
+      html += `<p class="text-muted" style="padding:.4rem 0;margin:0">No pending requests — total bookings loaded: ${allBookings.length}</p>`;
+    } else {
       pendingBookings
         .slice()
         .sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.timeSlot || '').localeCompare(b.timeSlot || ''))
@@ -171,8 +174,8 @@ const MyVenue = (() => {
             </div>
           </div>`;
         });
-      html += `</div></div>`;
     }
+    html += `</div></div>`;
 
     // ── Fixtures by date ─────────────────────────────────────────
     if (sortedDates.length === 0) {
