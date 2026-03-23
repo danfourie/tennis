@@ -124,14 +124,6 @@ const MyVenue = (() => {
       });
     });
 
-    if (fixturesByDate.size === 0) {
-      container.innerHTML = `<div class="empty-state">
-        <div class="empty-icon">📅</div>
-        <p>No ${_showUpcomingOnly ? 'upcoming ' : ''}fixtures scheduled at <strong>${esc(venue.name)}</strong>.</p>
-      </div>`;
-      return;
-    }
-
     // Sort dates
     const sortedDates = [...fixturesByDate.keys()].sort();
 
@@ -146,7 +138,7 @@ const MyVenue = (() => {
       </div>
     </div>`;
 
-    // ── Pending booking requests ─────────────────────────────────
+    // ── Pending booking requests (always shown, even if no fixtures) ──────
     const pendingBookings = DB.getBookings().filter(b =>
       b.status === 'pending' && b.venueId === school.venueId
     );
@@ -180,6 +172,17 @@ const MyVenue = (() => {
           </div>`;
         });
       html += `</div></div>`;
+    }
+
+    // ── Fixtures by date ─────────────────────────────────────────
+    if (sortedDates.length === 0) {
+      html += `<div class="empty-state" style="margin-top:1rem">
+        <div class="empty-icon">📅</div>
+        <p>No ${_showUpcomingOnly ? 'upcoming ' : ''}fixtures scheduled at <strong>${esc(venue.name)}</strong>.</p>
+      </div>`;
+      container.innerHTML = html;
+      _wireBookingHandlers(container, venue);
+      return;
     }
 
     // One card per date
@@ -257,8 +260,11 @@ const MyVenue = (() => {
     });
 
     container.innerHTML = html;
+    _wireBookingHandlers(container, venue);
+  }
 
-    // ── Pending booking action handlers ───────────────────────────
+  // ── Wire approve/reject handlers after render ─────────────────
+  function _wireBookingHandlers(container, venue) {
     container.querySelectorAll('.mv-approve-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const id = btn.dataset.id;
