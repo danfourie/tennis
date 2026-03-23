@@ -326,15 +326,35 @@ const MyVenue = (() => {
           DB.writeAudit(wasCancelling ? 'booking_cancelled' : 'booking_rejected', 'booking',
             `${wasCancelling ? 'Cancelled' : 'Rejected'} booking: ${booking ? esc(booking.label || '') : ''} on ${booking ? booking.date : ''}`,
             id, booking ? booking.label || '' : '');
-          if (booking && booking.requestedBy && typeof NotificationService !== 'undefined') {
-            NotificationService.send({
-              type:          wasCancelling ? 'booking_cancelled' : 'booking_rejected',
-              title:         wasCancelling ? 'Booking Cancelled' : 'Booking Request Rejected',
-              body:          wasCancelling
-                ? `Your confirmed booking for ${esc(booking.label || venue.name)} on ${booking.date ? formatDate(booking.date) : ''} has been cancelled by the venue.`
-                : `Your request to book ${esc(booking.label || venue.name)} on ${booking.date ? formatDate(booking.date) : ''} has been declined.`,
-              recipientUids: [booking.requestedBy],
-            });
+          if (booking && typeof NotificationService !== 'undefined') {
+            // Build recipient list:
+            //  1. requestedBy — always present for new bookings (admin path now also sets it).
+            //  2. Fallback for legacy bookings without requestedBy: notify all users of the
+            //     booking's school (catches the "admin booked on behalf of school" case).
+            const currentUid = Auth.getUser()?.uid;
+            let recipientUids = [];
+            if (booking.requestedBy) {
+              // Don't notify the person who is doing the cancelling (they know already)
+              if (booking.requestedBy !== currentUid) {
+                recipientUids.push(booking.requestedBy);
+              }
+            } else if (booking.schoolId) {
+              // Legacy booking — no requestedBy stored; notify school contacts instead
+              const schoolUsers = DB.getUsers().filter(
+                u => u.schoolId === booking.schoolId && u.uid !== currentUid
+              );
+              recipientUids = schoolUsers.map(u => u.uid);
+            }
+            if (recipientUids.length > 0) {
+              NotificationService.send({
+                type:          wasCancelling ? 'booking_cancelled' : 'booking_rejected',
+                title:         wasCancelling ? 'Booking Cancelled' : 'Booking Request Rejected',
+                body:          wasCancelling
+                  ? `Your confirmed booking for ${esc(booking.label || venue.name)} on ${booking.date ? formatDate(booking.date) : ''} has been cancelled by the venue.`
+                  : `Your request to book ${esc(booking.label || venue.name)} on ${booking.date ? formatDate(booking.date) : ''} has been declined.`,
+                recipientUids,
+              });
+            }
           }
           toast(wasCancelling ? 'Booking cancelled' : 'Request rejected');
         } catch (err) {

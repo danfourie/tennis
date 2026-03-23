@@ -512,15 +512,22 @@ const Calendar = (() => {
         const school   = schoolId ? DB.getSchools().find(s => s.id === schoolId) : null;
         if (selectedSlots.size === 0) { toast('Select at least one time slot', 'error'); return; }
 
+        const _adminUser = Auth.getUser();
+        const _adminProf = Auth.getProfile();
         let bookedCount = 0;
         selectedSlots.forEach(sl => {
           const result = DB.addBooking({
             venueId, courtIndex, date: dateStr, timeSlot: sl,
             type, schoolId: schoolId || null,
-            label:      label || (school ? school.name : type),
-            schoolName: school ? school.name : null,
+            label:           label || (school ? school.name : type),
+            schoolName:      school ? school.name : null,
             notes,
-            status:     'confirmed',
+            status:          'confirmed',
+            // Always record who created the booking so cancellation notifications
+            // can reach the creator even when they used the admin path.
+            requestedBy:     _adminUser ? _adminUser.uid : null,
+            requestedByName: _adminProf ? (_adminProf.displayName || _adminProf.email) : (_adminUser ? _adminUser.email : null),
+            requestedAt:     new Date().toISOString(),
           });
           if (!result) toast(`${sl} is already booked — skipped`, 'error');
           else bookedCount++;
