@@ -55,11 +55,11 @@ const DB = {
   },
   updateVenue(venue) {
     _cache.venues = _cache.venues.map(v => v.id === venue.id ? venue : v);
-    _doc('venues', venue.id).set(venue).catch(console.error);
+    return _doc('venues', venue.id).set(venue);
   },
   deleteVenue(id) {
     _cache.venues = _cache.venues.filter(v => v.id !== id);
-    _doc('venues', id).delete().catch(console.error);
+    return _doc('venues', id).delete();
   },
 
   // ── Schools ───────────────────────────────────────────────
@@ -74,11 +74,11 @@ const DB = {
   },
   updateSchool(school) {
     _cache.schools = _cache.schools.map(s => s.id === school.id ? school : s);
-    _doc('schools', school.id).set(school).catch(console.error);
+    return _doc('schools', school.id).set(school);
   },
   deleteSchool(id) {
     _cache.schools = _cache.schools.filter(s => s.id !== id);
-    _doc('schools', id).delete().catch(console.error);
+    return _doc('schools', id).delete();
   },
 
   // ── Bookings ──────────────────────────────────────────────
@@ -145,7 +145,7 @@ const DB = {
   },
   deleteLeague(id) {
     _cache.leagues = _cache.leagues.filter(l => l.id !== id);
-    _doc('leagues', id).delete().catch(console.error);
+    return _doc('leagues', id).delete();   // caller handles errors
   },
 
   // ── Tournaments ───────────────────────────────────────────
@@ -159,11 +159,11 @@ const DB = {
   },
   updateTournament(t) {
     _cache.tournaments = _cache.tournaments.map(x => x.id === t.id ? t : x);
-    _doc('tournaments', t.id).set(t).catch(console.error);
+    return _doc('tournaments', t.id).set(t);
   },
   deleteTournament(id) {
     _cache.tournaments = _cache.tournaments.filter(t => t.id !== id);
-    _doc('tournaments', id).delete().catch(console.error);
+    return _doc('tournaments', id).delete();
   },
 
   // ── League Entries ────────────────────────────────────────
@@ -205,7 +205,7 @@ const DB = {
   },
   deleteClosure(id) {
     _cache.closures = _cache.closures.filter(c => c.id !== id);
-    _doc('closures', id).delete().catch(console.error);
+    return _doc('closures', id).delete();
   },
 
   // ── Users (master-only, loaded on demand) ─────────────────

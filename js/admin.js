@@ -112,7 +112,7 @@ const Admin = (() => {
     if (tab === 'leagues')       Leagues.renderAdmin();
     if (tab === 'tournaments')   Tournaments.renderAdmin();
     if (tab === 'users')         renderUsers();
-    if (tab === 'settings')      renderAuditLog();
+    if (tab === 'settings')      { renderGlobalSettings(); renderAuditLog(); }
     if (tab === 'notifications') NotificationService.renderComposer();
   }
 
@@ -394,6 +394,39 @@ const Admin = (() => {
   }
 
   // ════════════════════════════════════════════════════════════
+  // GLOBAL SETTINGS
+  // ════════════════════════════════════════════════════════════
+  function renderGlobalSettings() {
+    const panel = document.getElementById('globalSettingsPanel');
+    if (!panel) return;
+    const settings = DB.getSettings();
+    const enabled = settings.tournamentPageEnabled !== false; // default true
+    panel.innerHTML = `
+      <div class="feature-toggle-row">
+        <label class="toggle-switch" title="Toggle Tournament page visibility for all users">
+          <input type="checkbox" id="tournamentPageToggle" ${enabled ? 'checked' : ''}>
+          <span class="toggle-slider"></span>
+        </label>
+        <span>Tournament Page Enabled
+          <span class="badge ${enabled ? 'badge-green' : 'badge-red'}" style="margin-left:.3rem">${enabled ? 'On' : 'Off'}</span>
+        </span>
+      </div>
+      <p class="text-muted" style="font-size:.85rem;margin-top:.1rem">When disabled, the Tournaments tab is hidden for all users in real time.</p>`;
+
+    document.getElementById('tournamentPageToggle')?.addEventListener('change', e => {
+      const newEnabled = e.target.checked;
+      DB.saveSettings({ ...DB.getSettings(), tournamentPageEnabled: newEnabled });
+      DB.writeAudit(
+        'setting_changed', 'admin',
+        `Tournament page ${newEnabled ? 'enabled' : 'disabled'}`,
+        'settings/global', 'Tournament Page'
+      );
+      toast(`Tournament page ${newEnabled ? 'enabled ✓' : 'disabled ✓'}`, 'success');
+      renderGlobalSettings();
+    });
+  }
+
+  // ════════════════════════════════════════════════════════════
   // AUDIT LOG
   // ════════════════════════════════════════════════════════════
   async function renderAuditLog() {
@@ -450,7 +483,7 @@ const Admin = (() => {
         if (!keys.has(key)) { toAdd.push(o); keys.add(key); }
       }));
       if (toAdd.length) {
-        DB.updateVenue({ ...v, contacts: [...existing, ...toAdd] });
+        DB.updateVenue({ ...v, contacts: [...existing, ...toAdd] }).catch(console.warn);
         count += toAdd.length;
       }
     });
@@ -520,7 +553,7 @@ const Admin = (() => {
     Modal.open('venueModal');
   }
 
-  function saveVenue() {
+  async function saveVenue() {
     const name  = document.getElementById('venueName').value.trim();
     const phone = document.getElementById('venuePhone').value.trim();
     if (!name) { toast('Venue name required', 'error'); return; }
@@ -542,30 +575,41 @@ const Admin = (() => {
       courts:  parseInt(document.getElementById('venueCourtCount').value) || 4,
       contacts,
     };
+    Modal.close('venueModal');
     if (id) {
-      DB.updateVenue(venue);
+      const savePromise = DB.updateVenue(venue);
       DB.writeAudit('venue_updated', 'admin', `Venue updated: ${name}`, id, name);
-      toast('Venue updated', 'success');
+      render(); Calendar.refresh(); Leagues.refresh(); Tournaments.refresh();
+      try {
+        await savePromise;
+        toast('Venue updated', 'success');
+      } catch (e) {
+        console.error('Venue update failed:', e);
+        toast('Save failed — ' + (e.message || 'permission denied'), 'error');
+        render(); Calendar.refresh();
+      }
     } else {
       DB.addVenue(venue);
       DB.writeAudit('venue_added', 'admin', `Venue added: ${name}`, venue.id, name);
       toast('Venue added', 'success');
+      render(); Calendar.refresh(); Leagues.refresh(); Tournaments.refresh();
     }
-    Modal.close('venueModal');
-    render();
-    Calendar.refresh();
-    Leagues.refresh();
-    Tournaments.refresh();
   }
 
-  function deleteVenue(id) {
+  async function deleteVenue(id) {
     const venue = DB.getVenues().find(v => v.id === id);
     if (!confirm('Delete this venue? Bookings at this venue will remain but venue reference will be lost.')) return;
-    DB.deleteVenue(id);
     DB.writeAudit('venue_deleted', 'admin', `Venue deleted: ${venue ? venue.name : id}`, id, venue ? venue.name : id);
-    render();
-    Calendar.refresh();
-    toast('Venue deleted');
+    const deletePromise = DB.deleteVenue(id);
+    render(); Calendar.refresh();
+    try {
+      await deletePromise;
+      toast('Venue deleted', 'success');
+    } catch (e) {
+      console.error('Venue delete failed:', e);
+      toast('Delete failed — ' + (e.message || 'permission denied'), 'error');
+      render(); Calendar.refresh();
+    }
   }
 
   // ════════════════════════════════════════════════════════════
@@ -620,7 +664,7 @@ function _orgRow(o) {
       if (s.venueId) return;
       const match = venues.find(v => v.name.toLowerCase() === s.name.toLowerCase());
       if (match) {
-        DB.updateSchool({ ...s, venueId: match.id });
+        DB.updateSchool({ ...s, venueId: match.id }).catch(console.warn);
         count++;
       }
     });
@@ -762,7 +806,7 @@ function _orgRow(o) {
     Modal.open('schoolModal');
   }
 
-  function saveSchool() {
+  async function saveSchool() {
     const name  = document.getElementById('schoolName').value.trim();
     const phone = document.getElementById('schoolPhone').value.trim();
     if (!name) { toast('School name required', 'error'); return; }
@@ -786,28 +830,41 @@ function _orgRow(o) {
       color:   document.getElementById('schoolColor').value,
       organizers,
     };
+    Modal.close('schoolModal');
     if (id) {
-      DB.updateSchool(school);
+      const savePromise = DB.updateSchool(school);
       DB.writeAudit('school_updated', 'admin', `School updated: ${name}`, id, name);
-      toast('School updated', 'success');
+      render(); Leagues.refresh();
+      try {
+        await savePromise;
+        toast('School updated', 'success');
+      } catch (e) {
+        console.error('School update failed:', e);
+        toast('Save failed — ' + (e.message || 'permission denied'), 'error');
+        render(); Leagues.refresh();
+      }
     } else {
       DB.addSchool(school);
       DB.writeAudit('school_added', 'admin', `School added: ${name}`, school.id, name);
       toast('School added', 'success');
+      render(); Leagues.refresh();
     }
-    Modal.close('schoolModal');
-    render();
-    Leagues.refresh();
   }
 
-  function deleteSchool(id) {
+  async function deleteSchool(id) {
     const school = DB.getSchools().find(s => s.id === id);
     if (!confirm('Delete this school?')) return;
-    DB.deleteSchool(id);
     DB.writeAudit('school_deleted', 'admin', `School deleted: ${school ? school.name : id}`, id, school ? school.name : id);
-    render();
-    Leagues.refresh();
-    toast('School deleted');
+    const deletePromise = DB.deleteSchool(id);
+    render(); Leagues.refresh();
+    try {
+      await deletePromise;
+      toast('School deleted', 'success');
+    } catch (e) {
+      console.error('School delete failed:', e);
+      toast('Delete failed — ' + (e.message || 'permission denied'), 'error');
+      render(); Leagues.refresh();
+    }
   }
 
   // ════════════════════════════════════════════════════════════
@@ -840,12 +897,19 @@ function _orgRow(o) {
       `</div>`;
 
     el.querySelectorAll('[data-closure-delete]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        DB.deleteClosure(btn.dataset.closureDelete);
-        DB.writeAudit('closure_deleted', 'admin', `Court closure removed`, btn.dataset.closureDelete);
-        render();
-        Calendar.refresh();
-        toast('Closure removed');
+      btn.addEventListener('click', async () => {
+        const cid = btn.dataset.closureDelete;
+        DB.writeAudit('closure_deleted', 'admin', `Court closure removed`, cid);
+        const deletePromise = DB.deleteClosure(cid);
+        render(); Calendar.refresh();
+        try {
+          await deletePromise;
+          toast('Closure removed', 'success');
+        } catch (e) {
+          console.error('Closure delete failed:', e);
+          toast('Delete failed — ' + (e.message || 'permission denied'), 'error');
+          render(); Calendar.refresh();
+        }
       });
     });
   }

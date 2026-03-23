@@ -223,6 +223,10 @@
       <div class="admin-tab-panel hidden" id="subtab-settings">
         <div class="admin-grid">
           <div class="admin-card">
+            <h3>🌐 Global Features</h3>
+            <div id="globalSettingsPanel"></div>
+          </div>
+          <div class="admin-card">
             <h3>🚫 Court Closures</h3>
             <div id="closuresList"></div>
             <button class="btn btn-primary" style="margin-top:.75rem" id="addClosureBtn">+ Add Closure</button>
@@ -475,6 +479,14 @@
             <label>Season End</label>
             <input type="date" id="leagueEnd">
           </div>
+        </div>
+        <div class="form-group">
+          <label>Excluded Dates <span class="form-hint-inline">(dates when no fixtures may be played)</span></label>
+          <div style="display:flex;gap:.5rem;align-items:center;margin-bottom:.5rem">
+            <input type="date" id="leagueExcludedDatePicker" style="flex:1">
+            <button type="button" class="btn btn-sm btn-secondary" id="leagueAddExcludedDate">+ Add Date</button>
+          </div>
+          <div id="leagueExcludedDatesList" style="display:flex;flex-wrap:wrap;gap:.4rem;min-height:1.5rem"></div>
         </div>
         <div class="form-row">
           <div class="form-group">
