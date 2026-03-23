@@ -143,7 +143,7 @@ const Calendar = (() => {
 
   function populateVenueFilter() {
     const sel    = document.getElementById('venueFilter');
-    const venues = [...DB.getVenues()].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    const venues = DB.getVenues(); // already sorted alphabetically by getter
     while (sel.options.length > 1) sel.remove(1);
     venues.forEach(v => sel.add(new Option(v.name, v.id)));
     // Default to the user's home venue on first load (only when still on 'all')

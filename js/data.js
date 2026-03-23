@@ -45,7 +45,9 @@ function _doc(col,id) { return _fs().collection(col).doc(id); }
 const DB = {
 
   // ── Venues ────────────────────────────────────────────────
-  getVenues() { return _cache.venues; },
+  getVenues() {
+    return [..._cache.venues].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  },
 
   addVenue(venue) {
     venue.id = venue.id || uid();
@@ -63,12 +65,13 @@ const DB = {
   },
 
   // ── Schools ───────────────────────────────────────────────
-  getSchools() { return _cache.schools; },
+  getSchools() {
+    return [..._cache.schools].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  },
 
   addSchool(school) {
     school.id = school.id || uid();
     _cache.schools.push(school);
-    _cache.schools.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
     _doc('schools', school.id).set(school).catch(console.error);
     return school;
   },

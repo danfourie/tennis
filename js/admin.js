@@ -620,7 +620,7 @@ const Admin = (() => {
   function renderVenues() {
     _syncSchoolOrganizersToVenues();
     const el = document.getElementById('venuesList');
-    const venues = [...DB.getVenues()].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    const venues = DB.getVenues(); // already sorted alphabetically by getter
     if (venues.length === 0) {
       el.innerHTML = `<p class="text-muted">No venues yet.</p>`;
       return;
@@ -800,7 +800,7 @@ function _orgRow(o) {
   function renderSchools() {
     _autoLinkSchoolVenues();
     const el = document.getElementById('schoolsList');
-    const schools = [...DB.getSchools()].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    const schools = DB.getSchools(); // already sorted alphabetically by getter
     if (schools.length === 0) {
       el.innerHTML = `<p class="text-muted">No schools yet.</p>`;
       return;
