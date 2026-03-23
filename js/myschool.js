@@ -422,10 +422,19 @@ const MySchool = (() => {
         const unchanged    = alreadySaved &&
                              homeInp.value === savedHome &&
                              awayInp.value === savedAway;
-        // Green = matches saved (already submitted); Blue = changed or unsaved
-        btn.disabled    = false;
-        btn.textContent = unchanged ? '✓ Submitted' : '📨 Submit Score';
-        btn.className   = `btn btn-xs ms-save-score-btn ${unchanged ? 'btn-success' : 'btn-primary'}`;
+        const bothEmpty    = homeInp.value === '' && awayInp.value === '';
+        // Green = matches saved; Orange = clearing saved scores; Blue = editing/new
+        btn.disabled = false;
+        if (unchanged) {
+          btn.textContent = '✓ Submitted';
+          btn.className   = 'btn btn-xs ms-save-score-btn btn-success';
+        } else if (bothEmpty && alreadySaved) {
+          btn.textContent = '🗑 Clear Scores';
+          btn.className   = 'btn btn-xs ms-save-score-btn btn-warning';
+        } else {
+          btn.textContent = '📨 Submit Score';
+          btn.className   = 'btn btn-xs ms-save-score-btn btn-primary';
+        }
       };
 
       inp.addEventListener('input', () => {
@@ -460,18 +469,23 @@ const MySchool = (() => {
         const homeInp = container.querySelector(`.my-score-input[data-fixture="${fid}"][data-field="homeScore"]`);
         const awayInp = container.querySelector(`.my-score-input[data-fixture="${fid}"][data-field="awayScore"]`);
         if (!homeInp || !awayInp) return;
-        if (homeInp.value === '' || awayInp.value === '') {
-          toast('Please enter both scores before submitting', 'error');
+        const homeEmpty = homeInp.value === '';
+        const awayEmpty = awayInp.value === '';
+        // Exactly one score filled — ambiguous, ask user to fix
+        if (homeEmpty !== awayEmpty) {
+          toast('Please enter both scores, or clear both to remove the result', 'error');
           return;
         }
+        // Both filled → save scores; both empty → clear scores (save null/null)
         Leagues.saveScore(lid, fid, 'homeScore', homeInp.value);
         Leagues.saveScore(lid, fid, 'awayScore', awayInp.value);
         // Stamp the saved values so future edits can detect changes
         btn.dataset.savedHome = homeInp.value;
         btn.dataset.savedAway = awayInp.value;
-        // Flash green confirmation, then re-render
-        btn.className   = 'btn btn-xs btn-success ms-save-score-btn';
-        btn.textContent = 'Score Submitted ✓';
+        // Flash confirmation, then re-render (fixture moves back to Upcoming if cleared)
+        const isClearing = homeEmpty && awayEmpty;
+        btn.className   = `btn btn-xs ms-save-score-btn ${isClearing ? 'btn-warning' : 'btn-success'}`;
+        btn.textContent = isClearing ? 'Scores Cleared ✓' : 'Score Submitted ✓';
         btn.disabled    = true;
         setTimeout(() => _render(), 800);
       });
