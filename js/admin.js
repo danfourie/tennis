@@ -134,85 +134,110 @@ const Admin = (() => {
   }
 
   // ════════════════════════════════════════════════════════════
-  // PENDING RESULTS (past fixtures with no score entered)
+  // PENDING RESULTS (no score entered, or score not yet verified)
   // ════════════════════════════════════════════════════════════
   function renderPendingResults() {
     const el = document.getElementById('pendingResultsList');
     if (!el) return;
 
     const today = new Date().toISOString().slice(0, 10);
-    const pending = [];
+    const noScore   = [];  // past fixtures with no score at all
+    const unverified = []; // past fixtures with a score but not yet verified
+
     DB.getLeagues().forEach(league => {
       (league.fixtures || []).forEach(f => {
         if (!f.date || f.date >= today) return;
-        if (f.homeScore !== null && f.homeScore !== undefined) return; // score already entered
-        pending.push({ fixture: f, league });
+        const hasScore = f.homeScore !== null && f.homeScore !== undefined;
+        if (!hasScore) {
+          noScore.push({ fixture: f, league });
+        } else if (!f.verified) {
+          unverified.push({ fixture: f, league });
+        }
       });
     });
 
-    // Most-recent overdue first
-    pending.sort((a, b) => b.fixture.date.localeCompare(a.fixture.date));
+    // Most-recent first within each group
+    const sortByDate = (a, b) => b.fixture.date.localeCompare(a.fixture.date);
+    noScore.sort(sortByDate);
+    unverified.sort(sortByDate);
 
-    if (pending.length === 0) {
-      el.innerHTML = `<p class="text-muted">All past fixtures have scores recorded ✓</p>`;
+    if (noScore.length === 0 && unverified.length === 0) {
+      el.innerHTML = `<p class="text-muted">All past fixtures have verified scores ✓</p>`;
       return;
     }
 
-    el.innerHTML = `<div class="admin-list">` +
-      pending.map(({ fixture: f, league }) => {
-        const homeSchool = DB.getSchools().find(s => s.id === f.homeSchoolId);
-        const awaySchool = DB.getSchools().find(s => s.id === f.awaySchoolId);
-        const hColor = homeSchool ? homeSchool.color : '#666';
-        const aColor = awaySchool ? awaySchool.color : '#666';
-        return `<div class="admin-list-item">
-          <div style="flex:1;min-width:0">
-            <div style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap">
-              <span class="badge badge-gray">${esc(league.name)}${league.division ? ' · ' + esc(league.division) : ''}</span>
-              <span class="text-muted" style="font-size:.82rem">📅 ${f.date ? formatDate(f.date) : '—'}</span>
-            </div>
-            <div style="margin-top:.2rem">
-              <span style="color:${hColor}">●</span> ${esc(f.homeSchoolName)}
-              <span class="text-muted" style="margin:0 .3rem">vs</span>
-              <span style="color:${aColor}">●</span> ${esc(f.awaySchoolName)}
-            </div>
+    const _row = ({ fixture: f, league }, status) => {
+      const homeSchool = DB.getSchools().find(s => s.id === f.homeSchoolId);
+      const awaySchool = DB.getSchools().find(s => s.id === f.awaySchoolId);
+      const hColor = homeSchool ? homeSchool.color : '#666';
+      const aColor = awaySchool ? awaySchool.color : '#666';
+      const scoreText = status === 'unverified'
+        ? `<span class="text-muted" style="font-size:.8rem">${f.homeScore} — ${f.awayScore}</span>`
+        : '';
+      const badge = status === 'unverified'
+        ? `<span class="badge" style="background:#fef9c3;color:#854d0e;font-size:.7rem">Unverified</span>`
+        : `<span class="badge" style="background:#fee2e2;color:#991b1b;font-size:.7rem">No score</span>`;
+      const notifyTitle  = status === 'unverified' ? 'Please verify match result' : 'Please submit match result';
+      const notifyBody   = status === 'unverified'
+        ? `The score for ${f.homeSchoolName} vs ${f.awaySchoolName} on ${formatDate(f.date)} (${f.homeScore}–${f.awayScore}) has not been verified yet. Please log in to confirm.`
+        : `The score for ${f.homeSchoolName} vs ${f.awaySchoolName} on ${formatDate(f.date)} has not been recorded yet. Please log in and enter the result.`;
+      return `<div class="admin-list-item">
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap">
+            <span class="badge badge-gray">${esc(league.name)}${league.division ? ' · ' + esc(league.division) : ''}</span>
+            <span class="text-muted" style="font-size:.82rem">📅 ${f.date ? formatDate(f.date) : '—'}</span>
+            ${badge}
           </div>
-          <div class="item-actions">
-            <button class="btn btn-xs btn-secondary"
-              data-pr-view-league="${league.id}">🔍 View</button>
-            <button class="btn btn-xs btn-warning"
-              data-pr-home="${f.homeSchoolId}"
-              data-pr-away="${f.awaySchoolId}"
-              data-pr-league="${league.id}"
-              data-pr-fixture="${f.id}"
-              data-pr-label="${esc(f.homeSchoolName + ' vs ' + f.awaySchoolName + ' on ' + formatDate(f.date))}">🔔 Notify</button>
+          <div style="margin-top:.2rem">
+            <span style="color:${hColor}">●</span> ${esc(f.homeSchoolName)}
+            <span class="text-muted" style="margin:0 .3rem">vs</span>
+            <span style="color:${aColor}">●</span> ${esc(f.awaySchoolName)}
+            ${scoreText ? ' &nbsp;' + scoreText : ''}
           </div>
-        </div>`;
-      }).join('') +
-      `</div>`;
+        </div>
+        <div class="item-actions">
+          <button class="btn btn-xs btn-secondary" data-pr-view-league="${league.id}" data-pr-view-fixture="${f.id}">🔍 View</button>
+          <button class="btn btn-xs btn-warning"
+            data-pr-home="${f.homeSchoolId}"
+            data-pr-away="${f.awaySchoolId}"
+            data-pr-league="${league.id}"
+            data-pr-fixture="${f.id}"
+            data-pr-notify-title="${esc(notifyTitle)}"
+            data-pr-notify-body="${esc(notifyBody)}">🔔 Notify</button>
+        </div>
+      </div>`;
+    };
+
+    let html = '<div class="admin-list">';
+    if (noScore.length > 0) {
+      html += noScore.map(item => _row(item, 'no-score')).join('');
+    }
+    if (unverified.length > 0) {
+      if (noScore.length > 0) html += `<div style="border-top:1px solid var(--border);margin:.25rem 0"></div>`;
+      html += unverified.map(item => _row(item, 'unverified')).join('');
+    }
+    html += '</div>';
+    el.innerHTML = html;
 
     el.querySelectorAll('[data-pr-view-league]').forEach(btn => {
       btn.addEventListener('click', () => {
         _switchTab('leagues');
-        if (typeof Leagues !== 'undefined') Leagues.openLeagueDetail(btn.dataset.prViewLeague, true);
+        if (typeof Leagues !== 'undefined') Leagues.openLeagueDetail(btn.dataset.prViewLeague, true, true, btn.dataset.prViewFixture || null);
       });
     });
 
-    el.querySelectorAll('[data-pr-notify]').forEach(btn => {
-      // handled below
-    });
     el.querySelectorAll('[data-pr-home]').forEach(btn => {
       btn.addEventListener('click', async () => {
         const homeId    = btn.dataset.prHome;
         const awayId    = btn.dataset.prAway;
         const leagueId  = btn.dataset.prLeague;
         const fixtureId = btn.dataset.prFixture;
-        const label     = btn.dataset.prLabel;
         btn.disabled = true; btn.textContent = 'Sending…';
         try {
           await NotificationService.sendToSchoolGroup([homeId, awayId], {
             type:      'score_reminder',
-            title:     'Please submit match result',
-            body:      `The score for ${label} has not been recorded yet. Please log in and enter the result.`,
+            title:     btn.dataset.prNotifyTitle,
+            body:      btn.dataset.prNotifyBody,
             leagueId,
             fixtureId,
           });
