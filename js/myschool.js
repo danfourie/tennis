@@ -945,20 +945,24 @@ const MySchool = (() => {
   // Public helper: navigate to My School and expand the settings card.
   // Called from other views (e.g. My Venue ⚙️ Settings shortcut).
   function openSettings() {
-    // If the My School view is not currently visible, navigate to it first.
+    // Switch to the My School view directly (no event-dispatch race condition).
     const view = document.getElementById('view-myschool');
     if (view && view.classList.contains('hidden')) {
-      document.querySelector('[data-view="myschool"]')?.click();
+      // navigate() is a global defined in app.js — switches views synchronously.
+      if (typeof navigate === 'function') navigate('myschool');
+      // Re-render content synchronously now that the view is visible.
+      _render();
     }
-    // Wait one tick for _render() to complete, then open the settings card.
-    setTimeout(() => {
+    // Expand the settings card. Use requestAnimationFrame so the browser has
+    // painted the freshly rendered DOM before we try to scroll to the card.
+    requestAnimationFrame(() => {
       const body    = document.getElementById('ms-settings-body');
       const chevron = document.getElementById('ms-settings-chevron');
       const card    = document.getElementById('ms-settings-card');
-      if (body) body.style.display = 'flex';
-      if (chevron) chevron.style.transform = 'rotate(180deg)';
-      if (card)  card.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }, 50);
+      if (body)    body.style.display         = 'flex';
+      if (chevron) chevron.style.transform    = 'rotate(180deg)';
+      if (card)    card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
   }
 
   return { init, refresh, impersonate, stopImpersonation, isImpersonating, getActiveSchoolId, openSettings };
