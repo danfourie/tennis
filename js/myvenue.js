@@ -138,54 +138,63 @@ const MyVenue = (() => {
       </div>
     </div>`;
 
-    // ── Bookings needing school attention: pending requests + admin-scheduled ──
-    // 'pending'       = request from another school, needs approve/reject
-    // no status/null  = admin-scheduled directly, school should confirm or delete
-    const allBookings = DB.getBookings();
-    const actionableBookings = allBookings.filter(b =>
-      b.venueId === school.venueId && b.status !== 'confirmed' && b.status !== 'rejected'
-    );
-    const actionCount = actionableBookings.length;
-    html += `<div class="card" style="margin-bottom:1.5rem;border-left:4px solid var(--warning,#f59e0b)">
+    // ── All bookings at this venue (excluding rejected) ──────────────────────
+    // Confirmed bookings are shown with a "Cancel" button so plans can be
+    // reversed.  Only truly rejected bookings are hidden.
+    const allBookings  = DB.getBookings();
+    const venueBookings = allBookings
+      .filter(b => b.venueId === school.venueId && b.status !== 'rejected')
+      .slice()
+      .sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.timeSlot || '').localeCompare(b.timeSlot || ''));
+    const pendingCount  = venueBookings.filter(b => b.status !== 'confirmed').length;
+    const borderColor   = pendingCount > 0 ? 'var(--warning,#f59e0b)' : 'var(--success,#22c55e)';
+
+    html += `<div class="card" style="margin-bottom:1.5rem;border-left:4px solid ${borderColor}">
       <div class="card-header">
-        <div class="card-title" style="margin:0">📩 Bookings Awaiting Confirmation
-          ${actionCount > 0 ? `<span class="badge" style="background:#fef9c3;color:#854d0e;margin-left:.5rem">${actionCount}</span>` : ''}
+        <div class="card-title" style="margin:0">📩 Venue Bookings
+          ${pendingCount > 0 ? `<span class="badge" style="background:#fef9c3;color:#854d0e;margin-left:.5rem">${pendingCount} awaiting confirmation</span>` : `<span class="badge" style="background:#dcfce7;color:#166534;margin-left:.5rem">All confirmed ✓</span>`}
         </div>
       </div>
       <div class="card-body" style="padding:.25rem .75rem .75rem">`;
-    if (actionCount === 0) {
-      html += `<p class="text-muted" style="padding:.4rem 0;margin:0">All bookings confirmed ✓</p>`;
+
+    if (venueBookings.length === 0) {
+      html += `<p class="text-muted" style="padding:.4rem 0;margin:0">No bookings recorded for this venue yet.</p>`;
     } else {
-      actionableBookings
-        .slice()
-        .sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.timeSlot || '').localeCompare(b.timeSlot || ''))
-        .forEach(b => {
-          const isPendingRequest = b.status === 'pending';
-          const statusBadge = isPendingRequest
+      venueBookings.forEach(b => {
+        const isConfirmed = b.status === 'confirmed';
+        const isPending   = b.status === 'pending';
+        // Badge colour: green = confirmed, yellow = pending request, blue = admin-scheduled
+        const statusBadge = isConfirmed
+          ? `<span class="badge" style="background:#dcfce7;color:#166534;font-size:.7rem">Confirmed ✓</span>`
+          : isPending
             ? `<span class="badge" style="background:#fef9c3;color:#854d0e;font-size:.7rem">Request</span>`
             : `<span class="badge" style="background:#e0f2fe;color:#0369a1;font-size:.7rem">Admin-scheduled</span>`;
-          const rejectLabel = isPendingRequest ? 'Reject' : 'Delete';
-          const approveLabel = isPendingRequest ? 'Approve ✓' : 'Confirm ✓';
-          html += `<div class="admin-list-item" style="align-items:flex-start;gap:.75rem">
-            <div style="flex:1;min-width:0">
-              <div style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap">
-                <span style="font-weight:600">${esc(b.label || b.type || 'Booking')}</span>
-                ${statusBadge}
-              </div>
-              <div class="text-muted" style="font-size:.82rem">
-                📅 ${b.date ? formatDate(b.date) : '—'}
-                ${b.timeSlot ? ` ⏰ ${esc(b.timeSlot)}` : ''}
-                🎾 Court ${(typeof b.courtIndex === 'number') ? b.courtIndex + 1 : '—'}
-              </div>
-              ${b.requestedByName ? `<div class="text-muted" style="font-size:.8rem">Requested by: ${esc(b.requestedByName)}${b.schoolName ? ' · ' + esc(b.schoolName) : ''}</div>` : ''}
-              ${b.notes ? `<div class="text-muted" style="font-size:.8rem;font-style:italic">${esc(b.notes)}</div>` : ''}
+
+        // Confirmed bookings only need a "Cancel" button; unconfirmed get Approve+Reject.
+        const actionBtns = isConfirmed
+          ? `<button class="btn btn-sm btn-danger mv-reject-btn" data-id="${esc(b.id)}" data-label="Cancel">Cancel</button>`
+          : `<button class="btn btn-sm btn-danger mv-reject-btn" data-id="${esc(b.id)}" data-label="${isPending ? 'Reject' : 'Delete'}">${isPending ? 'Reject' : 'Delete'}</button>
+             <button class="btn btn-sm btn-primary mv-approve-btn" data-id="${esc(b.id)}" data-label="${isPending ? 'Approve ✓' : 'Confirm ✓'}">${isPending ? 'Approve ✓' : 'Confirm ✓'}</button>`;
+
+        html += `<div class="admin-list-item" style="align-items:flex-start;gap:.75rem">
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap">
+              <span style="font-weight:600">${esc(b.label || b.type || 'Booking')}</span>
+              ${statusBadge}
             </div>
-            <div style="display:flex;gap:.4rem;flex-shrink:0;align-items:center">
-              <button class="btn btn-sm btn-danger mv-reject-btn" data-id="${esc(b.id)}" data-label="${esc(rejectLabel)}">${esc(rejectLabel)}</button>
-              <button class="btn btn-sm btn-primary mv-approve-btn" data-id="${esc(b.id)}" data-label="${esc(approveLabel)}">${esc(approveLabel)}</button>
+            <div class="text-muted" style="font-size:.82rem">
+              📅 ${b.date ? formatDate(b.date) : '—'}
+              ${b.timeSlot ? ` ⏰ ${esc(b.timeSlot)}` : ''}
+              🎾 Court ${(typeof b.courtIndex === 'number') ? b.courtIndex + 1 : '—'}
             </div>
-          </div>`;
-        });
+            ${b.requestedByName ? `<div class="text-muted" style="font-size:.8rem">Requested by: ${esc(b.requestedByName)}${b.schoolName ? ' · ' + esc(b.schoolName) : ''}</div>` : ''}
+            ${b.notes ? `<div class="text-muted" style="font-size:.8rem;font-style:italic">${esc(b.notes)}</div>` : ''}
+          </div>
+          <div style="display:flex;gap:.4rem;flex-shrink:0;align-items:center">
+            ${actionBtns}
+          </div>
+        </div>`;
+      });
     }
     html += `</div></div>`;
 
@@ -303,27 +312,35 @@ const MyVenue = (() => {
 
     container.querySelectorAll('.mv-reject-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
-        const id = btn.dataset.id;
+        const id      = btn.dataset.id;
+        const label   = btn.dataset.label || 'Reject';   // 'Reject', 'Delete', or 'Cancel'
         const booking = DB.getBookings().find(b => b.id === id);
-        btn.disabled = true; btn.textContent = 'Rejecting…';
+        const wasCancelling = label === 'Cancel';        // previously-confirmed booking
+        const confirmMsg = wasCancelling
+          ? `Cancel this confirmed booking?\n\n"${booking ? (booking.label || 'Booking') : 'Booking'}" on ${booking && booking.date ? formatDate(booking.date) : '—'}\n\nThis will notify the requester.`
+          : `${label} this booking request?`;
+        if (!confirm(confirmMsg)) return;
+        btn.disabled = true; btn.textContent = wasCancelling ? 'Cancelling…' : 'Rejecting…';
         try {
           await DB.rejectBooking(id);
-          DB.writeAudit('booking_rejected', 'booking',
-            `Rejected request by ${booking ? esc(booking.requestedByName || 'user') : 'user'}: ${booking ? esc(booking.label || '') : ''} on ${booking ? booking.date : ''}`,
+          DB.writeAudit(wasCancelling ? 'booking_cancelled' : 'booking_rejected', 'booking',
+            `${wasCancelling ? 'Cancelled' : 'Rejected'} booking: ${booking ? esc(booking.label || '') : ''} on ${booking ? booking.date : ''}`,
             id, booking ? booking.label || '' : '');
           if (booking && booking.requestedBy && typeof NotificationService !== 'undefined') {
             NotificationService.send({
-              type:          'booking_rejected',
-              title:         'Booking Request Rejected',
-              body:          `Your request to book ${esc(booking.label || venue.name)} on ${booking.date ? formatDate(booking.date) : ''} has been declined.`,
+              type:          wasCancelling ? 'booking_cancelled' : 'booking_rejected',
+              title:         wasCancelling ? 'Booking Cancelled' : 'Booking Request Rejected',
+              body:          wasCancelling
+                ? `Your confirmed booking for ${esc(booking.label || venue.name)} on ${booking.date ? formatDate(booking.date) : ''} has been cancelled by the venue.`
+                : `Your request to book ${esc(booking.label || venue.name)} on ${booking.date ? formatDate(booking.date) : ''} has been declined.`,
               recipientUids: [booking.requestedBy],
             });
           }
-          toast('Request rejected');
+          toast(wasCancelling ? 'Booking cancelled' : 'Request rejected');
         } catch (err) {
-          console.error('Reject booking failed:', err);
-          btn.disabled = false; btn.textContent = 'Reject';
-          toast('Failed to reject booking — please try again', 'error');
+          console.error('Reject/cancel booking failed:', err);
+          btn.disabled = false; btn.textContent = label;
+          toast('Failed — please try again', 'error');
         }
       });
     });
