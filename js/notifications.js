@@ -212,12 +212,33 @@ const NotificationService = (() => {
       return;
     }
 
-    const _itemHtml = n => `
-      <div class="notif-item${n.read ? '' : ' unread'}" data-id="${esc(n.id)}" data-league="${esc(n.leagueId || '')}">
-        <div class="notif-item-title">${_typeIcon(n.type)} ${esc(n.title)}</div>
-        <div class="notif-item-body">${esc(n.body)}</div>
-        <div class="notif-item-time">${_relativeTime(n.createdAt)}</div>
-      </div>`;
+    const _itemHtml = n => {
+      const fromHtml = n.fromName
+        ? `<div class="notif-item-from">From: ${esc(n.fromName)}</div>`
+        : '';
+      const replyCtxHtml = n.replyContext
+        ? `<div class="notif-reply-context">↩ ${esc(n.replyContext.slice(0, 100))}${n.replyContext.length > 100 ? '…' : ''}</div>`
+        : '';
+      const canReply = !!n.createdBy;
+      return `
+        <div class="notif-item${n.read ? '' : ' unread'}" data-id="${esc(n.id)}" data-league="${esc(n.leagueId || '')}" data-fixture="${esc(n.fixtureId || '')}">
+          <div class="notif-item-title">${_typeIcon(n.type)} ${esc(n.title)}</div>
+          ${fromHtml}
+          ${replyCtxHtml}
+          <div class="notif-item-body">${esc(n.body)}</div>
+          <div class="notif-item-footer">
+            <div class="notif-item-time">${_relativeTime(n.createdAt)}</div>
+            ${canReply ? `<button class="btn btn-xs btn-secondary notif-reply-btn" data-notif-id="${esc(n.id)}">↩ Reply</button>` : ''}
+          </div>
+          <div class="notif-reply-form hidden" id="notif-reply-form-${esc(n.id)}">
+            <textarea class="notif-reply-textarea" placeholder="Write your reply…" rows="2"></textarea>
+            <div style="display:flex;gap:.35rem;margin-top:.35rem;justify-content:flex-end">
+              <button class="btn btn-xs btn-secondary notif-reply-cancel" data-notif-id="${esc(n.id)}">Cancel</button>
+              <button class="btn btn-xs btn-primary notif-reply-send" data-notif-id="${esc(n.id)}">Send ↩</button>
+            </div>
+          </div>
+        </div>`;
+    };
 
     let html = unread.length === 0
       ? '<div class="notif-empty">No new notifications</div>'
@@ -247,19 +268,86 @@ const NotificationService = (() => {
       });
     }
 
+    // Navigate to league/fixture on notification click
     list.querySelectorAll('.notif-item').forEach(item => {
-      item.addEventListener('click', () => {
-        const id       = item.dataset.id;
-        const leagueId = item.dataset.league;
+      item.addEventListener('click', e => {
+        if (e.target.closest('.notif-reply-btn, .notif-reply-cancel, .notif-reply-send, .notif-reply-form')) return;
+        const id        = item.dataset.id;
+        const leagueId  = item.dataset.league;
+        const fixtureId = item.dataset.fixture || null;
         markRead(id);
         if (leagueId) {
           const panel = document.getElementById('notifPanel');
           if (panel) panel.classList.add('hidden');
           navigate('leagues');
           const league = DB.getLeagues().find(l => l.id === leagueId);
-          if (league) Leagues.openLeagueDetail(leagueId, Auth.isAdmin());
+          if (league) Leagues.openLeagueDetail(leagueId, Auth.isAdmin(), true, fixtureId);
         }
       });
+    });
+
+    // Reply button: show/hide inline form
+    list.querySelectorAll('.notif-reply-btn').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        const form = document.getElementById('notif-reply-form-' + btn.dataset.notifId);
+        if (form) {
+          form.classList.toggle('hidden');
+          if (!form.classList.contains('hidden')) form.querySelector('textarea')?.focus();
+        }
+      });
+    });
+
+    // Cancel reply
+    list.querySelectorAll('.notif-reply-cancel').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        const form = document.getElementById('notif-reply-form-' + btn.dataset.notifId);
+        if (form) form.classList.add('hidden');
+      });
+    });
+
+    // Send reply
+    list.querySelectorAll('.notif-reply-send').forEach(btn => {
+      btn.addEventListener('click', async e => {
+        e.stopPropagation();
+        const notifId = btn.dataset.notifId;
+        const n = _notifs.find(x => x.id === notifId);
+        if (!n) return;
+        const form     = document.getElementById('notif-reply-form-' + notifId);
+        const textarea = form ? form.querySelector('textarea') : null;
+        const message  = textarea ? textarea.value.trim() : '';
+        if (!message) { toast('Write a reply first', 'error'); return; }
+        btn.disabled = true; btn.textContent = 'Sending…';
+        try {
+          _sendReply(n, message);
+          toast('Reply sent ✓', 'success');
+          if (form) form.classList.add('hidden');
+          if (textarea) textarea.value = '';
+        } catch (err) {
+          console.error('[NotificationService] reply error:', err);
+          toast('Failed to send reply', 'error');
+        } finally {
+          btn.disabled = false; btn.textContent = 'Send ↩';
+        }
+      });
+    });
+  }
+
+  /** Send a reply back to whoever created the original notification. */
+  function _sendReply(original, message) {
+    if (!original.createdBy) return;
+    send({
+      type:         'general_message',
+      title:        `Re: ${original.title}`,
+      body:         message,
+      recipientUids: [original.createdBy],
+      leagueId:     original.leagueId  || null,
+      fixtureId:    original.fixtureId || null,
+      replyToId:    original.id,
+      replyContext: original.body.length > 120
+        ? original.body.slice(0, 117) + '…'
+        : original.body,
     });
   }
 
@@ -288,25 +376,35 @@ const NotificationService = (() => {
    * Fire-and-forget — no return value.
    */
   function send(payload) {
-    const { type, title, body, recipientUids, leagueId = null, fixtureId = null } = payload;
+    const {
+      type, title, body, recipientUids,
+      leagueId     = null,
+      fixtureId    = null,
+      replyToId    = null,   // id of the notification being replied to
+      replyContext = null,   // short excerpt of the original message
+    } = payload;
     if (!recipientUids || recipientUids.length === 0) return;
     const profile   = Auth.getProfile();
     const createdBy = profile ? profile.uid : null;
+    const fromName  = profile ? (profile.displayName || profile.email || null) : null;
     const now       = new Date().toISOString();
 
     recipientUids.forEach(recipientUid => {
       if (!recipientUid) return;
       DB.writeNotification({
-        id:        uid(),
-        uid:       recipientUid,
+        id:           uid(),
+        uid:          recipientUid,
         type,
         title,
         body,
-        read:      false,
+        read:         false,
         leagueId,
         fixtureId,
-        createdAt: now,
+        createdAt:    now,
         createdBy,
+        fromName,
+        replyToId,
+        replyContext,
       });
     });
   }

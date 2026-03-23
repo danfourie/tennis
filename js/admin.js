@@ -108,7 +108,7 @@ const Admin = (() => {
       panel.classList.toggle('active', panel.id === `subtab-${tab}`);
     });
     // Lazy-render heavy tabs when first opened
-    if (tab === 'overview')      { renderPendingBookings(); if (typeof Leagues !== 'undefined') Leagues.renderPendingEntries(); }
+    if (tab === 'overview')      { renderPendingResults(); renderPendingBookings(); if (typeof Leagues !== 'undefined') Leagues.renderPendingEntries(); }
     if (tab === 'leagues')       Leagues.renderAdmin();
     if (tab === 'tournaments')   Tournaments.renderAdmin();
     if (tab === 'users')         renderUsers();
@@ -122,6 +122,7 @@ const Admin = (() => {
     renderVenues();
     renderSchools();
     renderClosures();
+    renderPendingResults();
     renderPendingBookings();
     if (typeof Leagues !== 'undefined') Leagues.renderPendingEntries();
     // Only re-render active heavy tabs to avoid unnecessary work
@@ -130,6 +131,100 @@ const Admin = (() => {
     if (_activeTab === 'users')         renderUsers();
     if (_activeTab === 'settings')      { renderGlobalSettings(); renderAuditLog(); }
     if (_activeTab === 'notifications') NotificationService.renderComposer();
+  }
+
+  // ════════════════════════════════════════════════════════════
+  // PENDING RESULTS (past fixtures with no score entered)
+  // ════════════════════════════════════════════════════════════
+  function renderPendingResults() {
+    const el = document.getElementById('pendingResultsList');
+    if (!el) return;
+
+    const today = new Date().toISOString().slice(0, 10);
+    const pending = [];
+    DB.getLeagues().forEach(league => {
+      (league.fixtures || []).forEach(f => {
+        if (!f.date || f.date >= today) return;
+        if (f.homeScore !== null && f.homeScore !== undefined) return; // score already entered
+        pending.push({ fixture: f, league });
+      });
+    });
+
+    // Most-recent overdue first
+    pending.sort((a, b) => b.fixture.date.localeCompare(a.fixture.date));
+
+    if (pending.length === 0) {
+      el.innerHTML = `<p class="text-muted">All past fixtures have scores recorded ✓</p>`;
+      return;
+    }
+
+    el.innerHTML = `<div class="admin-list">` +
+      pending.map(({ fixture: f, league }) => {
+        const homeSchool = DB.getSchools().find(s => s.id === f.homeSchoolId);
+        const awaySchool = DB.getSchools().find(s => s.id === f.awaySchoolId);
+        const hColor = homeSchool ? homeSchool.color : '#666';
+        const aColor = awaySchool ? awaySchool.color : '#666';
+        return `<div class="admin-list-item">
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap">
+              <span class="badge badge-gray">${esc(league.name)}${league.division ? ' · ' + esc(league.division) : ''}</span>
+              <span class="text-muted" style="font-size:.82rem">📅 ${f.date ? formatDate(f.date) : '—'}</span>
+            </div>
+            <div style="margin-top:.2rem">
+              <span style="color:${hColor}">●</span> ${esc(f.homeSchoolName)}
+              <span class="text-muted" style="margin:0 .3rem">vs</span>
+              <span style="color:${aColor}">●</span> ${esc(f.awaySchoolName)}
+            </div>
+          </div>
+          <div class="item-actions">
+            <button class="btn btn-xs btn-secondary"
+              data-pr-view-league="${league.id}">🔍 View</button>
+            <button class="btn btn-xs btn-warning"
+              data-pr-home="${f.homeSchoolId}"
+              data-pr-away="${f.awaySchoolId}"
+              data-pr-league="${league.id}"
+              data-pr-fixture="${f.id}"
+              data-pr-label="${esc(f.homeSchoolName + ' vs ' + f.awaySchoolName + ' on ' + formatDate(f.date))}">🔔 Notify</button>
+          </div>
+        </div>`;
+      }).join('') +
+      `</div>`;
+
+    el.querySelectorAll('[data-pr-view-league]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        _switchTab('leagues');
+        if (typeof Leagues !== 'undefined') Leagues.openLeagueDetail(btn.dataset.prViewLeague, true);
+      });
+    });
+
+    el.querySelectorAll('[data-pr-notify]').forEach(btn => {
+      // handled below
+    });
+    el.querySelectorAll('[data-pr-home]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const homeId    = btn.dataset.prHome;
+        const awayId    = btn.dataset.prAway;
+        const leagueId  = btn.dataset.prLeague;
+        const fixtureId = btn.dataset.prFixture;
+        const label     = btn.dataset.prLabel;
+        btn.disabled = true; btn.textContent = 'Sending…';
+        try {
+          await NotificationService.sendToSchoolGroup([homeId, awayId], {
+            type:      'score_reminder',
+            title:     'Please submit match result',
+            body:      `The score for ${label} has not been recorded yet. Please log in and enter the result.`,
+            leagueId,
+            fixtureId,
+          });
+          toast('Reminder sent ✓', 'success');
+          btn.textContent = '✓ Sent';
+        } catch (err) {
+          console.error('[Admin] pending result notify error:', err);
+          btn.disabled = false; btn.textContent = '🔔 Notify';
+          toast('Failed to send notification', 'error');
+        }
+      });
+    });
   }
 
   // ════════════════════════════════════════════════════════════
