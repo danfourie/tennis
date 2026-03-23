@@ -1617,7 +1617,7 @@ const Leagues = (() => {
     </div>`;
   }
 
-  function openLeagueDetail(id, isAdmin = false, recalc = true) {
+  function openLeagueDetail(id, isAdmin = false, recalc = true, highlightFixtureId = null) {
     const league = DB.getLeagues().find(l => l.id === id);
     if (!league) return;
     const schools = DB.getSchools();
@@ -1850,6 +1850,18 @@ const Leagues = (() => {
     document.getElementById('exportStandingsBtn').addEventListener('click', () => _exportStandingsCSV(league));
 
     Modal.open('leagueDetailModal');
+
+    // Scroll to and highlight a specific fixture if requested (e.g. from notification)
+    if (highlightFixtureId) {
+      setTimeout(() => {
+        const row = body.querySelector(`tr[data-fixture-row="${highlightFixtureId}"]`);
+        if (row) {
+          row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          row.classList.add('fixture-highlight');
+          setTimeout(() => row.classList.remove('fixture-highlight'), 3000);
+        }
+      }, 120);
+    }
   }
 
   function _fixturesTab(league, schools, isAdmin) {
@@ -1951,7 +1963,7 @@ const Leagues = (() => {
           ? `<td><button class="btn btn-xs btn-secondary" data-fixture-edit="${f.id}" title="Edit fixture">✏️</button></td>`
           : '';
 
-        html += `<tr class="${clashedIds.has(f.id) && !f.clashOkayed ? 'fixture-row-clash' : ''}">
+        html += `<tr data-fixture-row="${f.id}" class="${clashedIds.has(f.id) && !f.clashOkayed ? 'fixture-row-clash' : ''}">
           <td style="white-space:nowrap">${f.date ? formatDate(f.date) : '—'}</td>
           <td style="white-space:nowrap">${f.timeSlot || '—'}</td>
           <td><span style="color:${homeColor}">●</span> ${esc(f.homeSchoolName)}</td>
