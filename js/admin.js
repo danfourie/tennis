@@ -146,13 +146,15 @@ const Admin = (() => {
 
     DB.getLeagues().forEach(league => {
       (league.fixtures || []).forEach(f => {
-        if (!f.date || f.date >= today) return;
+        if (!f.date) return;
         const hasScore   = f.homeScore !== null && f.homeScore !== undefined;
         const isVerified = !!(f.masterVerified || (f.homeTeamVerified && f.awayTeamVerified));
-        if (!hasScore) {
-          noScore.push({ fixture: f, league });
-        } else if (!isVerified) {
+        // Unverified scores show regardless of date (scores can be entered early)
+        if (hasScore && !isVerified) {
           unverified.push({ fixture: f, league });
+        } else if (!hasScore && f.date < today) {
+          // No score: only flag past fixtures (future fixtures haven't been played yet)
+          noScore.push({ fixture: f, league });
         }
       });
     });
@@ -163,7 +165,7 @@ const Admin = (() => {
     unverified.sort(sortByDate);
 
     if (noScore.length === 0 && unverified.length === 0) {
-      el.innerHTML = `<p class="text-muted">All past fixtures have verified scores ✓</p>`;
+      el.innerHTML = `<p class="text-muted">All fixtures are up to date ✓</p>`;
       return;
     }
 
