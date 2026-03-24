@@ -147,7 +147,17 @@ const Auth = (() => {
   }
 
   // ── Register ───────────────────────────────────────────────
-  async function register(email, password, displayName, schoolId = null) {
+  /** Normalise a South African phone to E.164 (+27...) */
+  function _toE164(phone) {
+    if (!phone) return null;
+    const clean = String(phone).replace(/[\s\-\(\)\.]/g, '');
+    if (clean.startsWith('+'))  return clean;
+    if (clean.startsWith('27')) return '+' + clean;
+    if (clean.startsWith('0'))  return '+27' + clean.slice(1);
+    return '+27' + clean;
+  }
+
+  async function register(email, password, displayName, schoolId = null, phone = null, whatsappOptIn = false) {
     try {
       // 1. Create Firebase Auth account
       const cred = await firebase.auth().createUserWithEmailAndPassword(email, password);
@@ -158,13 +168,16 @@ const Auth = (() => {
       const role = snap.empty ? 'master' : 'user';
 
       // 3. Create Firestore profile
+      const normPhone = _toE164(phone);
       const profile = {
-        uid:         cred.user.uid,
+        uid:            cred.user.uid,
         email,
         displayName,
         role,
-        schoolId:    schoolId || null,
-        createdAt:   new Date().toISOString(),
+        schoolId:       schoolId      || null,
+        phone:          normPhone     || null,
+        whatsappOptIn:  !!(normPhone && whatsappOptIn),
+        createdAt:      new Date().toISOString(),
       };
       await firebase.firestore().collection('users').doc(cred.user.uid).set(profile);
 

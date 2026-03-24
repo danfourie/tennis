@@ -1,6 +1,10 @@
 # Claude Code internal files (worktrees, plans, settings)
 .claude/
 
+# Firebase Cloud Functions dependencies
+functions/node_modules/
+functions/.env
+
 # Excel files
 *.xlsx
 *.xls

@@ -225,9 +225,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     sel.innerHTML = '<option value="">-- No school --</option>' +
       DB.getSchools().map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
     // Clear form
-    ['regName','regEmail','regPassword','regPasswordConfirm'].forEach(id => {
+    ['regName','regEmail','regPassword','regPasswordConfirm','regPhone'].forEach(id => {
       document.getElementById(id).value = '';
     });
+    document.getElementById('regWhatsApp').checked = false;
     document.getElementById('registerError').textContent = '';
     Modal.open('registerModal');
     setTimeout(() => document.getElementById('regName').focus(), 50);
@@ -239,12 +240,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   async function doRegister() {
-    const name     = document.getElementById('regName').value.trim();
-    const email    = document.getElementById('regEmail').value.trim();
-    const password = document.getElementById('regPassword').value;
-    const confirm  = document.getElementById('regPasswordConfirm').value;
-    const schoolId = document.getElementById('regSchool').value || null;
-    const errEl    = document.getElementById('registerError');
+    const name          = document.getElementById('regName').value.trim();
+    const email         = document.getElementById('regEmail').value.trim();
+    const password      = document.getElementById('regPassword').value;
+    const confirm       = document.getElementById('regPasswordConfirm').value;
+    const schoolId      = document.getElementById('regSchool').value || null;
+    const phone         = document.getElementById('regPhone').value.trim() || null;
+    const whatsappOptIn = !!(phone && document.getElementById('regWhatsApp').checked);
+    const errEl         = document.getElementById('registerError');
 
     if (!name)                      { errEl.textContent = 'Full name is required';              return; }
     if (!email)                     { errEl.textContent = 'Email is required';                   return; }
@@ -255,7 +258,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     btn.disabled = true; btn.textContent = 'Creating account…';
     errEl.textContent = '';
 
-    const result = await Auth.register(email, password, name, schoolId);
+    const result = await Auth.register(email, password, name, schoolId, phone, whatsappOptIn);
 
     btn.disabled = false; btn.textContent = 'Create Account';
 

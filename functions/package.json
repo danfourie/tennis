@@ -1,0 +1,16 @@
+{
+  "name": "court-campus-functions",
+  "description": "Firebase Cloud Functions — WhatsApp notifications via Twilio",
+  "engines": { "node": "20" },
+  "main": "index.js",
+  "scripts": {
+    "serve": "firebase emulators:start --only functions",
+    "deploy": "firebase deploy --only functions"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.0.0",
+    "firebase-functions": "^5.0.0",
+    "twilio": "^5.0.0"
+  },
+  "private": true
+}

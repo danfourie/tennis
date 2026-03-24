@@ -834,7 +834,11 @@ function _orgRow(o) {
             </div>
             <div class="text-muted">${venue ? esc(venue.name) : 'No home venue'}</div>
             ${(s.organizers && s.organizers.length
-                ? s.organizers.map(o => `<div class="text-muted">👤 ${esc(o.name)}${o.email ? ' · ' + esc(o.email) : ''}${o.phone ? ' · ' + esc(o.phone) : ''}</div>`).join('')
+                ? s.organizers.map(o => `
+                  <div class="text-muted" style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap">
+                    <span>👤 ${esc(o.name)}${o.email ? ' · ' + esc(o.email) : ''}${o.phone ? ' · ' + esc(o.phone) : ''}</span>
+                    ${o.phone ? `<button class="btn btn-xs btn-success wa-invite-btn" data-phone="${esc(o.phone)}" data-name="${esc(o.name)}" data-school="${esc(s.name)}" title="Send WhatsApp invitation">📲 Invite</button>` : ''}
+                  </div>`).join('')
                 : s.contact ? `<div class="text-muted">👤 ${esc(s.contact)}${s.email ? ' · ' + esc(s.email) : ''}${s.phone ? ' · ' + esc(s.phone) : ''}</div>` : '')}
             <div class="school-teams" style="margin-top:.35rem">${teamsBadges}</div>
           </div>
@@ -856,6 +860,9 @@ function _orgRow(o) {
     });
     el.querySelectorAll('[data-school-delete]').forEach(btn => {
       btn.addEventListener('click', () => deleteSchool(btn.dataset.schoolDelete));
+    });
+    el.querySelectorAll('.wa-invite-btn').forEach(btn => {
+      btn.addEventListener('click', () => _sendWhatsAppInvite(btn));
     });
     el.querySelectorAll('[data-school-notif]').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -971,6 +978,29 @@ function _orgRow(o) {
       DB.writeAudit('school_added', 'admin', `School added: ${name}`, school.id, name);
       toast('School added', 'success');
       render(); Leagues.refresh();
+    }
+  }
+
+  /** Send a WhatsApp invitation to a school organizer via the Cloud Function. */
+  async function _sendWhatsAppInvite(btn) {
+    const phone      = btn.dataset.phone;
+    const name       = btn.dataset.name;
+    const schoolName = btn.dataset.school;
+    if (!phone) { toast('No phone number on record for this organizer', 'error'); return; }
+
+    btn.disabled    = true;
+    btn.textContent = 'Sending…';
+
+    try {
+      const fn = firebase.functions().httpsCallable('sendWhatsAppInvite');
+      await fn({ phone, contactName: name, schoolName });
+      toast(`WhatsApp invite sent to ${name || phone} ✓`, 'success');
+      btn.textContent = '✓ Sent';
+    } catch (err) {
+      console.error('[WhatsApp] Invite failed:', err);
+      toast('Could not send invite — ' + (err.message || 'check Twilio credentials'), 'error');
+      btn.disabled    = false;
+      btn.textContent = '📲 Invite';
     }
   }
 

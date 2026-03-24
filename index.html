@@ -337,6 +337,17 @@
             <option value="">-- No school --</option>
           </select>
         </div>
+        <div class="form-group">
+          <label>Phone number <span style="color:#888;font-weight:400">(optional)</span></label>
+          <input type="tel" id="regPhone" placeholder="+27 or 08x..." autocomplete="tel">
+          <p style="font-size:.78rem;color:#888;margin:.2rem 0 0">Required to receive WhatsApp notifications</p>
+        </div>
+        <div class="form-group">
+          <label style="display:flex;align-items:flex-start;gap:.5rem;cursor:pointer;font-weight:400">
+            <input type="checkbox" id="regWhatsApp" style="margin-top:.15rem;flex-shrink:0">
+            <span style="font-size:.85rem;line-height:1.4">I agree to receive Court Campus notifications via WhatsApp on this number <span style="color:#888">(POPIA consent)</span></span>
+          </label>
+        </div>
         <p id="registerError" class="form-error"></p>
       </div>
       <div class="modal-footer">
@@ -818,6 +829,7 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-functions-compat.js"></script>
 
   <!-- Notification Context Modal (reusable for league / school / fixture notify) -->
   <div class="modal-overlay hidden" id="notifContextModal">
@@ -985,15 +997,15 @@
 
   <!-- App Scripts -->
   <script src="js/firebase-config.js"></script>
-  <script src="js/data.js?v=20260419"></script>
-  <script src="js/auth.js?v=20260419"></script>
-  <script src="js/notifications.js?v=20260419"></script>
-  <script src="js/calendar.js?v=20260419"></script>
-  <script src="js/leagues.js?v=20260419"></script>
-  <script src="js/tournaments.js?v=20260419"></script>
-  <script src="js/admin.js?v=20260419"></script>
-  <script src="js/myschool.js?v=20260419"></script>
-  <script src="js/myvenue.js?v=20260419"></script>
-  <script src="js/app.js?v=20260419"></script>
+  <script src="js/data.js?v=20260420"></script>
+  <script src="js/auth.js?v=20260420"></script>
+  <script src="js/notifications.js?v=20260420"></script>
+  <script src="js/calendar.js?v=20260420"></script>
+  <script src="js/leagues.js?v=20260420"></script>
+  <script src="js/tournaments.js?v=20260420"></script>
+  <script src="js/admin.js?v=20260420"></script>
+  <script src="js/myschool.js?v=20260420"></script>
+  <script src="js/myvenue.js?v=20260420"></script>
+  <script src="js/app.js?v=20260420"></script>
 </body>
 </html>
