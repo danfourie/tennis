@@ -45,17 +45,20 @@ const USE_CONTENT_TEMPLATES = false;
 
 const TEMPLATE_SIDS = {
   // Fill in after templates are approved in Twilio Console → Content Template Builder
-  booking_approved:    'HX_FILL_AFTER_APPROVAL',
-  booking_rejected:    'HX_FILL_AFTER_APPROVAL',
-  booking_request:     'HX_FILL_AFTER_APPROVAL',
-  booking_cancelled:   'HX_FILL_AFTER_APPROVAL',
-  fixture_changed:     'HX_FILL_AFTER_APPROVAL',
-  fixture_cancelled:   'HX_FILL_AFTER_APPROVAL',
-  score_reminder:      'HX_FILL_AFTER_APPROVAL',
-  league_entry:        'HX_FILL_AFTER_APPROVAL',
-  team_message:        'HX_FILL_AFTER_APPROVAL',
-  alt_venue_request:   'HX_FILL_AFTER_APPROVAL',
-  registration_invite: 'HX_FILL_AFTER_APPROVAL',
+  booking_approved:      'HX_FILL_AFTER_APPROVAL',
+  booking_rejected:      'HX_FILL_AFTER_APPROVAL',
+  booking_request:       'HX_FILL_AFTER_APPROVAL',
+  booking_cancelled:     'HX_FILL_AFTER_APPROVAL',
+  fixture_changed:       'HX_FILL_AFTER_APPROVAL',
+  fixture_cancelled:     'HX_FILL_AFTER_APPROVAL',
+  score_reminder:        'HX_FILL_AFTER_APPROVAL',
+  league_entry:          'HX_FILL_AFTER_APPROVAL',
+  league_created:        'HX_FILL_AFTER_APPROVAL',
+  league_start_reminder: 'HX_FILL_AFTER_APPROVAL',
+  team_message:          'HX_FILL_AFTER_APPROVAL',
+  alt_venue_request:     'HX_FILL_AFTER_APPROVAL',
+  general_message:       'HX_FILL_AFTER_APPROVAL',
+  registration_invite:   'HX_FILL_AFTER_APPROVAL',
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -149,6 +152,18 @@ function _buildTemplate(notif) {
       vars['2'] = notif.date       || '';
       vars['3'] = APP_URL;
       break;
+    case 'general_message':
+    case 'league_created':
+    case 'league_start_reminder':
+      vars['1'] = notif.title      || '';
+      vars['2'] = notif.body       || '';
+      vars['3'] = APP_URL;
+      break;
+    case 'registration_invite':
+      vars['1'] = notif.fromName   || '';
+      vars['2'] = notif.venueName  || '';  // re-used for schoolName in invite context
+      vars['3'] = APP_URL;
+      break;
     default:
       return null;
   }
@@ -214,7 +229,7 @@ exports.onNewNotification = onDocumentCreated(
       }
 
       const msg = await client.messages.create(msgParams);
-      console.log(`[WhatsApp] Sent ${notif.type} to ${phone} — SID: ${msg.sid}`);
+      console.log(`[WhatsApp] Sent ${notif.type} to ${phone} — SID: ${msg.sid} status: ${msg.status} errorCode: ${msg.errorCode || 'none'} errorMessage: ${msg.errorMessage || 'none'}`);
     } catch (err) {
       console.error(`[WhatsApp] Send failed for ${phone}:`, err.message);
     }
