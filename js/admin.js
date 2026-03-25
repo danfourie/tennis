@@ -552,38 +552,120 @@ const Admin = (() => {
   // ════════════════════════════════════════════════════════════
   // AUDIT LOG
   // ════════════════════════════════════════════════════════════
-  async function renderAuditLog() {
+  function renderAuditLog() {
     const el = document.getElementById('auditList');
     if (!el) return;
 
-    el.innerHTML = `<p class="text-muted">Loading…</p>`;
-    const entries = await DB.loadAuditLog(100);
+    // Default date range: last 30 days
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const monthAgo = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
 
-    if (entries.length === 0) {
-      el.innerHTML = `<p class="text-muted">No activity recorded yet.</p>`;
-      return;
+    el.innerHTML = `
+      <div class="audit-filters" style="display:flex;flex-wrap:wrap;gap:.5rem;align-items:flex-end;margin-bottom:.75rem">
+        <div>
+          <label class="form-label" style="font-size:.8rem;margin-bottom:2px">From</label>
+          <input type="date" id="auditFrom" class="form-control form-control-sm" value="${monthAgo}" style="width:140px">
+        </div>
+        <div>
+          <label class="form-label" style="font-size:.8rem;margin-bottom:2px">To</label>
+          <input type="date" id="auditTo" class="form-control form-control-sm" value="${todayStr}" style="width:140px">
+        </div>
+        <div>
+          <label class="form-label" style="font-size:.8rem;margin-bottom:2px">Category</label>
+          <select id="auditCat" class="form-control form-control-sm" style="width:130px">
+            <option value="">All categories</option>
+            <option value="booking">📅 Bookings</option>
+            <option value="user">👤 Users</option>
+            <option value="admin">⚙️ Admin</option>
+            <option value="league">🏆 Leagues</option>
+            <option value="tournament">🏅 Tournaments</option>
+          </select>
+        </div>
+        <button class="btn btn-sm btn-primary" id="auditApplyBtn">Apply</button>
+      </div>
+      <div id="auditResults"><p class="text-muted">Loading…</p></div>`;
+
+    async function loadResults(loadMore = false) {
+      const fromVal = document.getElementById('auditFrom')?.value;
+      const toVal   = document.getElementById('auditTo')?.value;
+      const catVal  = document.getElementById('auditCat')?.value;
+      const resultsEl = document.getElementById('auditResults');
+      if (!resultsEl) return;
+
+      resultsEl.innerHTML = `<p class="text-muted">Loading…</p>`;
+
+      // Convert date strings to ISO timestamps
+      const from     = fromVal ? fromVal + 'T00:00:00.000Z' : undefined;
+      const to       = toVal   ? toVal   + 'T23:59:59.999Z' : undefined;
+      const pageSize = 50;
+
+      const entries = await DB.loadAuditLog({ from, to, category: catVal || undefined, limit: pageSize });
+
+      if (entries.length === 0) {
+        resultsEl.innerHTML = `<p class="text-muted">No entries found for this filter.</p>`;
+        return;
+      }
+
+      const catIcon = { booking: '📅', league: '🏆', tournament: '🏅', admin: '⚙️', user: '👤' };
+
+      resultsEl.innerHTML = `
+        <div class="audit-table-wrap">
+          <table class="audit-table">
+            <thead><tr><th>When</th><th>Who</th><th>What happened</th></tr></thead>
+            <tbody>` +
+        entries.map(e => {
+          const when = e.at
+            ? new Date(e.at).toLocaleString('en-ZA', { day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' })
+            : '—';
+          const icon = catIcon[e.category] || '📋';
+          return `<tr>
+            <td class="audit-when">${when}</td>
+            <td class="audit-who">${esc(e.by || '?')}</td>
+            <td>${icon} ${esc(e.description || e.action || '?')}</td>
+          </tr>`;
+        }).join('') +
+        `</tbody></table>
+        </div>
+        <div style="display:flex;gap:.5rem;margin-top:.5rem;align-items:center">
+          <span class="text-muted" style="font-size:.82rem">${entries.length} entr${entries.length === 1 ? 'y' : 'ies'}</span>
+          ${entries.length === pageSize
+            ? `<button class="btn btn-xs btn-secondary" id="auditLoadMoreBtn">Load more ↓</button>`
+            : ''}
+        </div>`;
+
+      document.getElementById('auditLoadMoreBtn')?.addEventListener('click', async () => {
+        const lastEntry = entries[entries.length - 1];
+        const moreEl = document.getElementById('auditResults');
+        const tbody  = moreEl?.querySelector('tbody');
+        const footer = moreEl?.querySelector('div[style]');
+        if (!tbody || !lastEntry) return;
+
+        const more = await DB.loadAuditLog({
+          from: fromVal ? fromVal + 'T00:00:00.000Z' : undefined,
+          to:   lastEntry.at,   // use last entry's timestamp as new ceiling
+          category: catVal || undefined,
+          limit: pageSize + 1,  // +1 to detect if there are more
+        });
+        // Remove the duplicate first entry (same as lastEntry)
+        const newEntries = more.filter(e => e.at !== lastEntry.at || e.id !== lastEntry.id).slice(0, pageSize);
+        newEntries.forEach(e => {
+          const when = e.at
+            ? new Date(e.at).toLocaleString('en-ZA', { day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' })
+            : '—';
+          const icon = catIcon[e.category] || '📋';
+          const row = document.createElement('tr');
+          row.innerHTML = `
+            <td class="audit-when">${when}</td>
+            <td class="audit-who">${esc(e.by || '?')}</td>
+            <td>${icon} ${esc(e.description || e.action || '?')}</td>`;
+          tbody.appendChild(row);
+        });
+        if (newEntries.length < pageSize) footer.querySelector('#auditLoadMoreBtn')?.remove();
+      });
     }
 
-    const catIcon = { booking: '📅', league: '🏆', tournament: '🏅', admin: '⚙️', user: '👤' };
-
-    el.innerHTML = `<div class="audit-table-wrap"><table class="audit-table">
-      <thead><tr><th>When</th><th>Who</th><th>What happened</th></tr></thead>
-      <tbody>` +
-      entries.map(e => {
-        const when = e.at
-          ? new Date(e.at).toLocaleString('en-ZA', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' })
-          : '—';
-        const icon = catIcon[e.category] || '📋';
-        return `<tr>
-          <td class="audit-when">${when}</td>
-          <td class="audit-who">${esc(e.by || '?')}</td>
-          <td>${icon} ${esc(e.description || e.action || '?')}</td>
-        </tr>`;
-      }).join('') +
-      `</tbody></table></div>
-      <button class="btn btn-xs btn-secondary" id="refreshAuditBtn" style="margin-top:.5rem">↺ Refresh</button>`;
-
-    document.getElementById('refreshAuditBtn').addEventListener('click', renderAuditLog);
+    document.getElementById('auditApplyBtn').addEventListener('click', () => loadResults());
+    loadResults();
   }
 
   // ════════════════════════════════════════════════════════════

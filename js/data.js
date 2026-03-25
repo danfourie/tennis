@@ -301,12 +301,14 @@ const DB = {
     }
   },
 
-  async loadAuditLog(limit = 100) {
+  async loadAuditLog({ from, to, category, limit = 50 } = {}) {
     try {
-      const snap = await _col('auditLog')
-        .orderBy('at', 'desc')
-        .limit(limit)
-        .get();
+      let q = _col('auditLog').orderBy('at', 'desc');
+      if (from)     q = q.where('at', '>=', from);
+      if (to)       q = q.where('at', '<=', to);
+      if (category) q = q.where('category', '==', category);
+      q = q.limit(limit);
+      const snap = await q.get();
       return snap.docs.map(d => d.data());
     } catch (err) {
       console.warn('Could not load audit log:', err);
