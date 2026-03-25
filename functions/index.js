@@ -41,24 +41,23 @@ const APP_URL = 'https://danfourie.github.io/tennis/';
 // ── Switch to Content Templates once all templates are approved in Twilio ─────
 // false = plain text body (works in sandbox; no template approval needed)
 // true  = use pre-approved WhatsApp Content Templates (required for production)
-const USE_CONTENT_TEMPLATES = false;
+const USE_CONTENT_TEMPLATES = true;
 
 const TEMPLATE_SIDS = {
-  // Fill in after templates are approved in Twilio Console → Content Template Builder
-  booking_approved:      'HX_FILL_AFTER_APPROVAL',
-  booking_rejected:      'HX_FILL_AFTER_APPROVAL',
-  booking_request:       'HX_FILL_AFTER_APPROVAL',
-  booking_cancelled:     'HX_FILL_AFTER_APPROVAL',
-  fixture_changed:       'HX_FILL_AFTER_APPROVAL',
-  fixture_cancelled:     'HX_FILL_AFTER_APPROVAL',
-  score_reminder:        'HX_FILL_AFTER_APPROVAL',
-  league_entry:          'HX_FILL_AFTER_APPROVAL',
-  league_created:        'HX_FILL_AFTER_APPROVAL',
-  league_start_reminder: 'HX_FILL_AFTER_APPROVAL',
-  team_message:          'HX_FILL_AFTER_APPROVAL',
-  alt_venue_request:     'HX_FILL_AFTER_APPROVAL',
-  general_message:       'HX_FILL_AFTER_APPROVAL',
-  registration_invite:   'HX_FILL_AFTER_APPROVAL',
+  booking_approved:      'HX09c66abde0d0a350af7530fcf6c4d7a4',
+  booking_rejected:      'HXbd9682c8154e1d85546bb499695b5b88',
+  booking_request:       'HXb67580e1cb61cfaa2f7531973298e0a1',
+  booking_cancelled:     'HX9c26d30fe0fa029786cec77137ba8598',
+  fixture_changed:       'HX2a5da3283699e2e5eff2f83bbc79ad42',
+  fixture_cancelled:     'HX31b1a2dad4baf9da13bae50c8003e0d6',
+  score_reminder:        'HX28f993e93991f515a128db48b303be3b',
+  league_entry:          'HXe620507d217e814026d7202c33c4b942',
+  league_created:        'HX77f6d036014c1745919d1f23aa34949e',
+  league_start_reminder: 'HXfef0214e0118f6d83669c3dcc9ff5e33',
+  team_message:          'HX7944eb0afa9887bb697795308e5eb8b2',
+  alt_venue_request:     'HX89485778c741aac0c37901ffba27b0cd',
+  general_message:       'HXf5a885f17a1be22d1b0979514d6146a6',
+  registration_invite:   'HX72bdb50126287a446f9166288b222f31',
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
