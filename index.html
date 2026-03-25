@@ -357,6 +357,38 @@
     </div>
   </div>
 
+  <!-- My Profile Modal -->
+  <div class="modal-overlay hidden" id="profileModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>👤 My Profile</h3>
+        <button class="modal-close" data-modal="profileModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>Display Name</label>
+          <input type="text" id="profileName" placeholder="Your name" autocomplete="name">
+        </div>
+        <div class="form-group">
+          <label>Phone number <span style="color:#888;font-weight:400">(optional)</span></label>
+          <input type="tel" id="profilePhone" placeholder="+27 or 08x..." autocomplete="tel">
+          <p style="font-size:.78rem;color:#888;margin:.2rem 0 0">Required to receive WhatsApp notifications</p>
+        </div>
+        <div class="form-group">
+          <label style="display:flex;align-items:flex-start;gap:.5rem;cursor:pointer;font-weight:400">
+            <input type="checkbox" id="profileWhatsApp" style="margin-top:.15rem;flex-shrink:0">
+            <span style="font-size:.85rem;line-height:1.4">Receive Court Campus notifications via WhatsApp on this number <span style="color:#888">(POPIA consent)</span></span>
+          </label>
+        </div>
+        <p id="profileError" class="form-error"></p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-modal="profileModal">Cancel</button>
+        <button class="btn btn-primary" id="profileSaveBtn">Save</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Booking Modal -->
   <div class="modal-overlay hidden" id="bookingModal">
     <div class="modal modal-lg">
@@ -997,15 +1029,15 @@
 
   <!-- App Scripts -->
   <script src="js/firebase-config.js"></script>
-  <script src="js/data.js?v=20260420"></script>
-  <script src="js/auth.js?v=20260420"></script>
-  <script src="js/notifications.js?v=20260420"></script>
-  <script src="js/calendar.js?v=20260420"></script>
-  <script src="js/leagues.js?v=20260420"></script>
-  <script src="js/tournaments.js?v=20260420"></script>
-  <script src="js/admin.js?v=20260420"></script>
-  <script src="js/myschool.js?v=20260420"></script>
-  <script src="js/myvenue.js?v=20260420"></script>
-  <script src="js/app.js?v=20260420"></script>
+  <script src="js/data.js?v=20260425"></script>
+  <script src="js/auth.js?v=20260425"></script>
+  <script src="js/notifications.js?v=20260425"></script>
+  <script src="js/calendar.js?v=20260425"></script>
+  <script src="js/leagues.js?v=20260425"></script>
+  <script src="js/tournaments.js?v=20260425"></script>
+  <script src="js/admin.js?v=20260425"></script>
+  <script src="js/myschool.js?v=20260425"></script>
+  <script src="js/myvenue.js?v=20260425"></script>
+  <script src="js/app.js?v=20260425"></script>
 </body>
 </html>

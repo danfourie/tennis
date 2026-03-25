@@ -245,6 +245,9 @@ const Auth = (() => {
           : (_user ? _user.email : '');
         const icon = _role === 'master' ? '🔑' : _role === 'admin' ? '🛡️' : '👤';
         badge.textContent = `${icon} ${name}`;
+        badge.style.cursor = 'pointer';
+        badge.title = 'Edit profile';
+        badge.onclick = () => openProfileModal();
       }
     }
 
@@ -272,6 +275,55 @@ const Auth = (() => {
     }, 0);
   }
 
+  // ── Profile modal ─────────────────────────────────────────
+  function openProfileModal() {
+    if (!_profile) return;
+    const nameEl    = document.getElementById('profileName');
+    const phoneEl   = document.getElementById('profilePhone');
+    const optInEl   = document.getElementById('profileWhatsApp');
+    const errEl     = document.getElementById('profileError');
+    if (!nameEl) return;
+    nameEl.value   = _profile.displayName || '';
+    phoneEl.value  = _profile.phone        || '';
+    optInEl.checked = !!_profile.whatsappOptIn;
+    if (errEl) errEl.textContent = '';
+    Modal.open('profileModal');
+
+    const saveBtn = document.getElementById('profileSaveBtn');
+    if (saveBtn) {
+      // Replace to avoid duplicate listeners
+      const fresh = saveBtn.cloneNode(true);
+      saveBtn.parentNode.replaceChild(fresh, saveBtn);
+      fresh.addEventListener('click', async () => {
+        const name  = nameEl.value.trim();
+        const raw   = phoneEl.value.trim();
+        const optIn = optInEl.checked;
+        if (!name) { if (errEl) errEl.textContent = 'Name is required'; return; }
+        if (optIn && !raw) { if (errEl) errEl.textContent = 'Enter a phone number to enable WhatsApp'; return; }
+
+        // Normalise to E.164
+        const phone = raw
+          ? (raw.startsWith('+') ? raw : raw.startsWith('0') ? '+27' + raw.slice(1) : '+27' + raw)
+          : null;
+
+        fresh.disabled = true; fresh.textContent = 'Saving…';
+        try {
+          await _user.updateProfile({ displayName: name });
+          const updated = { ..._profile, displayName: name, phone: phone || null, whatsappOptIn: !!(phone && optIn) };
+          DB.updateUser(updated);
+          _profile = updated;
+          _updateUI();
+          Modal.close('profileModal');
+          if (typeof toast === 'function') toast('Profile saved ✓', 'success');
+        } catch (err) {
+          if (errEl) errEl.textContent = err.message;
+        } finally {
+          fresh.disabled = false; fresh.textContent = 'Save';
+        }
+      });
+    }
+  }
+
   // ── Auth error messages ────────────────────────────────────
   function _authMsg(err) {
     switch (err.code) {
@@ -289,6 +341,6 @@ const Auth = (() => {
   return {
     init, login, register, logout,
     isAdmin, isMaster, isLoggedIn, currentRole,
-    getUser, getProfile, changePassword,
+    getUser, getProfile, changePassword, openProfileModal,
   };
 })();
