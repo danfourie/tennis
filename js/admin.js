@@ -523,18 +523,30 @@ const Admin = (() => {
     const panel = document.getElementById('globalSettingsPanel');
     if (!panel) return;
     const settings = DB.getSettings();
-    const enabled = settings.tournamentPageEnabled === true; // default OFF
+    const tourEnabled = settings.tournamentPageEnabled === true; // default OFF
+    const waEnabled   = settings.whatsappEnabled !== false;      // default ON
     panel.innerHTML = `
       <div class="feature-toggle-row">
         <label class="toggle-switch" title="Toggle Tournament page visibility for all users">
-          <input type="checkbox" id="tournamentPageToggle" ${enabled ? 'checked' : ''}>
+          <input type="checkbox" id="tournamentPageToggle" ${tourEnabled ? 'checked' : ''}>
           <span class="toggle-slider"></span>
         </label>
         <span>Tournament Page Enabled
-          <span class="badge ${enabled ? 'badge-green' : 'badge-red'}" style="margin-left:.3rem">${enabled ? 'On' : 'Off'}</span>
+          <span class="badge ${tourEnabled ? 'badge-green' : 'badge-red'}" style="margin-left:.3rem">${tourEnabled ? 'On' : 'Off'}</span>
         </span>
       </div>
-      <p class="text-muted" style="font-size:.85rem;margin-top:.1rem">When disabled, the Tournaments tab is hidden for all users in real time.</p>`;
+      <p class="text-muted" style="font-size:.85rem;margin-top:.1rem">When disabled, the Tournaments tab is hidden for all users in real time.</p>
+
+      <div class="feature-toggle-row" style="margin-top:1rem">
+        <label class="toggle-switch" title="Toggle WhatsApp notifications for all users">
+          <input type="checkbox" id="whatsappToggle" ${waEnabled ? 'checked' : ''}>
+          <span class="toggle-slider"></span>
+        </label>
+        <span>WhatsApp Notifications Enabled
+          <span class="badge ${waEnabled ? 'badge-green' : 'badge-red'}" style="margin-left:.3rem">${waEnabled ? 'On' : 'Off'}</span>
+        </span>
+      </div>
+      <p class="text-muted" style="font-size:.85rem;margin-top:.1rem">When disabled, no WhatsApp messages are sent via Twilio regardless of user opt-in.</p>`;
 
     document.getElementById('tournamentPageToggle')?.addEventListener('change', e => {
       const newEnabled = e.target.checked;
@@ -545,6 +557,18 @@ const Admin = (() => {
         'settings/global', 'Tournament Page'
       );
       toast(`Tournament page ${newEnabled ? 'enabled ✓' : 'disabled ✓'}`, 'success');
+      renderGlobalSettings();
+    });
+
+    document.getElementById('whatsappToggle')?.addEventListener('change', e => {
+      const newEnabled = e.target.checked;
+      DB.saveSettings({ ...DB.getSettings(), whatsappEnabled: newEnabled });
+      DB.writeAudit(
+        'setting_changed', 'admin',
+        `WhatsApp notifications ${newEnabled ? 'enabled' : 'disabled'}`,
+        'settings/global', 'WhatsApp'
+      );
+      toast(`WhatsApp ${newEnabled ? 'enabled ✓' : 'disabled ✓'}`, 'success');
       renderGlobalSettings();
     });
   }

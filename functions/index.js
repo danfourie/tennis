@@ -171,6 +171,14 @@ exports.onNewNotification = onDocumentCreated(
     // Skip if no recipient uid
     if (!notif.uid) return null;
 
+    // Check global WhatsApp toggle (default ON when field is absent)
+    const settingsDoc = await admin.firestore().doc('settings/global').get();
+    const settings = settingsDoc.exists ? settingsDoc.data() : {};
+    if (settings.whatsappEnabled === false) {
+      console.log('[WhatsApp] Disabled by global setting — skipping');
+      return null;
+    }
+
     // Look up recipient's phone + opt-in status
     const userDoc = await admin.firestore().doc(`users/${notif.uid}`).get();
     const user = userDoc.exists ? userDoc.data() : null;
