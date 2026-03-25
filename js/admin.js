@@ -603,6 +603,7 @@ const Admin = (() => {
             <option value="admin">⚙️ Admin</option>
             <option value="league">🏆 Leagues</option>
             <option value="tournament">🏅 Tournaments</option>
+            <option value="notification">🔔 Notifications</option>
           </select>
         </div>
         <button class="btn btn-sm btn-primary" id="auditApplyBtn">Apply</button>
@@ -630,7 +631,7 @@ const Admin = (() => {
         return;
       }
 
-      const catIcon = { booking: '📅', league: '🏆', tournament: '🏅', admin: '⚙️', user: '👤' };
+      const catIcon = { booking: '📅', league: '🏆', tournament: '🏅', admin: '⚙️', user: '👤', notification: '🔔', fixture: '📋' };
 
       resultsEl.innerHTML = `
         <div class="audit-table-wrap">

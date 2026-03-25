@@ -520,13 +520,21 @@ const NotificationService = (() => {
     if (!title || !body) { toast('Title and message are required', 'error'); return; }
     const payload = { type: 'general_message', title, body };
 
+    let groupLabel = 'All users';
     if (groupType === 'all') {
       await sendToAll(payload);
     } else if (groupType === 'school') {
+      const school = DB.getSchools().find(s => s.id === groupId);
+      groupLabel = school ? `School: ${school.name}` : 'School';
       await sendToSchool(groupId, payload);
     } else if (groupType === 'league') {
+      const league = DB.getLeagues().find(l => l.id === groupId);
+      groupLabel = league ? `League: ${league.name}` : 'League';
       await sendToLeagueParticipants(groupId, payload);
     }
+
+    DB.writeAudit('notification_sent', 'notification',
+      `General notification sent to ${groupLabel}: "${title}"`);
 
     toast('Notification sent ✓', 'success');
     const titleEl = document.getElementById('notifTitle');
@@ -616,6 +624,16 @@ const NotificationService = (() => {
     }
 
     newNotifs.forEach(n => DB.writeNotification(n));
+
+    if (newNotifs.length > 0) {
+      const scoreCount  = newNotifs.filter(n => n.type === 'score_reminder').length;
+      const leagueCount = newNotifs.filter(n => n.type === 'league_start_reminder').length;
+      const parts = [];
+      if (scoreCount)  parts.push(`${scoreCount} score reminder${scoreCount > 1 ? 's' : ''}`);
+      if (leagueCount) parts.push(`${leagueCount} league start reminder${leagueCount > 1 ? 's' : ''}`);
+      DB.writeAudit('reminders_sent', 'notification',
+        `Auto-reminders sent: ${parts.join(', ')}`);
+    }
   }
 
   // ── Admin composer dropdown population ───────────────────────
