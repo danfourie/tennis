@@ -405,9 +405,11 @@ exports.whatsappWebhook = onRequest(async (req, res) => {
 
       console.log(`[WhatsApp] Score saved ${homeTeam} ${homeScore}-${awayScore} ${awayTeam} by ${fromPhone}`);
       return twiml(
-        `✅ Score recorded${prev}!\n` +
-        `${homeTeam} ${homeScore} – ${awayScore} ${awayTeam}\n\n` +
-        `View in app: ${APP_URL}`
+        `✅ Score received and saved!\n\n` +
+        `${homeTeam}  ${homeScore}  –  ${awayScore}  ${awayTeam}` +
+        `${prev}\n\n` +
+        `Need to correct it? Log in to the app and update the score there:\n` +
+        `🔗 ${APP_URL}`
       );
     } catch (err) {
       console.error('[WhatsApp] Score update failed:', err.message);
