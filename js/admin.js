@@ -912,6 +912,16 @@ function _orgRow(o) {
       el.innerHTML = `<p class="text-muted">No schools yet.</p>`;
       return;
     }
+
+    // Build a quick-lookup set of registered phone suffixes + emails
+    const regUsers = DB.getUsers();
+    const _digits9 = p => (p || '').replace(/\D/g, '').slice(-9);
+    const regPhones = new Set(regUsers.map(u => _digits9(u.phone)).filter(Boolean));
+    const regEmails = new Set(regUsers.map(u => (u.email || '').toLowerCase()).filter(Boolean));
+    const _isRegistered = o =>
+      (o.phone && regPhones.has(_digits9(o.phone))) ||
+      (o.email && regEmails.has(o.email.toLowerCase()));
+
     el.innerHTML = `<div class="admin-list">` +
       schools.map(s => {
         const venue   = DB.getVenues().find(v => v.id === s.venueId);
@@ -944,7 +954,9 @@ function _orgRow(o) {
                 ? s.organizers.map(o => `
                   <div class="text-muted" style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap">
                     <span>👤 ${esc(o.name)}${o.email ? ' · ' + esc(o.email) : ''}${o.phone ? ' · ' + esc(o.phone) : ''}</span>
-                    ${o.phone ? `<button class="btn btn-xs btn-success wa-invite-btn" data-phone="${esc(o.phone)}" data-name="${esc(o.name)}" data-school="${esc(s.name)}" title="Send WhatsApp invitation">📲 Invite</button>` : ''}
+                    ${_isRegistered(o)
+                      ? `<span class="badge badge-green" style="font-size:.72rem">✅ Registered</span>`
+                      : o.phone ? `<button class="btn btn-xs btn-success wa-invite-btn" data-phone="${esc(o.phone)}" data-name="${esc(o.name)}" data-school="${esc(s.name)}" title="Send WhatsApp invitation">📲 Invite</button>` : ''}
                   </div>`).join('')
                 : s.contact ? `<div class="text-muted">👤 ${esc(s.contact)}${s.email ? ' · ' + esc(s.email) : ''}${s.phone ? ' · ' + esc(s.phone) : ''}</div>` : '')}
             <div class="school-teams" style="margin-top:.35rem">${teamsBadges}</div>
