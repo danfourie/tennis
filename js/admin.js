@@ -381,9 +381,9 @@ const Admin = (() => {
       };
     });
 
-    // Wire search (re-bind each render to pick up new list)
+    // Reset search field on every render so all users show by default
     const searchInp = document.getElementById('usersSearch');
-    if (searchInp) searchInp.oninput = _applyUserFilters;
+    if (searchInp) { searchInp.value = ''; searchInp.oninput = _applyUserFilters; }
 
     if (users.length === 0) {
       el.innerHTML = `<p class="text-muted">No registered users yet.</p>`;
