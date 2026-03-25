@@ -36,7 +36,7 @@ const TWILIO_TOKEN = defineSecret('TWILIO_AUTH_TOKEN');
 const TWILIO_FROM  = defineSecret('TWILIO_WHATSAPP_FROM');
 
 // ── App config ────────────────────────────────────────────────────────────────
-const APP_URL = 'https://tennissa-planner.web.app';
+const APP_URL = 'https://danfourie.github.io/tennis/';
 
 // ── Switch to Content Templates once all templates are approved in Twilio ─────
 // false = plain text body (works in sandbox; no template approval needed)
