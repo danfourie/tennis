@@ -44,20 +44,20 @@ const APP_URL = 'https://danfourie.github.io/tennis/';
 const USE_CONTENT_TEMPLATES = true;
 
 const TEMPLATE_SIDS = {
-  booking_approved:      'HX09c66abde0d0a350af7530fcf6c4d7a4',
-  booking_rejected:      'HXbd9682c8154e1d85546bb499695b5b88',
-  booking_request:       'HXb67580e1cb61cfaa2f7531973298e0a1',
-  booking_cancelled:     'HX9c26d30fe0fa029786cec77137ba8598',
-  fixture_changed:       'HX2a5da3283699e2e5eff2f83bbc79ad42',
-  fixture_cancelled:     'HX31b1a2dad4baf9da13bae50c8003e0d6',
-  score_reminder:        'HX28f993e93991f515a128db48b303be3b',
-  league_entry:          'HXe620507d217e814026d7202c33c4b942',
-  league_created:        'HX77f6d036014c1745919d1f23aa34949e',
-  league_start_reminder: 'HXfef0214e0118f6d83669c3dcc9ff5e33',
-  team_message:          'HX7944eb0afa9887bb697795308e5eb8b2',
-  alt_venue_request:     'HX89485778c741aac0c37901ffba27b0cd',
-  general_message:       'HXf5a885f17a1be22d1b0979514d6146a6',
-  registration_invite:   'HX72bdb50126287a446f9166288b222f31',
+  booking_approved:      'HX65da71df7bb3fef8cd4a4f5a202b073d',
+  booking_rejected:      'HX58ac2511bddfce8a36f3b88b6e81e4c4',
+  booking_request:       'HX2bc04b98a1a807bda78a2802b15d6693',
+  booking_cancelled:     'HXf3bd68e6881f5571c5b0746a7942e8a5',
+  fixture_changed:       'HX818e3f85026abcbc6af52b065892db77',
+  fixture_cancelled:     'HXf32f42bd1ff463728ee33d42e5d6c840',
+  score_reminder:        'HXd5f98f4f9598662c7ea49af586c659c3',
+  league_entry:          'HX019864a2c73466e09faa8548c5d4b463',
+  league_created:        'HXb2de2dca9efcda28f5180ad919ef5b60',
+  league_start_reminder: 'HX2bfe8b0e69e5c5b72eb4c44ed9cbfd8d',
+  team_message:          'HX2aa83e582ade77f97b8f5da1ac95dfe9',
+  alt_venue_request:     'HXe4c4095613cd1e33ded4679422932978',
+  general_message:       'HXa55b3a10e2ce041939a1e4cd692729dc',
+  registration_invite:   'HX65895557d6d16a19dc62e9ec9d7a702b',
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -109,59 +109,50 @@ function _buildTemplate(notif) {
   // submitted in Twilio Console → Content Template Builder)
   const vars = {};
   switch (notif.type) {
+    // URL is hardcoded in each template body (Meta rejects variables at start/end)
     case 'booking_approved':
     case 'booking_cancelled':
       vars['1'] = notif.venueName  || '';
       vars['2'] = notif.date       || '';
-      vars['3'] = APP_URL;
       break;
     case 'booking_rejected':
       vars['1'] = notif.venueName  || '';
-      vars['2'] = APP_URL;
       break;
     case 'booking_request':
       vars['1'] = notif.fromName   || '';
       vars['2'] = notif.venueName  || '';
       vars['3'] = notif.date       || '';
-      vars['4'] = APP_URL;
       break;
     case 'fixture_changed':
     case 'fixture_cancelled':
       vars['1'] = notif.opponent   || '';
       vars['2'] = notif.date       || '';
-      vars['3'] = APP_URL;
       break;
     case 'score_reminder':
       vars['1'] = notif.opponent   || '';
-      vars['2'] = APP_URL;
       break;
     case 'league_entry':
       vars['1'] = notif.leagueName || '';
       vars['2'] = notif.status     || '';
-      vars['3'] = APP_URL;
       break;
     case 'team_message':
       vars['1'] = notif.fromName   || '';
       vars['2'] = notif.date       || '';
       vars['3'] = notif.body       || '';
-      vars['4'] = APP_URL;
       break;
     case 'alt_venue_request':
       vars['1'] = notif.fromName   || '';
       vars['2'] = notif.date       || '';
-      vars['3'] = APP_URL;
       break;
     case 'general_message':
     case 'league_created':
     case 'league_start_reminder':
       vars['1'] = notif.title      || '';
       vars['2'] = notif.body       || '';
-      vars['3'] = APP_URL;
       break;
     case 'registration_invite':
       vars['1'] = notif.fromName   || '';
-      vars['2'] = notif.venueName  || '';  // re-used for schoolName in invite context
-      vars['3'] = APP_URL;
+      vars['2'] = notif.venueName  || '';  // schoolName in invite context
       break;
     default:
       return null;
