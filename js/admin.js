@@ -904,7 +904,7 @@ function _orgRow(o) {
     }
   }
 
-  function renderSchools() {
+  async function renderSchools() {
     _autoLinkSchoolVenues();
     const el = document.getElementById('schoolsList');
     const schools = DB.getSchools(); // already sorted alphabetically by getter
@@ -912,6 +912,9 @@ function _orgRow(o) {
       el.innerHTML = `<p class="text-muted">No schools yet.</p>`;
       return;
     }
+
+    // Ensure users are loaded (may not be if Schools tab opened before Users tab)
+    if (DB.getUsers().length === 0) await DB.loadUsers();
 
     // Build a quick-lookup set of registered phone suffixes + emails
     const regUsers = DB.getUsers();
