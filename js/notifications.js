@@ -575,16 +575,20 @@ const NotificationService = (() => {
         if (alreadyForFixture(f.id)) continue;
 
         newNotifs.push({
-          id:        uid(),
-          uid:       myUid,
-          type:      'score_reminder',
-          title:     'Score not submitted',
-          body:      `${f.homeSchoolName || 'Home'} vs ${f.awaySchoolName || 'Away'} on ${formatDate(f.date)} still has no score recorded.`,
-          read:      false,
-          leagueId:  league.id,
-          fixtureId: f.id,
-          createdAt: now,
-          createdBy: null,
+          id:           uid(),
+          uid:          myUid,
+          type:         'score_reminder',
+          title:        'Score not submitted',
+          body:         `${f.homeSchoolName || 'Home'} vs ${f.awaySchoolName || 'Away'} on ${formatDate(f.date)} still has no score recorded.`,
+          read:         false,
+          leagueId:     league.id,
+          fixtureId:    f.id,
+          homeTeam:     f.homeSchoolName  || 'Home',
+          awayTeam:     f.awaySchoolName  || 'Away',
+          homeSchoolId: f.homeSchoolId    || null,
+          awaySchoolId: f.awaySchoolId    || null,
+          createdAt:    now,
+          createdBy:    null,
         });
       }
     }

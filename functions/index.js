@@ -50,7 +50,7 @@ const TEMPLATE_SIDS = {
   booking_cancelled:     'HXf3bd68e6881f5571c5b0746a7942e8a5',
   fixture_changed:       'HX818e3f85026abcbc6af52b065892db77',
   fixture_cancelled:     'HXf32f42bd1ff463728ee33d42e5d6c840',
-  score_reminder:        'HXd5f98f4f9598662c7ea49af586c659c3',
+  score_reminder:        'HX38266847239b534291b247984b00f68a',
   league_entry:          'HX019864a2c73466e09faa8548c5d4b463',
   league_created:        'HXb2de2dca9efcda28f5180ad919ef5b60',
   league_start_reminder: 'HX2bfe8b0e69e5c5b72eb4c44ed9cbfd8d',
@@ -129,7 +129,8 @@ function _buildTemplate(notif) {
       vars['2'] = notif.date       || '';
       break;
     case 'score_reminder':
-      vars['1'] = notif.opponent   || '';
+      vars['1'] = notif.homeTeam || notif.opponent || '';
+      vars['2'] = notif.awayTeam || '';
       break;
     case 'league_entry':
       vars['1'] = notif.leagueName || '';
@@ -220,6 +221,23 @@ exports.onNewNotification = onDocumentCreated(
 
       const msg = await client.messages.create(msgParams);
       console.log(`[WhatsApp] Sent ${notif.type} to ${phone} — SID: ${msg.sid} status: ${msg.status} errorCode: ${msg.errorCode || 'none'} errorMessage: ${msg.errorMessage || 'none'}`);
+
+      // For score reminders: store a pending-score record so a WhatsApp reply
+      // of the form "HOME-AWAY" (e.g. "6-3") can update the fixture directly.
+      if (notif.type === 'score_reminder' && notif.fixtureId && notif.leagueId) {
+        const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000); // 48 h
+        await admin.firestore().doc(`whatsappPendingScores/${phone}`).set({
+          fixtureId:    notif.fixtureId,
+          leagueId:     notif.leagueId,
+          homeTeam:     notif.homeTeam     || '',
+          awayTeam:     notif.awayTeam     || '',
+          homeSchoolId: notif.homeSchoolId || null,
+          awaySchoolId: notif.awaySchoolId || null,
+          sentAt:       admin.firestore.FieldValue.serverTimestamp(),
+          expiresAt,
+        });
+        console.log(`[WhatsApp] Pending score stored for ${phone} fixture ${notif.fixtureId}`);
+      }
     } catch (err) {
       console.error(`[WhatsApp] Send failed for ${phone}:`, err.message);
     }
@@ -270,50 +288,139 @@ exports.sendWhatsAppInvite = onCall(
 // ── 3. Inbound: Twilio webhook — user replied on WhatsApp ─────────────────────
 // Register the deployed URL of this function in:
 //   Twilio Console → Messaging → WhatsApp → Sender → "A message comes in" → Webhook
-//   URL: https://us-central1-tennissa-planner.cloudfunctions.net/whatsappWebhook
+//   URL: https://whatsappwebhook-y4qyzqnkpq-uc.a.run.app
 exports.whatsappWebhook = onRequest(async (req, res) => {
-  // Twilio sends URL-encoded POST body
   const fromRaw = req.body && req.body.From ? String(req.body.From) : null;
-  const body    = req.body && req.body.Body  ? String(req.body.Body).trim() : null;
+  const rawBody = req.body && req.body.Body  ? String(req.body.Body).trim() : null;
 
-  // Twilio expects a 200 response quickly; always respond 200
-  if (!fromRaw || !body) return res.sendStatus(200);
+  if (!fromRaw || !rawBody) return res.sendStatus(200);
 
-  // Strip the "whatsapp:" prefix Twilio prepends
   const fromPhone = fromRaw.replace(/^whatsapp:/i, '');
+  const e164      = _toE164(fromPhone) || fromPhone;
+  const db        = admin.firestore();
 
-  // Find the registered user with this phone
-  const snap = await admin.firestore()
-    .collection('users')
-    .where('phone', '==', fromPhone)
-    .limit(1)
-    .get();
+  // Helper: reply via TwiML (Twilio renders this as a WhatsApp message back)
+  const twiml = (msg) => {
+    res.set('Content-Type', 'text/xml');
+    return res.send(
+      `<?xml version="1.0" encoding="UTF-8"?><Response><Message>${
+        msg.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+      }</Message></Response>`
+    );
+  };
 
-  if (snap.empty) {
-    // Try E.164 normalisation in case the stored number has a different format
-    const e164 = _toE164(fromPhone);
-    const snap2 = e164 && e164 !== fromPhone
-      ? await admin.firestore().collection('users').where('phone', '==', e164).limit(1).get()
-      : { empty: true };
+  // ── Resolve user ────────────────────────────────────────────────────────
+  let userDoc = null;
+  for (const ph of [fromPhone, e164]) {
+    if (!ph) continue;
+    const snap = await db.collection('users').where('phone', '==', ph).limit(1).get();
+    if (!snap.empty) { userDoc = snap.docs[0]; break; }
+  }
+  if (!userDoc) {
+    console.log(`[WhatsApp] Reply from unrecognised phone: ${fromPhone}`);
+    return res.sendStatus(200);
+  }
+  const user = userDoc.data();
 
-    if (snap2.empty) {
-      console.log(`[WhatsApp] Reply from unrecognised phone: ${fromPhone}`);
-      return res.sendStatus(200);
+  // ── Score reply detection ───────────────────────────────────────────────
+  // Accept only strict HOME-AWAY format: one to three digits, a hyphen, one to
+  // three digits — no spaces, no other separators.
+  const noSpace = rawBody.replace(/\s/g, '');
+  const scoreMatch = noSpace.match(/^(\d{1,3})-(\d{1,3})$/);
+
+  // Detect common near-miss formats and give specific guidance
+  const nearMiss = !scoreMatch && (
+    /^\d+\s*[-:,/]\s*\d+$/.test(rawBody) ||  // spaces / wrong separator
+    /^\d{1,3}\s+\d{1,3}$/.test(rawBody)       // "6 3"
+  );
+  if (nearMiss) {
+    return twiml(
+      '⚠️ Score format not recognised.\n' +
+      'Please reply using HOME-AWAY (digits only, hyphen separator).\n' +
+      'Example: 6-3 or 42-12'
+    );
+  }
+
+  if (scoreMatch) {
+    const homeScore = parseInt(scoreMatch[1], 10);
+    const awayScore = parseInt(scoreMatch[2], 10);
+
+    if (homeScore > 999 || awayScore > 999) {
+      return twiml('❌ Score values too large. Please enter realistic scores (e.g. 6-3 or 42-12).');
+    }
+
+    // Look up pending score request keyed on E.164 phone
+    const pendingRef = db.doc(`whatsappPendingScores/${e164}`);
+    const pending    = await pendingRef.get();
+
+    if (!pending.exists) {
+      return twiml(
+        '❓ No score request is pending for your number.\n' +
+        `Please enter the score in the app: ${APP_URL}`
+      );
+    }
+
+    const { fixtureId, leagueId, homeTeam, awayTeam, expiresAt } = pending.data();
+
+    if (expiresAt && new Date() > new Date(expiresAt.toMillis ? expiresAt.toMillis() : expiresAt)) {
+      await pendingRef.delete();
+      return twiml(
+        '⏰ Score request has expired (48 h window).\n' +
+        `Please enter the score in the app: ${APP_URL}`
+      );
+    }
+
+    try {
+      const leagueRef = db.doc(`leagues/${leagueId}`);
+      const leagueDoc = await leagueRef.get();
+      if (!leagueDoc.exists) throw new Error('League not found');
+
+      const fixtures = leagueDoc.data().fixtures || [];
+      const idx = fixtures.findIndex(f => f.id === fixtureId);
+      if (idx === -1) throw new Error('Fixture not found');
+
+      // If a score already exists, confirm the overwrite in the reply
+      const prev = fixtures[idx].homeScore != null
+        ? ` (overwrites previous ${fixtures[idx].homeScore}-${fixtures[idx].awayScore})`
+        : '';
+
+      fixtures[idx].homeScore = homeScore;
+      fixtures[idx].awayScore = awayScore;
+      await leagueRef.update({ fixtures });
+
+      // Clean up pending entry
+      await pendingRef.delete();
+
+      // Audit log
+      await db.collection('auditLog').add({
+        action:   'score_submitted',
+        category: 'fixture',
+        details:  `WhatsApp score: ${homeTeam} ${homeScore} - ${awayScore} ${awayTeam}${prev}`,
+        itemId:   fixtureId,
+        itemName: `${homeTeam} vs ${awayTeam}`,
+        at:       new Date().toISOString(),
+        by:       user.uid,
+        byName:   user.displayName || fromPhone,
+      });
+
+      console.log(`[WhatsApp] Score saved ${homeTeam} ${homeScore}-${awayScore} ${awayTeam} by ${fromPhone}`);
+      return twiml(
+        `✅ Score recorded${prev}!\n` +
+        `${homeTeam} ${homeScore} – ${awayScore} ${awayTeam}\n\n` +
+        `View in app: ${APP_URL}`
+      );
+    } catch (err) {
+      console.error('[WhatsApp] Score update failed:', err.message);
+      return twiml(`❌ Could not save the score. Please enter it in the app: ${APP_URL}`);
     }
   }
 
-  const userDoc = snap.empty
-    ? (await admin.firestore().collection('users').where('phone', '==', _toE164(fromPhone)).limit(1).get()).docs[0]
-    : snap.docs[0];
-
-  const user = userDoc.data();
-
-  // Store as an in-app notification so it appears in the notification bell
-  await admin.firestore().collection('notifications').add({
+  // ── Generic reply → store as in-app notification ────────────────────────
+  await db.collection('notifications').add({
     uid:       user.uid,
     type:      'whatsapp_reply',
     title:     '📱 WhatsApp message',
-    body,
+    body:      rawBody,
     read:      false,
     leagueId:  null,
     fixtureId: null,
