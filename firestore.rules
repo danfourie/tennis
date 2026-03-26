@@ -43,7 +43,7 @@ service cloud.firestore {
     // ── Venues ───────────────────────────────────────────────────────────────
     match /venues/{docId} {
       allow read: if true;
-      allow write: if isMaster();
+      allow write: if isAdminRole();
       // School contacts may update their own school's home venue (courts, name, etc.)
       allow update: if isSignedIn() && getUserSchoolId() != null
         && get(/databases/$(database)/documents/schools/$(getUserSchoolId())).data.venueId == docId;
@@ -52,7 +52,7 @@ service cloud.firestore {
     // ── Schools ──────────────────────────────────────────────────────────────
     match /schools/{docId} {
       allow read: if true;
-      allow write: if isMaster();
+      allow write: if isAdminRole();
       // School contacts may update their own school record (organisers, contact details)
       allow update: if isSignedIn() && getUserSchoolId() == docId;
     }

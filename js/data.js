@@ -52,8 +52,11 @@ const DB = {
   addVenue(venue) {
     venue.id = venue.id || uid();
     _cache.venues.push(venue);
-    _doc('venues', venue.id).set(venue).catch(console.error);
-    return venue;
+    // Return the promise so callers can await and catch errors
+    return _doc('venues', venue.id).set(venue).catch(err => {
+      _cache.venues = _cache.venues.filter(v => v.id !== venue.id); // rollback
+      throw err;
+    });
   },
   updateVenue(venue) {
     _cache.venues = _cache.venues.map(v => v.id === venue.id ? venue : v);
@@ -72,8 +75,11 @@ const DB = {
   addSchool(school) {
     school.id = school.id || uid();
     _cache.schools.push(school);
-    _doc('schools', school.id).set(school).catch(console.error);
-    return school;
+    // Return the promise so callers can await and catch errors
+    return _doc('schools', school.id).set(school).catch(err => {
+      _cache.schools = _cache.schools.filter(s => s.id !== school.id); // rollback
+      throw err;
+    });
   },
   updateSchool(school) {
     _cache.schools = _cache.schools.map(s => s.id === school.id ? school : s);

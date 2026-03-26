@@ -886,10 +886,17 @@ const Admin = (() => {
         render(); Calendar.refresh();
       }
     } else {
-      DB.addVenue(venue);
-      DB.writeAudit('venue_added', 'admin', `Venue added: ${name}`, venue.id, name);
-      toast('Venue added', 'success');
       render(); Calendar.refresh(); Leagues.refresh(); Tournaments.refresh();
+      try {
+        await DB.addVenue(venue);
+        DB.writeAudit('venue_added', 'admin', `Venue added: ${name}`, venue.id, name);
+        toast('Venue added', 'success');
+        render();
+      } catch (e) {
+        console.error('Venue add failed:', e);
+        toast('Save failed — ' + (e.message || 'permission denied'), 'error');
+        render(); Calendar.refresh();
+      }
     }
   }
 
@@ -1163,10 +1170,17 @@ function _orgRow(o) {
         render(); Leagues.refresh();
       }
     } else {
-      DB.addSchool(school);
-      DB.writeAudit('school_added', 'admin', `School added: ${name}`, school.id, name);
-      toast('School added', 'success');
       render(); Leagues.refresh();
+      try {
+        await DB.addSchool(school);
+        DB.writeAudit('school_added', 'admin', `School added: ${name}`, school.id, name);
+        toast('School added', 'success');
+        render(); Leagues.refresh();
+      } catch (e) {
+        console.error('School add failed:', e);
+        toast('Save failed — ' + (e.message || 'permission denied'), 'error');
+        render(); Leagues.refresh();
+      }
     }
   }
 
