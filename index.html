@@ -298,11 +298,15 @@
           <input type="password" id="loginPassword" placeholder="Enter password" autocomplete="current-password">
         </div>
         <p id="loginError" class="form-error"></p>
+        <p id="loginInfo" class="form-hint" style="display:none"></p>
         <p class="form-hint">Visitor mode: just close this dialog to browse as a viewer.</p>
       </div>
-      <div class="modal-footer">
-        <button class="btn btn-secondary" data-modal="loginModal">Cancel</button>
-        <button class="btn btn-primary" id="loginSubmitBtn">Login</button>
+      <div class="modal-footer" style="justify-content:space-between;align-items:center;">
+        <button class="btn-link" id="forgotPasswordBtn" type="button">Forgot password?</button>
+        <div style="display:flex;gap:.5rem;">
+          <button class="btn btn-secondary" data-modal="loginModal">Cancel</button>
+          <button class="btn btn-primary" id="loginSubmitBtn">Login</button>
+        </div>
       </div>
     </div>
   </div>

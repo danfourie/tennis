@@ -195,6 +195,38 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   });
 
+  document.getElementById('forgotPasswordBtn').addEventListener('click', async () => {
+    const email  = document.getElementById('loginEmail').value.trim();
+    const errEl  = document.getElementById('loginError');
+    const infoEl = document.getElementById('loginInfo');
+
+    errEl.textContent = '';
+    infoEl.style.display = 'none';
+
+    if (!email) {
+      errEl.textContent = 'Enter your email address above first';
+      document.getElementById('loginEmail').focus();
+      return;
+    }
+
+    const btn = document.getElementById('forgotPasswordBtn');
+    btn.disabled = true;
+    btn.textContent = 'Sending…';
+
+    const result = await Auth.resetPassword(email);
+
+    btn.disabled = false;
+    btn.textContent = 'Forgot password?';
+
+    if (result.ok) {
+      infoEl.textContent = `✅ Reset email sent to ${email} — check your inbox.`;
+      infoEl.style.display = 'block';
+      document.getElementById('loginPassword').value = '';
+    } else {
+      errEl.textContent = result.error || 'Could not send reset email';
+    }
+  });
+
   async function doLogin() {
     const email    = document.getElementById('loginEmail').value.trim();
     const password = document.getElementById('loginPassword').value;

@@ -338,9 +338,19 @@ const Auth = (() => {
     }
   }
 
+  // ── Password reset ─────────────────────────────────────────
+  async function resetPassword(email) {
+    try {
+      await firebase.auth().sendPasswordResetEmail(email);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: _authMsg(err) };
+    }
+  }
+
   return {
     init, login, register, logout,
     isAdmin, isMaster, isLoggedIn, currentRole,
-    getUser, getProfile, changePassword, openProfileModal,
+    getUser, getProfile, changePassword, openProfileModal, resetPassword,
   };
 })();

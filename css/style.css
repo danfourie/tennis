@@ -102,6 +102,9 @@ body {
 .btn-primary:hover:not(:disabled) { background: var(--primary-dark); }
 .btn-secondary { background: var(--neutral-light); color: var(--neutral-dark); border: 1px solid var(--border); }
 .btn-secondary:hover:not(:disabled) { background: #e5e7eb; }
+.btn-link { background: none; border: none; padding: 0; color: var(--primary); font-size: .85rem; cursor: pointer; text-decoration: underline; }
+.btn-link:hover { color: var(--primary-dark); }
+.btn-link:disabled { opacity: .6; cursor: default; }
 .btn-outline { background: transparent; color: white; border: 1.5px solid rgba(255,255,255,.6); }
 .btn-outline:hover { background: rgba(255,255,255,.15); border-color: white; }
 .btn-outline-primary { background: transparent; color: var(--primary); border: 1.5px solid var(--primary); }
