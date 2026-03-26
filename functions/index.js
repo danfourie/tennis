@@ -443,29 +443,38 @@ exports.getTwilioUsage = onCall(
 
     const sid   = TWILIO_SID.value();
     const token = TWILIO_TOKEN.value();
-    if (!sid || !token) return { count: 0, cost: '0.00', currency: 'USD' };
+    if (!sid || !token) return { count: 0, cost: '0.00', currency: 'USD', balance: null };
 
     const client = twilio(sid, token);
     const now    = new Date();
     const start  = new Date(now.getFullYear(), now.getMonth(), 1);
 
-    try {
-      // Fetch outbound WhatsApp usage records for this month
-      const records = await client.usage.records.list({
+    // Fetch usage and balance in parallel
+    const [records, balanceData] = await Promise.allSettled([
+      client.usage.records.list({
         category:  'sms-whatsapp-outbound',
         startDate: start,
         endDate:   now,
-      });
-      if (!records || records.length === 0) return { count: 0, cost: '0.00', currency: 'USD' };
-      const r = records[0];
-      return {
-        count:    parseInt(r.count    || '0', 10),
-        cost:     parseFloat(r.price  || '0').toFixed(2),
-        currency: r.priceUnit || 'USD',
-      };
-    } catch (err) {
-      console.error('[WhatsApp] Usage query failed:', err.message);
-      return { count: 0, cost: '0.00', currency: 'USD' };
+      }),
+      client.api.v2010.accounts(sid).balance().fetch(),
+    ]);
+
+    // Usage
+    let count = 0, cost = '0.00', currency = 'USD';
+    if (records.status === 'fulfilled' && records.value.length > 0) {
+      const r = records.value[0];
+      count    = parseInt(r.count   || '0', 10);
+      cost     = parseFloat(r.price || '0').toFixed(2);
+      currency = r.priceUnit || 'USD';
     }
+
+    // Balance
+    let balance = null, balanceCurrency = 'USD';
+    if (balanceData.status === 'fulfilled') {
+      balance         = parseFloat(balanceData.value.balance || '0').toFixed(2);
+      balanceCurrency = balanceData.value.currency || 'USD';
+    }
+
+    return { count, cost, currency, balance, balanceCurrency };
   }
 );

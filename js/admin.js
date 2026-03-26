@@ -108,7 +108,7 @@ const Admin = (() => {
       panel.classList.toggle('active', panel.id === `subtab-${tab}`);
     });
     // Lazy-render heavy tabs when first opened
-    if (tab === 'overview')      { renderPendingResults(); renderPendingBookings(); if (typeof Leagues !== 'undefined') Leagues.renderPendingEntries(); }
+    if (tab === 'overview')      { renderPendingResults(); renderPendingBookings(); if (typeof Leagues !== 'undefined') Leagues.renderPendingEntries(); renderTwilioUsage(); }
     if (tab === 'leagues')       Leagues.renderAdmin();
     if (tab === 'tournaments')   Tournaments.renderAdmin();
     if (tab === 'users')         renderUsers();
@@ -132,6 +132,73 @@ const Admin = (() => {
     if (_activeTab === 'settings')      { renderGlobalSettings(); renderAuditLog(); }
     if (_activeTab === 'notifications') NotificationService.renderComposer();
   }
+
+  // ════════════════════════════════════════════════════════════
+  // TWILIO USAGE / BALANCE
+  // ════════════════════════════════════════════════════════════
+  let _twilioLoading = false;
+
+  async function renderTwilioUsage() {
+    const panel   = document.getElementById('twilioUsagePanel');
+    const btn     = document.getElementById('twilioRefreshBtn');
+    if (!panel || _twilioLoading) return;
+
+    _twilioLoading = true;
+    if (btn) { btn.disabled = true; btn.textContent = '↻ Loading…'; }
+    panel.innerHTML = '<span class="text-muted" style="font-size:.85rem">Loading…</span>';
+
+    try {
+      const fn   = firebase.functions().httpsCallable('getTwilioUsage');
+      const res  = await fn();
+      const d    = res.data;
+
+      const bal     = d.balance !== null ? parseFloat(d.balance) : null;
+      const now     = new Date();
+      const month   = now.toLocaleString('default', { month: 'long', year: 'numeric' });
+
+      // Balance colour: green ≥ 10, orange 3–10, red < 3
+      let balColour = '#16a34a', balIcon = '🟢';
+      if (bal !== null) {
+        if (bal < 3)  { balColour = '#dc2626'; balIcon = '🔴'; }
+        else if (bal < 10) { balColour = '#d97706'; balIcon = '🟡'; }
+      }
+
+      const balHtml = bal !== null
+        ? `<div style="display:flex;align-items:center;gap:.4rem;margin-bottom:.35rem;">
+             <span style="font-size:1rem">${balIcon}</span>
+             <span style="font-weight:600;font-size:1.05rem;color:${balColour}">$${bal.toFixed(2)} ${d.balanceCurrency}</span>
+             <span class="text-muted" style="font-size:.8rem">account balance</span>
+           </div>`
+        : `<div class="text-muted" style="font-size:.85rem;margin-bottom:.35rem;">Balance unavailable</div>`;
+
+      panel.innerHTML = `
+        <div style="display:flex;flex-wrap:wrap;gap:1.5rem;align-items:flex-start;">
+          <div>
+            ${balHtml}
+            <div style="font-size:.85rem;color:var(--text-muted);margin-top:.1rem">
+              💬 <strong>${d.count}</strong> WhatsApp message${d.count !== 1 ? 's' : ''} sent in ${month}
+              &nbsp;·&nbsp; cost: <strong>$${d.cost} ${d.currency}</strong>
+            </div>
+          </div>
+        </div>
+        <div class="text-muted" style="font-size:.75rem;margin-top:.5rem">
+          Last checked: ${new Date().toLocaleTimeString()}
+          ${bal !== null && bal < 5 ? ' &nbsp;⚠️ <strong style="color:#d97706">Top up recommended</strong>' : ''}
+        </div>`;
+
+    } catch (err) {
+      panel.innerHTML = `<span class="text-muted" style="font-size:.85rem">Could not load Twilio data — ${err.message}</span>`;
+    } finally {
+      _twilioLoading = false;
+      if (btn) { btn.disabled = false; btn.textContent = '↻ Refresh'; }
+    }
+  }
+
+  // Wire up the refresh button (runs once after DOM is ready)
+  document.addEventListener('DOMContentLoaded', () => {
+    const btn = document.getElementById('twilioRefreshBtn');
+    if (btn) btn.addEventListener('click', renderTwilioUsage);
+  });
 
   // ════════════════════════════════════════════════════════════
   // PENDING RESULTS (no score entered, or score not yet master/dual-verified)

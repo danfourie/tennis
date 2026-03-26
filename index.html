@@ -141,6 +141,17 @@
       <!-- Overview Tab -->
       <div class="admin-tab-panel active" id="subtab-overview">
         <div class="admin-grid">
+          <!-- WhatsApp / Twilio usage card -->
+          <div class="admin-card admin-card-full">
+            <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem;">
+              <h3 style="margin:0">💬 WhatsApp (Twilio)</h3>
+              <button class="btn btn-xs btn-secondary" id="twilioRefreshBtn">↻ Refresh</button>
+            </div>
+            <div id="twilioUsagePanel" style="margin-top:.75rem;">
+              <span class="text-muted" style="font-size:.85rem">Loading…</span>
+            </div>
+          </div>
+
           <div class="admin-card admin-card-full">
             <h3>⏰ Pending Results <span class="text-muted" style="font-size:.78rem;font-weight:400">(no score / unverified)</span></h3>
             <div id="pendingResultsList"></div>
