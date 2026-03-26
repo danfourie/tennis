@@ -36,7 +36,7 @@ const TWILIO_TOKEN = defineSecret('TWILIO_AUTH_TOKEN');
 const TWILIO_FROM  = defineSecret('TWILIO_WHATSAPP_FROM');
 
 // ── App config ────────────────────────────────────────────────────────────────
-const APP_URL = 'https://danfourie.github.io/tennis/';
+const APP_URL = 'https://www.courtcampus.co.za/';
 
 // ── Switch to Content Templates once all templates are approved in Twilio ─────
 // false = plain text body (works in sandbox; no template approval needed)
@@ -44,20 +44,20 @@ const APP_URL = 'https://danfourie.github.io/tennis/';
 const USE_CONTENT_TEMPLATES = true;
 
 const TEMPLATE_SIDS = {
-  booking_approved:      'HX65da71df7bb3fef8cd4a4f5a202b073d',
-  booking_rejected:      'HX58ac2511bddfce8a36f3b88b6e81e4c4',
-  booking_request:       'HX2bc04b98a1a807bda78a2802b15d6693',
-  booking_cancelled:     'HXf3bd68e6881f5571c5b0746a7942e8a5',
-  fixture_changed:       'HX818e3f85026abcbc6af52b065892db77',
-  fixture_cancelled:     'HXf32f42bd1ff463728ee33d42e5d6c840',
-  score_reminder:        'HX38266847239b534291b247984b00f68a',
-  league_entry:          'HX019864a2c73466e09faa8548c5d4b463',
-  league_created:        'HXb2de2dca9efcda28f5180ad919ef5b60',
-  league_start_reminder: 'HX2bfe8b0e69e5c5b72eb4c44ed9cbfd8d',
-  team_message:          'HX2aa83e582ade77f97b8f5da1ac95dfe9',
-  alt_venue_request:     'HXe4c4095613cd1e33ded4679422932978',
-  general_message:       'HXa55b3a10e2ce041939a1e4cd692729dc',
-  registration_invite:   'HX65895557d6d16a19dc62e9ec9d7a702b',
+  booking_approved:      'HXb10a75c6f7da594b48b1d30bf6afc51f',
+  booking_rejected:      'HXf2354b8f548abf664a8d8dc996a573ac',
+  booking_request:       'HX6bb8d38bb7d309eb538298393487e2a9',
+  booking_cancelled:     'HXee12c3a33516b940bf69451dbb79c04d',
+  fixture_changed:       'HX0a0982228b2086b1796c24c3a0dff47d',
+  fixture_cancelled:     'HX330caa9222ff757a219ff5e1777295bd',
+  score_reminder:        'HXf02c97f4030b7e4c0083f0b25fd5fd92',
+  league_entry:          'HX06da6c17895c1513873dd8f663545681',
+  league_created:        'HX11b97f0a334fc41da1ac39f478af02f2',
+  league_start_reminder: 'HXdc7cd1e18ad060dfdc38bba852ee739f',
+  team_message:          'HXd54a150764c7f983e7ad1280d264a8ed',
+  alt_venue_request:     'HX29ec39a6b13c9501aa6577f7d9a0c829',
+  general_message:       'HX1eb854e7b1f131278b709c8028145101',
+  registration_invite:   'HX62fe5f398eab47e8c8f7811eb26a0034',
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
