@@ -437,44 +437,57 @@ exports.whatsappWebhook = onRequest(async (req, res) => {
 
 // ── 4. Usage stats: this month's WhatsApp message count + cost ────────────────
 exports.getTwilioUsage = onCall(
-  { secrets: [TWILIO_SID, TWILIO_TOKEN] },
+  { secrets: [TWILIO_SID, TWILIO_TOKEN, TWILIO_FROM] },
   async (request) => {
     if (!request.auth) throw new Error('Unauthenticated');
 
     const sid   = TWILIO_SID.value();
     const token = TWILIO_TOKEN.value();
+    const from  = TWILIO_FROM.value(); // e.g. whatsapp:+13186531674
     if (!sid || !token) return { count: 0, cost: '0.00', currency: 'USD', balance: null };
 
-    const client = twilio(sid, token);
-    const now    = new Date();
-    const start  = new Date(now.getFullYear(), now.getMonth(), 1);
+    const client  = twilio(sid, token);
+    const https   = require('https');
+    const now     = new Date();
+    const start   = new Date(now.getFullYear(), now.getMonth(), 1);
 
-    // Fetch usage and balance in parallel
-    const [records, balanceData] = await Promise.allSettled([
-      client.usage.records.list({
-        category:  'sms-whatsapp-outbound',
-        startDate: start,
-        endDate:   now,
-      }),
-      client.api.v2010.accounts(sid).balance().fetch(),
-    ]);
+    // ── Balance via REST (SDK v5 removed the balance() sub-resource) ──────────
+    const balancePromise = new Promise(resolve => {
+      const auth = Buffer.from(`${sid}:${token}`).toString('base64');
+      const req  = https.request({
+        hostname: 'api.twilio.com',
+        path:     `/2010-04-01/Accounts/${sid}/Balance.json`,
+        headers:  { Authorization: `Basic ${auth}` },
+      }, res => {
+        let d = '';
+        res.on('data', c => d += c);
+        res.on('end', () => {
+          try { resolve(JSON.parse(d)); } catch { resolve(null); }
+        });
+      });
+      req.on('error', () => resolve(null));
+      req.end();
+    });
 
-    // Usage
-    let count = 0, cost = '0.00', currency = 'USD';
-    if (records.status === 'fulfilled' && records.value.length > 0) {
-      const r = records.value[0];
-      count    = parseInt(r.count   || '0', 10);
-      cost     = parseFloat(r.price || '0').toFixed(2);
-      currency = r.priceUnit || 'USD';
-    }
+    // ── WhatsApp message count + actual cost from messages list ───────────────
+    const msgsPromise = client.messages.list({
+      from:          from,
+      dateSentAfter: start,
+      limit:         1000,
+    }).catch(() => []);
 
-    // Balance
-    let balance = null, balanceCurrency = 'USD';
-    if (balanceData.status === 'fulfilled') {
-      balance         = parseFloat(balanceData.value.balance || '0').toFixed(2);
-      balanceCurrency = balanceData.value.currency || 'USD';
-    }
+    const [balanceData, msgs] = await Promise.all([balancePromise, msgsPromise]);
 
-    return { count, cost, currency, balance, balanceCurrency };
+    const count    = msgs.length;
+    const cost     = msgs.reduce((sum, m) => sum + Math.abs(parseFloat(m.price || '0')), 0);
+    const currency = msgs.length > 0 ? (msgs[0].priceUnit || 'USD') : 'USD';
+
+    return {
+      count,
+      cost:            cost.toFixed(4),
+      currency,
+      balance:         balanceData ? parseFloat(balanceData.balance).toFixed(2) : null,
+      balanceCurrency: balanceData ? (balanceData.currency || 'USD') : 'USD',
+    };
   }
 );
