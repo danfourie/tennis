@@ -441,40 +441,65 @@ exports.getTwilioUsage = onCall(
   async (request) => {
     if (!request.auth) throw new Error('Unauthenticated');
 
-    const sid   = TWILIO_SID.value();
-    const token = TWILIO_TOKEN.value();
-    const from  = TWILIO_FROM.value(); // e.g. whatsapp:+13186531674
-    if (!sid || !token) return { count: 0, cost: '0.00', currency: 'USD', balance: null };
+    // .trim() is critical — Firebase Secrets can include a trailing newline,
+    // which causes ERR_UNESCAPED_CHARACTERS when the SID is interpolated into
+    // an HTTPS path, and breaks the Twilio SDK client.
+    const sid   = (TWILIO_SID.value()   || '').trim();
+    const token = (TWILIO_TOKEN.value() || '').trim();
+    const from  = (TWILIO_FROM.value()  || '').trim(); // e.g. whatsapp:+13186531674
 
-    const client  = twilio(sid, token);
-    const https   = require('https');
-    const now     = new Date();
-    const start   = new Date(now.getFullYear(), now.getMonth(), 1);
+    if (!sid || !token) {
+      return { count: 0, cost: '0.0000', currency: 'USD', balance: null, balanceCurrency: 'USD' };
+    }
 
-    // ── Balance via REST (SDK v5 removed the balance() sub-resource) ──────────
+    const https = require('https');
+    const now   = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth(), 1);
+
+    // ── Balance via Twilio REST API ───────────────────────────────────────────
+    // SDK v5 removed the .balance() sub-resource — call the REST endpoint directly.
+    // encodeURIComponent guards against any remaining special chars in the SID.
     const balancePromise = new Promise(resolve => {
-      const auth = Buffer.from(`${sid}:${token}`).toString('base64');
-      const req  = https.request({
-        hostname: 'api.twilio.com',
-        path:     `/2010-04-01/Accounts/${sid}/Balance.json`,
-        headers:  { Authorization: `Basic ${auth}` },
-      }, res => {
-        let d = '';
-        res.on('data', c => d += c);
-        res.on('end', () => {
-          try { resolve(JSON.parse(d)); } catch { resolve(null); }
+      try {
+        const auth = Buffer.from(`${sid}:${token}`).toString('base64');
+        const req  = https.request({
+          hostname: 'api.twilio.com',
+          path:     `/2010-04-01/Accounts/${encodeURIComponent(sid)}/Balance.json`,
+          method:   'GET',
+          headers:  { Authorization: `Basic ${auth}` },
+        }, res => {
+          let d = '';
+          res.on('data', c => d += c);
+          res.on('end', () => {
+            try { resolve(JSON.parse(d)); } catch { resolve(null); }
+          });
         });
-      });
-      req.on('error', () => resolve(null));
-      req.end();
+        req.on('error', (e) => {
+          console.error('[Twilio] Balance REST error:', e.message);
+          resolve(null);
+        });
+        req.end();
+      } catch (e) {
+        console.error('[Twilio] Balance request setup error:', e.message);
+        resolve(null);
+      }
     });
 
-    // ── WhatsApp message count + actual cost from messages list ───────────────
-    const msgsPromise = client.messages.list({
-      from:          from,
-      dateSentAfter: start,
-      limit:         1000,
-    }).catch(() => []);
+    // ── WhatsApp message count + cost from messages list ─────────────────────
+    // Filter by the WhatsApp sender number for this month only.
+    const msgsPromise = (async () => {
+      try {
+        const client = twilio(sid, token);
+        return await client.messages.list({
+          from:          from,
+          dateSentAfter: start,
+          limit:         1000,
+        });
+      } catch (e) {
+        console.error('[Twilio] Messages list error:', e.message);
+        return [];
+      }
+    })();
 
     const [balanceData, msgs] = await Promise.all([balancePromise, msgsPromise]);
 
@@ -482,11 +507,15 @@ exports.getTwilioUsage = onCall(
     const cost     = msgs.reduce((sum, m) => sum + Math.abs(parseFloat(m.price || '0')), 0);
     const currency = msgs.length > 0 ? (msgs[0].priceUnit || 'USD') : 'USD';
 
+    console.log(`[Twilio] Usage: ${count} msgs, $${cost.toFixed(4)}, balance: ${balanceData ? balanceData.balance : 'N/A'}`);
+
     return {
       count,
       cost:            cost.toFixed(4),
       currency,
-      balance:         balanceData ? parseFloat(balanceData.balance).toFixed(2) : null,
+      balance:         balanceData && balanceData.balance != null
+                         ? parseFloat(balanceData.balance).toFixed(2)
+                         : null,
       balanceCurrency: balanceData ? (balanceData.currency || 'USD') : 'USD',
     };
   }
