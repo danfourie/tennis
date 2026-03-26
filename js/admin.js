@@ -108,7 +108,7 @@ const Admin = (() => {
       panel.classList.toggle('active', panel.id === `subtab-${tab}`);
     });
     // Lazy-render heavy tabs when first opened
-    if (tab === 'overview')      { renderPendingResults(); renderPendingBookings(); if (typeof Leagues !== 'undefined') Leagues.renderPendingEntries(); renderTwilioUsage(); }
+    if (tab === 'overview')      { renderPendingResults(); renderPendingBookings(); if (typeof Leagues !== 'undefined') Leagues.renderPendingEntries(); if (!_twilioLoaded) renderTwilioUsage(); }
     if (tab === 'leagues')       Leagues.renderAdmin();
     if (tab === 'tournaments')   Tournaments.renderAdmin();
     if (tab === 'users')         renderUsers();
@@ -136,7 +136,8 @@ const Admin = (() => {
   // ════════════════════════════════════════════════════════════
   // TWILIO USAGE / BALANCE
   // ════════════════════════════════════════════════════════════
-  let _twilioLoading = false;
+  let _twilioLoading  = false;
+  let _twilioLoaded   = false;   // auto-fetch once on first overview visit
 
   async function renderTwilioUsage() {
     const panel   = document.getElementById('twilioUsagePanel');
@@ -151,6 +152,7 @@ const Admin = (() => {
       const fn   = firebase.functions().httpsCallable('getTwilioUsage');
       const res  = await fn();
       const d    = res.data;
+      _twilioLoaded = true;
 
       const bal     = d.balance !== null ? parseFloat(d.balance) : null;
       const now     = new Date();
@@ -194,11 +196,9 @@ const Admin = (() => {
     }
   }
 
-  // Wire up the refresh button (runs once after DOM is ready)
-  document.addEventListener('DOMContentLoaded', () => {
-    const btn = document.getElementById('twilioRefreshBtn');
-    if (btn) btn.addEventListener('click', renderTwilioUsage);
-  });
+  // Wire refresh button directly — scripts run after DOM is ready (bottom of body)
+  const _twilioBtn = document.getElementById('twilioRefreshBtn');
+  if (_twilioBtn) _twilioBtn.addEventListener('click', renderTwilioUsage);
 
   // ════════════════════════════════════════════════════════════
   // PENDING RESULTS (no score entered, or score not yet master/dual-verified)
