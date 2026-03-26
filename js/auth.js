@@ -339,9 +339,25 @@ const Auth = (() => {
   }
 
   // ── Password reset ─────────────────────────────────────────
+  // handleCodeInApp: true → Firebase emails a link to OUR app URL
+  // (?mode=resetPassword&oobCode=...) so email scanners can't pre-consume
+  // the one-time code, and the link shows courtcampus.co.za not Firebase.
   async function resetPassword(email) {
     try {
-      await firebase.auth().sendPasswordResetEmail(email);
+      await firebase.auth().sendPasswordResetEmail(email, {
+        url: 'https://www.courtcampus.co.za',
+        handleCodeInApp: true,
+      });
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: _authMsg(err) };
+    }
+  }
+
+  // Called when the user submits a new password after clicking the email link.
+  async function confirmNewPassword(oobCode, newPassword) {
+    try {
+      await firebase.auth().confirmPasswordReset(oobCode, newPassword);
       return { ok: true };
     } catch (err) {
       return { ok: false, error: _authMsg(err) };
@@ -351,6 +367,7 @@ const Auth = (() => {
   return {
     init, login, register, logout,
     isAdmin, isMaster, isLoggedIn, currentRole,
-    getUser, getProfile, changePassword, openProfileModal, resetPassword,
+    getUser, getProfile, changePassword, openProfileModal,
+    resetPassword, confirmNewPassword,
   };
 })();

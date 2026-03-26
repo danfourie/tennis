@@ -160,6 +160,60 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Apply global feature flags from settings
   applyTournamentVisibility();
 
+  // ── Password-reset email link handler ───────────────────────
+  // Firebase emails a link to ?mode=resetPassword&oobCode=... when
+  // handleCodeInApp:true is set in sendPasswordResetEmail().
+  // We detect these params on arrival and show the set-new-password form.
+  (function _checkResetLink() {
+    const params  = new URLSearchParams(location.search);
+    const mode    = params.get('mode');
+    const oobCode = params.get('oobCode');
+    if (mode !== 'resetPassword' || !oobCode) return;
+
+    // Clean the URL immediately so a refresh doesn't re-open the modal
+    history.replaceState(null, '', location.pathname);
+
+    const errEl  = document.getElementById('resetPasswordError');
+    const submitBtn = document.getElementById('resetPasswordSubmitBtn');
+
+    errEl.textContent = '';
+    Modal.open('resetPasswordModal');
+    setTimeout(() => document.getElementById('resetNewPassword').focus(), 50);
+
+    async function doReset() {
+      const pw1 = document.getElementById('resetNewPassword').value;
+      const pw2 = document.getElementById('resetConfirmPassword').value;
+      errEl.textContent = '';
+      if (pw1.length < 6) { errEl.textContent = 'Password must be at least 6 characters'; return; }
+      if (pw1 !== pw2)    { errEl.textContent = 'Passwords do not match'; return; }
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Saving…';
+
+      const result = await Auth.confirmNewPassword(oobCode, pw1);
+
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Set Password';
+
+      if (result.ok) {
+        Modal.close('resetPasswordModal');
+        document.getElementById('resetNewPassword').value  = '';
+        document.getElementById('resetConfirmPassword').value = '';
+        toast('Password updated — please log in with your new password', 'success');
+        setTimeout(() => Modal.open('loginModal'), 600);
+      } else {
+        errEl.textContent = result.error || 'Could not update password. The link may have expired — request a new one.';
+      }
+    }
+
+    submitBtn.addEventListener('click', doReset);
+    ['resetNewPassword', 'resetConfirmPassword'].forEach(id => {
+      document.getElementById(id).addEventListener('keydown', e => {
+        if (e.key === 'Enter') doReset();
+      });
+    });
+  })();
+
   // ── Navigation ─────────────────────────────────────────────
   document.querySelectorAll('.nav-btn').forEach(btn => {
     btn.addEventListener('click', () => {
