@@ -339,15 +339,13 @@ const Auth = (() => {
   }
 
   // ── Password reset ─────────────────────────────────────────
-  // handleCodeInApp: true → Firebase emails a link to OUR app URL
-  // (?mode=resetPassword&oobCode=...) so email scanners can't pre-consume
-  // the one-time code, and the link shows courtcampus.co.za not Firebase.
+  // The email link domain is controlled by Firebase Auth's callbackUri setting
+  // (set via Identity Toolkit API to https://www.courtcampus.co.za).
+  // Firebase will send a link to ?mode=resetPassword&oobCode=... on our domain,
+  // which app.js detects on arrival and shows the Set New Password modal.
   async function resetPassword(email) {
     try {
-      await firebase.auth().sendPasswordResetEmail(email, {
-        url: 'https://www.courtcampus.co.za',
-        handleCodeInApp: true,
-      });
+      await firebase.auth().sendPasswordResetEmail(email);
       return { ok: true };
     } catch (err) {
       return { ok: false, error: _authMsg(err) };
