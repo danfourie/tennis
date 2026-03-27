@@ -60,8 +60,9 @@ service cloud.firestore {
     // ── Closures ─────────────────────────────────────────────────────────────
     match /closures/{docId} {
       allow read: if true;
-      allow write: if isMaster();
-      // School contacts may manage closures for their own venue
+      // Admin role can manage all closures (covers multi-venue managers)
+      allow write: if isAdminRole();
+      // School contacts may manage closures for their own primary school's venue
       allow create: if isSignedIn() && getUserSchoolId() != null
         && get(/databases/$(database)/documents/schools/$(getUserSchoolId())).data.venueId == request.resource.data.venueId;
       allow delete: if isSignedIn() && getUserSchoolId() != null

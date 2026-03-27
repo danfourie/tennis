@@ -9,6 +9,10 @@
  * Multi-venue support: a user may manage more than one venue if they are
  * listed as an organiser on multiple schools.  When that is the case a
  * venue-selector bar is shown at the top of the view.
+ *
+ * Settings are displayed inline (courts + blocked dates) so the user always
+ * knows which venue they are editing, regardless of how many venues they
+ * manage.  Full school-level settings are still reachable via a link.
  */
 
 const MyVenue = (() => {
@@ -16,10 +20,10 @@ const MyVenue = (() => {
   // ── state ────────────────────────────────────────────────────
   let _showUpcomingOnly = false;   // toggle: all | upcoming
   let _activeVenueId    = null;    // null = auto-select first venue
+  let _showSettings     = false;   // inline settings panel open?
 
   // ── helpers ─────────────────────────────────────────────────
 
-  /** Normalise a phone number to digits-only starting with country code. */
   function _normPhone(p) {
     if (!p) return '';
     return p.replace(/\D/g, '').replace(/^0/, '27');
@@ -27,13 +31,8 @@ const MyVenue = (() => {
 
   /**
    * Return all {venue, school} pairs this user manages.
-   *
-   * Priority order:
-   *  1. profile.schoolId → school.venueId  (primary – always first)
-   *  2. Any school where user's email or phone is in school.organizers
-   *
-   * Duplicate venue IDs are collapsed (each venue appears once).
-   * Result is sorted: primary school's venue first, then alphabetically.
+   * 1. profile.schoolId → school.venueId  (primary – always first)
+   * 2. Any school where user's email or phone is in school.organizers
    */
   function _getMyVenues() {
     if (!Auth.isLoggedIn()) return [];
@@ -44,22 +43,20 @@ const MyVenue = (() => {
     const phone      = _normPhone(profile.phone);
     const mySchoolId = profile.schoolId;
 
-    const venueMap = new Map(); // venueId → { venue, school }
+    const venueMap = new Map();
 
     DB.getSchools().forEach(school => {
       if (!school.venueId) return;
-      if (venueMap.has(school.venueId)) return; // already captured
+      if (venueMap.has(school.venueId)) return;
 
       const venue = DB.getVenues().find(v => v.id === school.venueId);
       if (!venue) return;
 
-      // Primary school
       if (school.id === mySchoolId) {
         venueMap.set(venue.id, { venue, school });
         return;
       }
 
-      // School where user is listed as organiser
       const isOrg = (school.organizers || []).some(org => {
         const orgEmail = (org.email || '').toLowerCase();
         const orgPhone = _normPhone(org.phone);
@@ -70,15 +67,12 @@ const MyVenue = (() => {
     });
 
     const entries = [...venueMap.values()];
-
-    // Sort: primary school's venue first, then alphabetically by venue name
     entries.sort((a, b) => {
       const aPri = a.school.id === mySchoolId ? 0 : 1;
       const bPri = b.school.id === mySchoolId ? 0 : 1;
       if (aPri !== bPri) return aPri - bPri;
       return a.venue.name.localeCompare(b.venue.name);
     });
-
     return entries;
   }
 
@@ -131,6 +125,66 @@ const MyVenue = (() => {
     if (view && !view.classList.contains('hidden')) _render();
   }
 
+  // ── inline settings section ──────────────────────────────────
+  function _settingsHtml(venue) {
+    const closures = DB.getClosures()
+      .filter(c => c.venueId === venue.id && !c.courtIndex)
+      .sort((a, b) => (a.startDate || '').localeCompare(b.startDate || ''));
+
+    const closureRows = closures.map(c => `
+      <div class="ms-closure-row" style="display:flex;gap:.5rem;align-items:center;margin-bottom:.3rem;flex-wrap:wrap">
+        <span style="font-size:.85rem">
+          ${formatDate(c.startDate)}${c.endDate && c.endDate !== c.startDate ? ' → ' + formatDate(c.endDate) : ''}
+        </span>
+        ${c.reason ? `<span class="text-muted" style="font-size:.8rem">${esc(c.reason)}</span>` : ''}
+        <button class="btn btn-xs btn-danger mv-closure-del" data-id="${esc(c.id)}" title="Remove">✕</button>
+      </div>`).join('') || '<span class="text-muted" style="font-size:.85rem">No blocked dates.</span>';
+
+    return `
+      <div class="card" id="mv-settings-card"
+           style="margin-bottom:1.5rem;border-left:4px solid var(--primary,#3b82f6)">
+        <div class="card-header" style="display:flex;align-items:center;justify-content:space-between">
+          <div class="card-title" style="margin:0">⚙️ Settings — ${esc(venue.name)}</div>
+          <button class="btn btn-xs btn-secondary" id="mv-settings-close" title="Close settings">✕ Close</button>
+        </div>
+        <div class="card-body" style="display:flex;flex-direction:column;gap:1.25rem">
+
+          <!-- Courts count -->
+          <div>
+            <label style="font-weight:600;display:block;margin-bottom:.4rem">🎾 Courts available at this venue</label>
+            <div style="display:flex;gap:.5rem;align-items:center">
+              <input id="mv-courts-input" type="number" min="1" max="30"
+                value="${venue.courts || ''}" placeholder="e.g. 4" style="width:80px">
+              <button class="btn btn-sm btn-primary" id="mv-courts-save">Save</button>
+            </div>
+          </div>
+
+          <!-- Blocked dates -->
+          <div>
+            <label style="font-weight:600;display:block;margin-bottom:.4rem">🚫 Blocked dates (courts unavailable)</label>
+            <div id="mv-closures-list" style="margin-bottom:.5rem">${closureRows}</div>
+            <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+              <input type="date" id="mv-block-start" style="flex:1;min-width:130px">
+              <span class="text-muted" style="white-space:nowrap">to</span>
+              <input type="date" id="mv-block-end" style="flex:1;min-width:130px">
+              <input type="text" id="mv-block-reason" placeholder="Reason (optional)"
+                style="flex:2;min-width:140px">
+              <button class="btn btn-sm btn-secondary" id="mv-block-add">+ Add</button>
+            </div>
+          </div>
+
+          <!-- Link to full My School settings -->
+          <div style="border-top:1px solid var(--border,#e2e8f0);padding-top:.75rem">
+            <button class="btn btn-sm btn-secondary" id="mv-school-settings-link"
+              title="Open full school settings in My School">
+              🏫 Full school settings →
+            </button>
+          </div>
+
+        </div>
+      </div>`;
+  }
+
   // ── main render ──────────────────────────────────────────────
   function _render() {
     const container = document.getElementById('myvenueContent');
@@ -138,7 +192,6 @@ const MyVenue = (() => {
 
     _syncToggleBtns();
 
-    // ── Resolve which venues this user manages ───────────────────
     const myVenues = _getMyVenues();
 
     if (!Auth.isLoggedIn() || myVenues.length === 0) {
@@ -150,21 +203,19 @@ const MyVenue = (() => {
       return;
     }
 
-    // Ensure _activeVenueId points to a valid entry (reset if stale)
     if (!myVenues.find(e => e.venue.id === _activeVenueId)) {
       _activeVenueId = myVenues[0].venue.id;
     }
 
     const { venue, school } = myVenues.find(e => e.venue.id === _activeVenueId);
 
-    // Update page heading
     const title = document.getElementById('myvenueTitle');
     if (title) title.textContent = venue.name;
 
     const totalCourts = venue.courts || 0;
     const today       = new Date().toISOString().slice(0, 10);
 
-    // ── Venue selector (shown only when the user manages > 1 venue) ──
+    // ── Venue selector (multi-venue only) ───────────────────────
     let html = '';
 
     if (myVenues.length > 1) {
@@ -173,17 +224,11 @@ const MyVenue = (() => {
           🏟 Select venue
         </div>
         <div style="display:flex;gap:.5rem;flex-wrap:wrap">`;
-
       myVenues.forEach(({ venue: v }) => {
         const active = v.id === _activeVenueId;
-        html += `<button
-          class="btn btn-sm ${active ? 'btn-primary' : 'btn-secondary'}"
-          data-venue-select="${esc(v.id)}"
-          style="${active ? '' : 'opacity:.85'}">
-          ${esc(v.name)}
-        </button>`;
+        html += `<button class="btn btn-sm ${active ? 'btn-primary' : 'btn-secondary'}"
+          data-venue-select="${esc(v.id)}">${esc(v.name)}</button>`;
       });
-
       html += `</div></div>`;
     }
 
@@ -198,21 +243,25 @@ const MyVenue = (() => {
           <div class="text-muted">Home venue for: <strong>${esc(school.name)}</strong></div>
         </div>
       </div>
-      <button class="btn btn-sm btn-secondary" id="mv-settings-shortcut"
-          data-school-id="${esc(school.id)}"
-          title="Open school &amp; venue settings" style="flex-shrink:0;white-space:nowrap">
-        ⚙️ Settings
+      <button class="btn btn-sm ${_showSettings ? 'btn-primary' : 'btn-secondary'}"
+              id="mv-settings-toggle-btn"
+              style="flex-shrink:0;white-space:nowrap">
+        ⚙️ ${_showSettings ? 'Hide settings' : 'Settings'}
       </button>
     </div>`;
 
-    // ── All bookings at this venue (excluding rejected) ──────────────────────
-    const allBookings   = DB.getBookings();
-    const venueBookings = allBookings
+    // ── Inline settings (shown when toggled) ─────────────────────
+    if (_showSettings) {
+      html += _settingsHtml(venue);
+    }
+
+    // ── Bookings ──────────────────────────────────────────────────
+    const venueBookings = DB.getBookings()
       .filter(b => b.venueId === venue.id && b.status !== 'rejected')
       .slice()
       .sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.timeSlot || '').localeCompare(b.timeSlot || ''));
-    const pendingCount  = venueBookings.filter(b => b.status !== 'confirmed').length;
-    const borderColor   = pendingCount > 0 ? 'var(--warning,#f59e0b)' : 'var(--success,#22c55e)';
+    const pendingCount = venueBookings.filter(b => b.status !== 'confirmed').length;
+    const borderColor  = pendingCount > 0 ? 'var(--warning,#f59e0b)' : 'var(--success,#22c55e)';
 
     html += `<div class="card" style="margin-bottom:1.5rem;border-left:4px solid ${borderColor}">
       <div class="card-header">
@@ -235,17 +284,15 @@ const MyVenue = (() => {
           : isPending
             ? `<span class="badge" style="background:#fef9c3;color:#854d0e;font-size:.7rem">Request</span>`
             : `<span class="badge" style="background:#e0f2fe;color:#0369a1;font-size:.7rem">Admin-scheduled</span>`;
-
         const actionBtns = isConfirmed
           ? `<button class="btn btn-sm btn-danger mv-reject-btn" data-id="${esc(b.id)}" data-label="Cancel">Cancel</button>`
           : `<button class="btn btn-sm btn-danger mv-reject-btn" data-id="${esc(b.id)}" data-label="${isPending ? 'Reject' : 'Delete'}">${isPending ? 'Reject' : 'Delete'}</button>
-             <button class="btn btn-sm btn-primary mv-approve-btn" data-id="${esc(b.id)}" data-label="${isPending ? 'Approve ✓' : 'Confirm ✓'}">${isPending ? 'Approve ✓' : 'Confirm ✓'}</button>`;
+             <button class="btn btn-sm btn-primary mv-approve-btn" data-id="${esc(b.id)}">${isPending ? 'Approve ✓' : 'Confirm ✓'}</button>`;
 
         html += `<div class="admin-list-item" style="align-items:flex-start;gap:.75rem">
           <div style="flex:1;min-width:0">
             <div style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap">
-              <span style="font-weight:600">${esc(b.label || b.type || 'Booking')}</span>
-              ${statusBadge}
+              <span style="font-weight:600">${esc(b.label || b.type || 'Booking')}</span>${statusBadge}
             </div>
             <div class="text-muted" style="font-size:.82rem">
               📅 ${b.date ? formatDate(b.date) : '—'}
@@ -255,19 +302,15 @@ const MyVenue = (() => {
             ${b.requestedByName ? `<div class="text-muted" style="font-size:.8rem">Requested by: ${esc(b.requestedByName)}${b.schoolName ? ' · ' + esc(b.schoolName) : ''}</div>` : ''}
             ${b.notes ? `<div class="text-muted" style="font-size:.8rem;font-style:italic">${esc(b.notes)}</div>` : ''}
           </div>
-          <div style="display:flex;gap:.4rem;flex-shrink:0;align-items:center">
-            ${actionBtns}
-          </div>
+          <div style="display:flex;gap:.4rem;flex-shrink:0;align-items:center">${actionBtns}</div>
         </div>`;
       });
     }
     html += `</div></div>`;
 
-    // ── Fixtures at this venue across all leagues ────────────────
-    const allLeagues    = DB.getLeagues();
-    const fixturesByDate = new Map(); // date → [{fixture, league}]
-
-    allLeagues.forEach(league => {
+    // ── Fixtures by date ──────────────────────────────────────────
+    const fixturesByDate = new Map();
+    DB.getLeagues().forEach(league => {
       (league.fixtures || []).forEach(f => {
         if (f.venueId !== venue.id) return;
         if (_showUpcomingOnly && f.date && f.date < today) return;
@@ -288,7 +331,6 @@ const MyVenue = (() => {
       return;
     }
 
-    // One card per date
     sortedDates.forEach(date => {
       const entries = fixturesByDate.get(date);
       const booked  = entries.reduce((sum, e) => sum + (e.fixture.courtsBooked || 3), 0);
@@ -296,12 +338,10 @@ const MyVenue = (() => {
       const isNear  = totalCourts > 0 && !isOver && booked >= totalCourts;
       const isPast  = date && date < today;
 
-      const statusColor = isOver ? 'var(--danger, #ef4444)'
-                        : isNear ? 'var(--warning, #f59e0b)'
-                        : 'var(--success, #22c55e)';
-      const statusLabel = isOver ? `⚠️ Overbooked — ${booked} / ${totalCourts} courts`
-                        : isNear ? `⚠️ Full — ${booked} / ${totalCourts} courts`
-                        : totalCourts ? `✓ ${booked} / ${totalCourts} courts`
+      const statusColor = isOver ? 'var(--danger,#ef4444)' : isNear ? 'var(--warning,#f59e0b)' : 'var(--success,#22c55e)';
+      const statusLabel = isOver ? `⚠️ Overbooked — ${booked}/${totalCourts} courts`
+                        : isNear ? `⚠️ Full — ${booked}/${totalCourts} courts`
+                        : totalCourts ? `✓ ${booked}/${totalCourts} courts`
                         : `${booked} courts booked`;
 
       html += `<div class="card" style="margin-bottom:1rem;border-left:4px solid ${statusColor}${isPast ? ';opacity:.7' : ''}">
@@ -317,44 +357,33 @@ const MyVenue = (() => {
         </div>
         <div class="card-body" style="padding:.25rem .75rem .75rem">`;
 
-      // Sort fixtures by time then league name
-      const sorted = [...entries].sort((a, b) => {
-        const tA = a.fixture.timeSlot || a.fixture.matchTime || '';
-        const tB = b.fixture.timeSlot || b.fixture.matchTime || '';
-        return tA.localeCompare(tB) || a.league.name.localeCompare(b.league.name);
-      });
+      [...entries]
+        .sort((a, b) => (a.fixture.timeSlot || '').localeCompare(b.fixture.timeSlot || '') || a.league.name.localeCompare(b.league.name))
+        .forEach(({ fixture: f, league }) => {
+          const hasScore   = f.homeScore !== null && f.homeScore !== undefined;
+          const courts     = f.courtsBooked || 3;
+          const homeSchool = DB.getSchools().find(s => s.id === f.homeSchoolId);
+          const awaySchool = DB.getSchools().find(s => s.id === f.awaySchoolId);
 
-      sorted.forEach(({ fixture: f, league }) => {
-        const hasScore   = f.homeScore !== null && f.homeScore !== undefined;
-        const courts     = f.courtsBooked || 3;
-        const courtLabel = courts === 1 ? '1 court' : `${courts} courts`;
-
-        const homeSchool = DB.getSchools().find(s => s.id === f.homeSchoolId);
-        const awaySchool = DB.getSchools().find(s => s.id === f.awaySchoolId);
-        const hColor     = homeSchool ? homeSchool.color : '#666';
-        const aColor     = awaySchool ? awaySchool.color : '#666';
-
-        const scoreHtml = hasScore
-          ? `<strong>${f.homeScore} — ${f.awayScore}</strong>`
-          : `<span class="text-muted">vs</span>`;
-
-        html += `<div class="myschool-fixture" style="margin:.5rem 0;background:var(--surface2,#f8fafc);border-radius:6px;padding:.5rem .75rem">
-          <div class="fixture-meta" style="margin-bottom:.2rem">
-            <span class="text-muted" style="font-size:.78rem">🏆 ${esc(league.name)}${league.division ? ' · ' + esc(league.division) : ''}</span>
-            ${f.timeSlot ? `<span class="text-muted" style="font-size:.78rem">⏰ ${esc(f.timeSlot)}</span>` : ''}
-            <span class="text-muted" style="font-size:.78rem">🎾 ${courtLabel}</span>
-          </div>
-          <div class="fixture-score-row">
-            <span class="fixture-team">
-              <span style="color:${hColor}">●</span> ${esc(f.homeSchoolName)}
-            </span>
-            <span class="fixture-score">${scoreHtml}</span>
-            <span class="fixture-team">
-              <span style="color:${aColor}">●</span> ${esc(f.awaySchoolName)}
-            </span>
-          </div>
-        </div>`;
-      });
+          html += `<div class="myschool-fixture" style="margin:.5rem 0;background:var(--surface2,#f8fafc);border-radius:6px;padding:.5rem .75rem">
+            <div class="fixture-meta" style="margin-bottom:.2rem">
+              <span class="text-muted" style="font-size:.78rem">🏆 ${esc(league.name)}${league.division ? ' · ' + esc(league.division) : ''}</span>
+              ${f.timeSlot ? `<span class="text-muted" style="font-size:.78rem">⏰ ${esc(f.timeSlot)}</span>` : ''}
+              <span class="text-muted" style="font-size:.78rem">🎾 ${courts === 1 ? '1 court' : courts + ' courts'}</span>
+            </div>
+            <div class="fixture-score-row">
+              <span class="fixture-team">
+                <span style="color:${homeSchool ? homeSchool.color : '#666'}">●</span> ${esc(f.homeSchoolName)}
+              </span>
+              <span class="fixture-score">
+                ${hasScore ? `<strong>${f.homeScore} — ${f.awayScore}</strong>` : '<span class="text-muted">vs</span>'}
+              </span>
+              <span class="fixture-team">
+                <span style="color:${awaySchool ? awaySchool.color : '#666'}">●</span> ${esc(f.awaySchoolName)}
+              </span>
+            </div>
+          </div>`;
+        });
 
       html += `</div></div>`;
     });
@@ -363,10 +392,10 @@ const MyVenue = (() => {
     _wireHandlers(container, venue, school);
   }
 
-  // ── Wire all interactive handlers after render ────────────────
+  // ── Wire all interactive handlers ────────────────────────────
   function _wireHandlers(container, venue, school) {
 
-    // ── Venue selector buttons ──────────────────────────────────
+    // ── Venue selector ──────────────────────────────────────────
     container.querySelectorAll('[data-venue-select]').forEach(btn => {
       btn.addEventListener('click', () => {
         _activeVenueId = btn.dataset.venueSelect;
@@ -374,22 +403,62 @@ const MyVenue = (() => {
       });
     });
 
-    // ── Settings shortcut ───────────────────────────────────────
-    // If the selected venue belongs to a school other than the user's primary
-    // school, impersonate that school so My School opens in the right context.
-    const settingsBtn = container.querySelector('#mv-settings-shortcut');
-    if (settingsBtn && typeof MySchool !== 'undefined') {
-      settingsBtn.addEventListener('click', () => {
-        const btnSchoolId  = settingsBtn.dataset.schoolId;
-        const activeSchool = MySchool.getActiveSchoolId();
-        if (btnSchoolId && btnSchoolId !== activeSchool) {
-          MySchool.impersonate(btnSchoolId);
-        }
-        MySchool.openSettings();
-      });
-    }
+    // ── Settings toggle ─────────────────────────────────────────
+    container.querySelector('#mv-settings-toggle-btn')?.addEventListener('click', () => {
+      _showSettings = !_showSettings;
+      _render();
+    });
 
-    // ── Booking approve ──────────────────────────────────────────
+    // ── Settings: close button ──────────────────────────────────
+    container.querySelector('#mv-settings-close')?.addEventListener('click', () => {
+      _showSettings = false;
+      _render();
+    });
+
+    // ── Settings: save courts ───────────────────────────────────
+    container.querySelector('#mv-courts-save')?.addEventListener('click', () => {
+      const n = parseInt(document.getElementById('mv-courts-input').value, 10);
+      if (isNaN(n) || n < 1 || n > 30) {
+        toast('Enter a number between 1 and 30', 'error');
+        return;
+      }
+      DB.updateVenue({ ...venue, courts: n })
+        .then(() => { toast(`Courts saved — ${n} court${n !== 1 ? 's' : ''} ✓`, 'success'); _render(); })
+        .catch(err => toast('Save failed — ' + err.message, 'error'));
+    });
+
+    // ── Settings: add blocked date ──────────────────────────────
+    container.querySelector('#mv-block-add')?.addEventListener('click', () => {
+      const start  = document.getElementById('mv-block-start').value;
+      const end    = document.getElementById('mv-block-end').value || start;
+      const reason = document.getElementById('mv-block-reason').value.trim();
+      if (!start) { toast('Select a start date', 'error'); return; }
+      if (end < start) { toast('End date must be on or after start date', 'error'); return; }
+      DB.addClosure({ venueId: venue.id, startDate: start, endDate: end, reason });
+      toast('Blocked date added ✓', 'success');
+      _render();
+    });
+
+    // ── Settings: delete blocked date ───────────────────────────
+    container.querySelectorAll('.mv-closure-del').forEach(btn => {
+      btn.addEventListener('click', () => {
+        DB.deleteClosure(btn.dataset.id)
+          .then(() => { toast('Blocked date removed', 'success'); _render(); })
+          .catch(err => { toast('Failed — ' + err.message, 'error'); });
+      });
+    });
+
+    // ── Settings: link to full school settings ──────────────────
+    container.querySelector('#mv-school-settings-link')?.addEventListener('click', () => {
+      if (typeof MySchool === 'undefined') return;
+      const activeSchool = MySchool.getActiveSchoolId();
+      if (school.id && school.id !== activeSchool) {
+        MySchool.impersonate(school.id);
+      }
+      MySchool.openSettings();
+    });
+
+    // ── Booking: approve ────────────────────────────────────────
     container.querySelectorAll('.mv-approve-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const id      = btn.dataset.id;
@@ -411,14 +480,14 @@ const MyVenue = (() => {
       });
     });
 
-    // ── Booking reject / cancel ──────────────────────────────────
+    // ── Booking: reject / cancel ────────────────────────────────
     container.querySelectorAll('.mv-reject-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
-        const id      = btn.dataset.id;
-        const label   = btn.dataset.label || 'Reject';
-        const booking = DB.getBookings().find(b => b.id === id);
+        const id            = btn.dataset.id;
+        const label         = btn.dataset.label || 'Reject';
+        const booking       = DB.getBookings().find(b => b.id === id);
         const wasCancelling = label === 'Cancel';
-        const confirmMsg = wasCancelling
+        const confirmMsg    = wasCancelling
           ? `Cancel this confirmed booking?\n\n"${booking ? (booking.label || 'Booking') : 'Booking'}" on ${booking && booking.date ? formatDate(booking.date) : '—'}\n\nThis will notify the requester.`
           : `${label} this booking request?`;
         if (!confirm(confirmMsg)) return;
