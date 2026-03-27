@@ -30,9 +30,13 @@ const MyVenue = (() => {
   }
 
   /**
-   * Return all {venue, school} pairs this user manages.
-   * 1. profile.schoolId → school.venueId  (primary – always first)
-   * 2. Any school where user's email or phone is in school.organizers
+   * Return all {venue, school|null} pairs this user manages.
+   *
+   * Three sources, checked in order (each venue appears at most once):
+   *  1. profile.schoolId → school.venueId          (primary – always first)
+   *  2. school.organizers email/phone match         (secondary school link)
+   *  3. venue.contacts email/phone match            (direct venue contact –
+   *     school may be null if no school owns the venue)
    */
   function _getMyVenues() {
     if (!Auth.isLoggedIn()) return [];
@@ -43,8 +47,9 @@ const MyVenue = (() => {
     const phone      = _normPhone(profile.phone);
     const mySchoolId = profile.schoolId;
 
-    const venueMap = new Map();
+    const venueMap = new Map(); // venueId → { venue, school|null }
 
+    // ── Pass 1 & 2: via schools ──────────────────────────────────
     DB.getSchools().forEach(school => {
       if (!school.venueId) return;
       if (venueMap.has(school.venueId)) return;
@@ -52,11 +57,13 @@ const MyVenue = (() => {
       const venue = DB.getVenues().find(v => v.id === school.venueId);
       if (!venue) return;
 
+      // Primary school
       if (school.id === mySchoolId) {
         venueMap.set(venue.id, { venue, school });
         return;
       }
 
+      // Secondary: user is listed as organiser for this school
       const isOrg = (school.organizers || []).some(org => {
         const orgEmail = (org.email || '').toLowerCase();
         const orgPhone = _normPhone(org.phone);
@@ -66,10 +73,31 @@ const MyVenue = (() => {
       if (isOrg) venueMap.set(venue.id, { venue, school });
     });
 
+    // ── Pass 3: direct venue contacts ───────────────────────────
+    // Catches venues where the user is listed in venue.contacts but is not
+    // an organiser on any school that owns that venue.
+    DB.getVenues().forEach(venue => {
+      if (venueMap.has(venue.id)) return; // already found via school
+
+      const isContact = (venue.contacts || []).some(c => {
+        const cEmail = (c.email || '').toLowerCase();
+        const cPhone = _normPhone(c.phone);
+        return (email && cEmail && email === cEmail) ||
+               (phone && cPhone && phone === cPhone);
+      });
+      if (!isContact) return;
+
+      // Find any school that uses this as its home venue (for the settings link)
+      const ownerSchool = DB.getSchools().find(s => s.venueId === venue.id) || null;
+      venueMap.set(venue.id, { venue, school: ownerSchool });
+    });
+
     const entries = [...venueMap.values()];
+
+    // Sort: primary school's venue first, then alphabetically
     entries.sort((a, b) => {
-      const aPri = a.school.id === mySchoolId ? 0 : 1;
-      const bPri = b.school.id === mySchoolId ? 0 : 1;
+      const aPri = a.school && a.school.id === mySchoolId ? 0 : 1;
+      const bPri = b.school && b.school.id === mySchoolId ? 0 : 1;
       if (aPri !== bPri) return aPri - bPri;
       return a.venue.name.localeCompare(b.venue.name);
     });
@@ -126,7 +154,7 @@ const MyVenue = (() => {
   }
 
   // ── inline settings section ──────────────────────────────────
-  function _settingsHtml(venue) {
+  function _settingsHtml(venue, school) {
     const closures = DB.getClosures()
       .filter(c => c.venueId === venue.id && !c.courtIndex)
       .sort((a, b) => (a.startDate || '').localeCompare(b.startDate || ''));
@@ -173,13 +201,15 @@ const MyVenue = (() => {
             </div>
           </div>
 
-          <!-- Link to full My School settings -->
+          <!-- Link to full My School settings (only when a school owns this venue) -->
+          ${school ? `
           <div style="border-top:1px solid var(--border,#e2e8f0);padding-top:.75rem">
             <button class="btn btn-sm btn-secondary" id="mv-school-settings-link"
+              data-school-id="${esc(school.id)}"
               title="Open full school settings in My School">
               🏫 Full school settings →
             </button>
-          </div>
+          </div>` : ''}
 
         </div>
       </div>`;
@@ -240,7 +270,7 @@ const MyVenue = (() => {
           <div class="myschool-school-name">${esc(venue.name)}</div>
           ${venue.address ? `<div class="text-muted">📍 ${esc(venue.address)}</div>` : ''}
           ${totalCourts  ? `<div class="text-muted">🎾 ${totalCourts} court${totalCourts !== 1 ? 's' : ''} available</div>` : ''}
-          <div class="text-muted">Home venue for: <strong>${esc(school.name)}</strong></div>
+          ${school ? `<div class="text-muted">Home venue for: <strong>${esc(school.name)}</strong></div>` : ''}
         </div>
       </div>
       <button class="btn btn-sm ${_showSettings ? 'btn-primary' : 'btn-secondary'}"
@@ -252,7 +282,7 @@ const MyVenue = (() => {
 
     // ── Inline settings (shown when toggled) ─────────────────────
     if (_showSettings) {
-      html += _settingsHtml(venue);
+      html += _settingsHtml(venue, school);
     }
 
     // ── Bookings ──────────────────────────────────────────────────
@@ -449,11 +479,12 @@ const MyVenue = (() => {
     });
 
     // ── Settings: link to full school settings ──────────────────
-    container.querySelector('#mv-school-settings-link')?.addEventListener('click', () => {
+    container.querySelector('#mv-school-settings-link')?.addEventListener('click', function () {
       if (typeof MySchool === 'undefined') return;
-      const activeSchool = MySchool.getActiveSchoolId();
-      if (school.id && school.id !== activeSchool) {
-        MySchool.impersonate(school.id);
+      const linkSchoolId  = this.dataset.schoolId;
+      const activeSchool  = MySchool.getActiveSchoolId();
+      if (linkSchoolId && linkSchoolId !== activeSchool) {
+        MySchool.impersonate(linkSchoolId);
       }
       MySchool.openSettings();
     });
