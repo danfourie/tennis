@@ -382,6 +382,8 @@ const NotificationService = (() => {
       fixtureId    = null,
       replyToId    = null,   // id of the notification being replied to
       replyContext = null,   // short excerpt of the original message
+      // eslint-disable-next-line no-unused-vars
+      ...extraFields         // pass-through: homeTeam, awayTeam, date, homeSchoolId, etc.
     } = payload;
     if (!recipientUids || recipientUids.length === 0) return;
     const profile   = Auth.getProfile();
@@ -392,6 +394,7 @@ const NotificationService = (() => {
     recipientUids.forEach(recipientUid => {
       if (!recipientUid) return;
       DB.writeNotification({
+        ...extraFields,       // extra type-specific fields (homeTeam, awayTeam, date, …)
         id:           uid(),
         uid:          recipientUid,
         type,
@@ -657,6 +660,7 @@ const NotificationService = (() => {
           fixtureId:    f.id,
           homeTeam:     f.homeSchoolName  || 'Home',
           awayTeam:     f.awaySchoolName  || 'Away',
+          date:         f.date            || '',   // needed for score_reminder template {{3}}
           homeSchoolId: f.homeSchoolId    || null,
           awaySchoolId: f.awaySchoolId    || null,
           createdAt:    now,

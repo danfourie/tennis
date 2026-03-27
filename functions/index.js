@@ -131,6 +131,7 @@ function _buildTemplate(notif) {
     case 'score_reminder':
       vars['1'] = notif.homeTeam || notif.opponent || '';
       vars['2'] = notif.awayTeam || '';
+      vars['3'] = notif.date     || '';   // template: {{3}} = date played
       break;
     case 'league_entry':
       vars['1'] = notif.leagueName || '';

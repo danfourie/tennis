@@ -564,9 +564,41 @@ const Leagues = (() => {
               body:           `This is a reminder to submit outstanding scores for ${l.name}. Please update your results as soon as possible.`,
               recipientLabel: `📬 Recipients: ${participantNames || 'All participants'}`,
               sendFn: async (title, body) => {
-                await NotificationService.sendToLeagueParticipants(l.id, {
-                  type: 'score_reminder', title, body, leagueId: l.id,
-                });
+                // Send per-fixture notifications so the WhatsApp template gets
+                // the correct homeTeam / awayTeam / date variables ({{1}} {{2}} {{3}}).
+                // Scope to fixtures that have no score recorded and a past date.
+                const today    = new Date().toISOString().slice(0, 10);
+                const fixtures = (l.fixtures || []).filter(f =>
+                  f.homeScore == null && f.awayScore == null && f.date && f.date <= today
+                );
+
+                if (fixtures.length === 0) {
+                  // No outstanding past fixtures — send a generic league-wide reminder
+                  await NotificationService.sendToLeagueParticipants(l.id, {
+                    type: 'score_reminder', title, body, leagueId: l.id,
+                  });
+                  return;
+                }
+
+                // Send one notification per fixture to each school involved
+                for (const f of fixtures) {
+                  const fixtureBody = `${f.homeSchoolName || 'Home'} vs ${f.awaySchoolName || 'Away'} on ${formatDate(f.date)} — please submit the score.`;
+                  const extra = {
+                    type:         'score_reminder',
+                    title,
+                    leagueId:     l.id,
+                    fixtureId:    f.id,
+                    homeTeam:     f.homeSchoolName  || '',
+                    awayTeam:     f.awaySchoolName  || '',
+                    date:         f.date            || '',
+                    homeSchoolId: f.homeSchoolId    || null,
+                    awaySchoolId: f.awaySchoolId    || null,
+                  };
+                  const schools = [...new Set([f.homeSchoolId, f.awaySchoolId].filter(Boolean))];
+                  for (const sid of schools) {
+                    await NotificationService.sendToSchool(sid, { ...extra, body: fixtureBody });
+                  }
+                }
               },
             },
           ],
