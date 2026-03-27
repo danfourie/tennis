@@ -50,7 +50,12 @@ const TEMPLATE_SIDS = {
   booking_cancelled:     'HXee12c3a33516b940bf69451dbb79c04d',
   fixture_changed:       'HX0a0982228b2086b1796c24c3a0dff47d',
   fixture_cancelled:     'HX330caa9222ff757a219ff5e1777295bd',
-  score_reminder:        'HX83655d37bef731fbcb82b7d77592cabd',  // quick-reply template v2
+  // score_reminder_v3 (HX24c495de9ff7f39a1537bba9c10f44da) — quick-reply,
+  // static button "Submit Score", no variables in button (Meta requirement).
+  // Submitted for UTILITY approval 2026-03-27. Temporarily disabled below
+  // (plain-text fallback used) until Meta approves; re-enable by replacing
+  // 'HX_FILL_score_reminder' with 'HX24c495de9ff7f39a1537bba9c10f44da'.
+  score_reminder:        'HX_FILL_score_reminder',
   league_entry:          'HX06da6c17895c1513873dd8f663545681',
   league_created:        'HX11b97f0a334fc41da1ac39f478af02f2',
   league_start_reminder: 'HXdc7cd1e18ad060dfdc38bba852ee739f',
@@ -149,8 +154,9 @@ function _buildTemplate(notif) {
     case 'score_reminder':
       vars['1'] = notif.homeTeam  || notif.opponent || '';
       vars['2'] = notif.awayTeam  || '';
-      vars['3'] = notif.date      ? _fmtDate(notif.date) : '';  // "20 Mar" for display
-      vars['4'] = notif.fixtureId || '';  // embedded in button id → ButtonPayload = "score_<fixtureId>"
+      vars['3'] = notif.date      ? _fmtDate(notif.date) : '';  // human-readable "20 Mar"
+      // Note: button payload is static "submit_score" — fixture identified via
+      // OriginalRepliedMessageSid matched against the stored msgSid in pending map.
       break;
     case 'league_entry':
       vars['1'] = notif.leagueName || '';
@@ -401,63 +407,57 @@ exports.whatsappWebhook = onRequest(async (req, res) => {
   }
 
   // ── "Submit Score" button tap (quick-reply template) ──────────────────
-  // The score_reminder template has a button with id = "score_{{4}}" where
-  // {{4}} is the fixtureId. When tapped, Twilio sends ButtonPayload =
-  // "score_<fixtureId>" — no SID lookup or menu needed.
-  //
-  // Guard: if fixtureId was empty when the template was sent (old notification
-  // format), ButtonPayload = "score_" and buttonFixtureId will be empty string.
-  // In that case we fall through to the pending-fixtures lookup below.
-  const buttonPayload   = req.body && req.body.ButtonPayload ? String(req.body.ButtonPayload) : null;
-  const isScoreButton   = buttonPayload && buttonPayload.startsWith('score_');
-  const buttonFixtureId = isScoreButton ? (buttonPayload.slice('score_'.length) || null) : null;
+  // score_reminder_v3 has a STATIC button id = "submit_score" (no variables —
+  // Meta rejects templates with variables or emojis in button fields).
+  // Fixture identity is established via OriginalRepliedMessageSid: Twilio
+  // always includes this when a user taps a quick-reply button (WhatsApp
+  // treats button taps as contextual replies to the original message).
+  // msgSid is stored in the pending-score fixture record at send time.
+  const buttonPayload = req.body && req.body.ButtonPayload ? String(req.body.ButtonPayload) : null;
 
-  if (isScoreButton) {
-    console.log(`[WhatsApp] "Submit Score" button tapped — fixtureId="${buttonFixtureId || 'none'}"`);
+  if (buttonPayload === 'submit_score') {
+    const origSid = req.body && req.body.OriginalRepliedMessageSid
+      ? String(req.body.OriginalRepliedMessageSid) : null;
 
-    if (buttonFixtureId) {
-      // ── Happy path: fixtureId embedded in payload ────────────────────
-      const btnFix = fixturesMap[buttonFixtureId];
+    console.log(`[WhatsApp] "Submit Score" button tapped — OriginalRepliedMessageSid=${origSid || 'none'}`);
 
-      if (btnFix && activeFixtures.find(f => f.fixtureId === buttonFixtureId)) {
-        await pendingRef.set({ awaitingScoreInput: buttonFixtureId }, { merge: true });
-        const dateStr = btnFix.date ? ` · ${_fmtDate(btnFix.date)}` : '';
-        return twiml(
-          `⏰ *${btnFix.homeTeam} vs ${btnFix.awayTeam}${dateStr}*\n\n` +
-          `Reply with the score — *${btnFix.homeTeam}'s score first*.\n\n` +
-          `  If *${btnFix.homeTeam}* won 6-3 → reply *6-3*\n` +
-          `  If *${btnFix.awayTeam}* won 6-3 → reply *3-6*`
-        );
-      }
-
-      return twiml(`❓ This score reminder has already been submitted or has expired.\n🔗 ${APP_URL}`);
+    // Identify fixture: OriginalRepliedMessageSid → msgSid lookup (primary)
+    let btnFixture = null;
+    if (origSid) {
+      const entry = Object.entries(fixturesMap).find(([, f]) => f.msgSid === origSid);
+      if (entry) btnFixture = { fixtureId: entry[0], ...entry[1] };
     }
 
-    // ── Fallback: no fixtureId in payload (notification sent before fix) ─
-    // Use the pending-fixtures map to identify what to score.
-    if (activeFixtures.length === 0) {
-      return twiml(`❓ No score requests are pending for your number.\n🔗 ${APP_URL}`);
+    // Fallback: only one fixture pending — unambiguous
+    if (!btnFixture && activeFixtures.length === 1) {
+      btnFixture = activeFixtures[0];
     }
-    if (activeFixtures.length === 1) {
-      const f = activeFixtures[0];
-      await pendingRef.set({ awaitingScoreInput: f.fixtureId }, { merge: true });
-      const dateStr = f.date ? ` · ${_fmtDate(f.date)}` : '';
+
+    if (btnFixture && activeFixtures.find(f => f.fixtureId === btnFixture.fixtureId)) {
+      await pendingRef.set({ awaitingScoreInput: btnFixture.fixtureId }, { merge: true });
+      const dateStr = btnFixture.date ? ` · ${_fmtDate(btnFixture.date)}` : '';
       return twiml(
-        `⏰ *${f.homeTeam} vs ${f.awayTeam}${dateStr}*\n\n` +
-        `Reply with the score — *${f.homeTeam}'s score first* (e.g. *6-3*).`
+        `⏰ *${btnFixture.homeTeam} vs ${btnFixture.awayTeam}${dateStr}*\n\n` +
+        `Reply with the score — *${btnFixture.homeTeam}'s score first*.\n\n` +
+        `  If *${btnFixture.homeTeam}* won 6-3 → reply *6-3*\n` +
+        `  If *${btnFixture.awayTeam}* won 6-3 → reply *3-6*`
       );
     }
-    // Multiple fixtures pending — show a numbered menu
-    const order = activeFixtures.map(f => f.fixtureId);
-    const lines = activeFixtures.map((f, i) =>
-      `${i + 1}. ${f.homeTeam} vs ${f.awayTeam}${f.date ? ' · ' + _fmtDate(f.date) : ''}`
-    );
-    await pendingRef.set({ menuOrder: order, selectedFixtureId: null, awaitingScoreInput: null }, { merge: true });
-    return twiml(
-      `📋 Multiple matches pending. Which match are you scoring?\n\n` +
-      lines.join('\n') +
-      '\n\nReply with the number.'
-    );
+
+    // Multiple fixtures pending, SID not matched — show a numbered menu
+    if (activeFixtures.length > 1) {
+      const order = activeFixtures.map(f => f.fixtureId);
+      const lines = activeFixtures.map((f, i) =>
+        `${i + 1}. ${f.homeTeam} vs ${f.awayTeam}${f.date ? ' · ' + _fmtDate(f.date) : ''}`
+      );
+      await pendingRef.set({ menuOrder: order, selectedFixtureId: null, awaitingScoreInput: null }, { merge: true });
+      return twiml(
+        `📋 Multiple matches pending. Which match are you scoring?\n\n` +
+        lines.join('\n') + '\n\nReply with the number.'
+      );
+    }
+
+    return twiml(`❓ No pending score request found — it may have already been submitted.\n🔗 ${APP_URL}`);
   }
 
   // ── Fallback: native WhatsApp "Reply" SID correlation ──────────────────
