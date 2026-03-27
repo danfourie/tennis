@@ -142,8 +142,7 @@ function _buildTemplate(notif) {
       vars['1'] = notif.homeTeam  || notif.opponent || '';
       vars['2'] = notif.awayTeam  || '';
       vars['3'] = notif.date      ? _fmtDate(notif.date) : '';  // human-readable "20 Mar"
-      // Note: button payload is static "submit_score" — fixture identified via
-      // OriginalRepliedMessageSid matched against the stored msgSid in pending map.
+      vars['4'] = notif.fixtureId || '';  // template defines 4 vars; {{4}} unused in body/button
       break;
     case 'league_entry':
       vars['1'] = notif.leagueName || '';
