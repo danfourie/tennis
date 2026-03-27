@@ -104,15 +104,7 @@ function _buildTextMessage(notif) {
   };
   const icon = icons[notif.type] || '🔔';
 
-  // For score reminders, append the reply instruction so the user knows they
-  // can submit the score directly here instead of opening the app.
-  // Plain-text fallback for score_reminder (used when the quick-reply template
-  // is not yet approved or not supported by the recipient's channel).
-  const replyHint = notif.type === 'score_reminder'
-    ? '\n\n*Reply to this message* with your score (e.g. *6-3*, your score first) to submit it directly.'
-    : '';
-
-  return `${icon} *Court Campus*\n${notif.title}\n${notif.body}${replyHint}\n\n🔗 ${APP_URL}`;
+  return `${icon} *Court Campus*\n${notif.title}\n${notif.body}\n\n🔗 ${APP_URL}`;
 }
 
 /**
@@ -248,7 +240,7 @@ exports.onNewNotification = onDocumentCreated(
         // Template send failed (pending approval, rejected, or invalid variables).
         // Fall back to plain text so the message still reaches the recipient.
         if (usedTemplate) {
-          console.warn(`[WhatsApp] Template failed for ${notif.type} (${tplErr.message}) — falling back to plain text`);
+          console.warn(`[WhatsApp] Template failed for ${notif.type} — code: ${tplErr.code} status: ${tplErr.status} message: ${tplErr.message} moreInfo: ${tplErr.moreInfo} — falling back to plain text`);
           delete msgParams.contentSid;
           delete msgParams.contentVariables;
           msgParams.body = _buildTextMessage(notif);

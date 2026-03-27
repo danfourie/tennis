@@ -24,9 +24,10 @@
  */
 
 const Auth = (() => {
-  let _user    = null;   // Firebase Auth user
-  let _profile = null;   // Firestore user profile document
-  let _role    = null;   // 'master' | 'admin' | 'user' | null
+  let _user             = null;   // Firebase Auth user
+  let _profile          = null;   // Firestore user profile document
+  let _role             = null;   // 'master' | 'admin' | 'user' | null
+  let _profileUnsub     = null;   // unsubscribe fn for profile live-listener
 
   // ── Bootstrap ─────────────────────────────────────────────
   function init() {
@@ -51,6 +52,7 @@ const Auth = (() => {
         await DB.loadBookings();
         if (typeof Calendar !== 'undefined') Calendar.refresh();
       } else {
+        if (_profileUnsub) { _profileUnsub(); _profileUnsub = null; }
         _profile = null;
         _role    = null;
         DB.clearBookings();
@@ -87,6 +89,19 @@ const Auth = (() => {
         ref.update({ lastLoginAt: now, loginLog }).catch(() => {});
         _profile.lastLoginAt = now;
         _profile.loginLog    = loginLog;
+
+        // ── Live profile listener ────────────────────────────────────────────
+        // Keep _profile in sync so that admin changes (e.g. managedVenueIds,
+        // role) are reflected in the current session without requiring a logout.
+        if (_profileUnsub) _profileUnsub();
+        _profileUnsub = ref.onSnapshot(snap => {
+          if (!snap.exists || !_user) return;
+          const updated = snap.data();
+          _profile = updated;
+          _role    = updated.role || 'user';
+          _updateUI();
+          _refreshViews();
+        }, () => { /* ignore listener errors — stale data is fine */ });
       } else {
         // Profile missing. Only auto-create when this is the very first user
         // (empty users collection = first-ever registration). For all other cases
