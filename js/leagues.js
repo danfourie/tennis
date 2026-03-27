@@ -484,10 +484,25 @@ const Leagues = (() => {
       btn.addEventListener('click', () => {
         const l = DB.getLeagues().find(x => x.id === btn.dataset.confirmDraw);
         if (!l) return;
-        if (!confirm(`Confirm the draw for "${l.name}"?\n\nThis locks the fixtures. Reset Fixtures will be disabled until you explicitly reset.`)) return;
-        DB.updateLeague({ ...l, drawConfirmed: true });
-        toast(`Draw confirmed for ${l.name}`, 'success');
-        renderAdmin();
+        if (!confirm(`Confirm the draw for "${l.name}"?\n\nThis locks the fixtures and notifies all participants. Reset Fixtures will be disabled until you explicitly reset.`)) return;
+        DB.updateLeague({ ...l, drawConfirmed: true })
+          .then(() => {
+            toast(`Draw confirmed for ${l.name} — participants notified ✓`, 'success');
+            renderAdmin();
+            // Notify participants now that the draw is final
+            if (typeof NotificationService !== 'undefined') {
+              NotificationService.sendToLeagueParticipants(l.id, {
+                type:     'league_created',
+                title:    `Draw confirmed: ${l.name}`,
+                body:     `${l.name}${l.division ? ' · ' + l.division : ''} fixtures have been confirmed. Your first match starts ${l.startDate ? formatDate(l.startDate) : 'soon'}.`,
+                leagueId: l.id,
+              });
+            }
+          })
+          .catch(err => {
+            console.error('[Leagues] confirmDraw failed:', err);
+            toast('Failed to confirm draw — ' + (err.message || err), 'error');
+          });
       });
     });
 
@@ -1140,14 +1155,8 @@ const Leagues = (() => {
         .then(() => {
           DB.writeAudit('league_created', 'league', `Created league: ${name} (${league.fixtures.length} fixtures)`, league.id, name);
           toast(`League created — ${league.fixtures.length} fixtures generated ✓`, 'success');
-          if (typeof NotificationService !== 'undefined') {
-            NotificationService.sendToLeagueParticipants(league.id, {
-              type:     'league_created',
-              title:    `New league: ${name}`,
-              body:     `${name}${division ? ' · ' + division : ''} has been created. Your fixtures start ${startDate ? formatDate(startDate) : 'soon'}.`,
-              leagueId: league.id,
-            });
-          }
+          // Participant notification is sent on "Confirm Draw", not on creation,
+          // so schools are only notified once the admin is happy with the fixtures.
         })
         .catch(err => {
           console.error('[Leagues] addLeague failed:', err);
