@@ -1061,16 +1061,19 @@ const Leagues = (() => {
         schoolIds:    newSchoolIds,
         standings:    mergedStandings,
       };
-      DB.updateLeague(updated);
-      DB.writeAudit('league_updated', 'league', `Updated league details: ${name}`, id, name);
-
-      // Auto-approve any pending entries for newly added schools
-      _autoApproveEntriesForParticipants(updated);
-
-      toast('League details saved ✓', 'success');
-      Modal.close('leagueModal');
-      render();
-      renderAdmin();
+      DB.updateLeague(updated)
+        .then(() => {
+          DB.writeAudit('league_updated', 'league', `Updated league details: ${name}`, id, name);
+          _autoApproveEntriesForParticipants(updated);
+          toast('League details saved ✓', 'success');
+          Modal.close('leagueModal');
+          render();
+          renderAdmin();
+        })
+        .catch(err => {
+          console.error('[Leagues] updateLeague (details) failed:', err);
+          toast('Failed to save league — ' + (err.message || err), 'error');
+        });
       return;
     }
 
@@ -1122,25 +1125,34 @@ const Leagues = (() => {
     };
 
     if (id) {
-      DB.updateLeague(league);
-      DB.writeAudit('league_updated', 'league', `Updated league: ${name}`, league.id, name);
-
-      // Auto-approve any pending entries whose school was just added to the league
-      _autoApproveEntriesForParticipants(league);
-
-      toast('League updated', 'success');
-    } else {
-      DB.addLeague(league);
-      DB.writeAudit('league_created', 'league', `Created league: ${name} (${league.fixtures.length} fixtures)`, league.id, name);
-      toast(`League created — ${league.fixtures.length} fixtures generated ✓`, 'success');
-      if (typeof NotificationService !== 'undefined') {
-        NotificationService.sendToLeagueParticipants(league.id, {
-          type:     'league_created',
-          title:    `New league: ${name}`,
-          body:     `${name}${division ? ' · ' + division : ''} has been created. Your fixtures start ${startDate ? formatDate(startDate) : 'soon'}.`,
-          leagueId: league.id,
+      DB.updateLeague(league)
+        .then(() => {
+          DB.writeAudit('league_updated', 'league', `Updated league: ${name}`, league.id, name);
+          _autoApproveEntriesForParticipants(league);
+          toast('League updated ✓', 'success');
+        })
+        .catch(err => {
+          console.error('[Leagues] updateLeague failed:', err);
+          toast('Failed to save league — ' + (err.message || err), 'error');
         });
-      }
+    } else {
+      DB.addLeague(league)
+        .then(() => {
+          DB.writeAudit('league_created', 'league', `Created league: ${name} (${league.fixtures.length} fixtures)`, league.id, name);
+          toast(`League created — ${league.fixtures.length} fixtures generated ✓`, 'success');
+          if (typeof NotificationService !== 'undefined') {
+            NotificationService.sendToLeagueParticipants(league.id, {
+              type:     'league_created',
+              title:    `New league: ${name}`,
+              body:     `${name}${division ? ' · ' + division : ''} has been created. Your fixtures start ${startDate ? formatDate(startDate) : 'soon'}.`,
+              leagueId: league.id,
+            });
+          }
+        })
+        .catch(err => {
+          console.error('[Leagues] addLeague failed:', err);
+          toast('Failed to save league — ' + (err.message || err), 'error');
+        });
     }
 
     Modal.close('leagueModal');

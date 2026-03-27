@@ -109,8 +109,8 @@ service cloud.firestore {
     // ── Leagues ──────────────────────────────────────────────────────────────
     match /leagues/{docId} {
       allow read:   if true;
-      allow create: if isMaster();
-      allow delete: if isMaster();
+      allow create: if isAdminRole();
+      allow delete: if isAdminRole();
       // Admin/master can change anything; school contacts may only update
       // the fixtures and standings arrays (score entry, verifications).
       allow update: if isAdminRole()
@@ -122,8 +122,8 @@ service cloud.firestore {
     // ── Tournaments ──────────────────────────────────────────────────────────
     match /tournaments/{docId} {
       allow read:   if true;
-      allow create: if isMaster();
-      allow delete: if isMaster();
+      allow create: if isAdminRole();
+      allow delete: if isAdminRole();
       allow update: if isAdminRole()
         || (isSignedIn()
             && request.resource.data.diff(resource.data).affectedKeys()

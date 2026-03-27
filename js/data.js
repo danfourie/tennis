@@ -145,12 +145,18 @@ const DB = {
   addLeague(league) {
     league.id = league.id || uid();
     _cache.leagues.push(league);
-    _doc('leagues', league.id).set(league).catch(console.error);
-    return league;
+    return _doc('leagues', league.id).set(league).catch(err => {
+      _cache.leagues = _cache.leagues.filter(l => l.id !== league.id);
+      throw err;
+    });
   },
   updateLeague(league) {
+    const prev = _cache.leagues.find(l => l.id === league.id);
     _cache.leagues = _cache.leagues.map(l => l.id === league.id ? league : l);
-    _doc('leagues', league.id).set(league).catch(console.error);
+    return _doc('leagues', league.id).set(league).catch(err => {
+      if (prev) _cache.leagues = _cache.leagues.map(l => l.id === league.id ? prev : l);
+      throw err;
+    });
   },
   deleteLeague(id) {
     _cache.leagues = _cache.leagues.filter(l => l.id !== id);
