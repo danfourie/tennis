@@ -50,7 +50,7 @@ const TEMPLATE_SIDS = {
   booking_cancelled:     'HXee12c3a33516b940bf69451dbb79c04d',
   fixture_changed:       'HX0a0982228b2086b1796c24c3a0dff47d',
   fixture_cancelled:     'HX330caa9222ff757a219ff5e1777295bd',
-  score_reminder:        'HXf02c97f4030b7e4c0083f0b25fd5fd92',
+  score_reminder:        'HX83655d37bef731fbcb82b7d77592cabd',  // quick-reply template v2
   league_entry:          'HX06da6c17895c1513873dd8f663545681',
   league_created:        'HX11b97f0a334fc41da1ac39f478af02f2',
   league_start_reminder: 'HXdc7cd1e18ad060dfdc38bba852ee739f',
@@ -106,8 +106,10 @@ function _buildTextMessage(notif) {
 
   // For score reminders, append the reply instruction so the user knows they
   // can submit the score directly here instead of opening the app.
+  // Plain-text fallback for score_reminder (used when the quick-reply template
+  // is not yet approved or not supported by the recipient's channel).
   const replyHint = notif.type === 'score_reminder'
-    ? '\n\n*Reply to this message* with your score (e.g. *6-3*, your score first) to record it directly here.'
+    ? '\n\n*Reply to this message* with your score (e.g. *6-3*, your score first) to submit it directly.'
     : '';
 
   return `${icon} *Court Campus*\n${notif.title}\n${notif.body}${replyHint}\n\n🔗 ${APP_URL}`;
@@ -145,9 +147,10 @@ function _buildTemplate(notif) {
       vars['2'] = notif.date       || '';
       break;
     case 'score_reminder':
-      vars['1'] = notif.homeTeam || notif.opponent || '';
-      vars['2'] = notif.awayTeam || '';
-      vars['3'] = notif.date     || '';   // template: {{3}} = date played
+      vars['1'] = notif.homeTeam  || notif.opponent || '';
+      vars['2'] = notif.awayTeam  || '';
+      vars['3'] = notif.date      ? _fmtDate(notif.date) : '';  // "20 Mar" for display
+      vars['4'] = notif.fixtureId || '';  // embedded in button id → ButtonPayload = "score_<fixtureId>"
       break;
     case 'league_entry':
       vars['1'] = notif.leagueName || '';
@@ -397,15 +400,44 @@ exports.whatsappWebhook = onRequest(async (req, res) => {
     pendingRef.update(purge).catch(() => {});
   }
 
-  // ── Native WhatsApp "Reply" correlation ────────────────────────────────
-  // When the user long-presses a message and taps Reply, Twilio includes
-  // OriginalRepliedMessageSid — the SID of the outbound message they replied
-  // to. We store msgSid in each fixture record so we can identify the exact
-  // fixture without asking the user to pick from a menu.
-  const repliedSid    = req.body && req.body.OriginalRepliedMessageSid
+  // ── "Submit Score" button tap (quick-reply template) ──────────────────
+  // The score_reminder template has a button with id = "score_{{4}}" where
+  // {{4}} is the fixtureId. When tapped, Twilio sends ButtonPayload =
+  // "score_<fixtureId>" — no SID lookup or menu needed.
+  const buttonPayload  = req.body && req.body.ButtonPayload ? String(req.body.ButtonPayload) : null;
+  const buttonFixtureId = buttonPayload && buttonPayload.startsWith('score_')
+    ? buttonPayload.slice('score_'.length)
+    : null;
+
+  if (buttonFixtureId) {
+    console.log(`[WhatsApp] "Submit Score" button tapped for fixture ${buttonFixtureId}`);
+    const btnFix = fixturesMap[buttonFixtureId];
+
+    if (btnFix && activeFixtures.find(f => f.fixtureId === buttonFixtureId)) {
+      // Prompt for the score and store which fixture we're waiting for
+      await pendingRef.set({ awaitingScoreInput: buttonFixtureId }, { merge: true });
+      const dateStr = btnFix.date ? ` · ${_fmtDate(btnFix.date)}` : '';
+      return twiml(
+        `⏰ *${btnFix.homeTeam} vs ${btnFix.awayTeam}${dateStr}*\n\n` +
+        `Reply with the score — *${btnFix.homeTeam}'s score first*.\n\n` +
+        `  If *${btnFix.homeTeam}* won 6-3 → reply *6-3*\n` +
+        `  If *${btnFix.awayTeam}* won 6-3 → reply *3-6*`
+      );
+    }
+
+    // Fixture not found — already submitted or expired
+    return twiml(
+      `❓ This score reminder has already been submitted or has expired.\n🔗 ${APP_URL}`
+    );
+  }
+
+  // ── Fallback: native WhatsApp "Reply" SID correlation ──────────────────
+  // For users who long-press → Reply on a message rather than tapping the
+  // button (e.g. plain-text fallback, or older app versions).
+  const repliedSid     = req.body && req.body.OriginalRepliedMessageSid
     ? String(req.body.OriginalRepliedMessageSid)
     : null;
-  const repliedEntry  = repliedSid
+  const repliedEntry   = repliedSid
     ? Object.entries(fixturesMap).find(([, f]) => f.msgSid === repliedSid)
     : null;
   const repliedFixture = repliedEntry
@@ -432,9 +464,8 @@ exports.whatsappWebhook = onRequest(async (req, res) => {
   }
 
   // ── Menu selection reply (single digit) ────────────────────────────────
-  // Fallback when the user sends a plain new message (no native Reply context)
-  // and has multiple fixtures pending. A number selects a match; the next
-  // score reply then targets the selected fixture.
+  // Last-resort fallback: user typed a plain new message with no button or
+  // reply context and has multiple fixtures pending.
   const menuOrder = Array.isArray(pendingData.menuOrder) ? pendingData.menuOrder : [];
   const numMatch  = !repliedFixture && rawBody.match(/^(\d+)$/);
 
@@ -450,7 +481,7 @@ exports.whatsappWebhook = onRequest(async (req, res) => {
     await pendingRef.set({ selectedFixtureId: selId }, { merge: true });
     return twiml(
       `✅ *${selFix.homeTeam} vs ${selFix.awayTeam}* selected.\n` +
-      `Now reply with the score, your score first (e.g. *6-3*).`
+      `Now reply with the score, *${selFix.homeTeam}'s score first* (e.g. *6-3*).`
     );
   }
 
@@ -471,14 +502,22 @@ exports.whatsappWebhook = onRequest(async (req, res) => {
     }
 
     // Determine which fixture to score — priority order:
-    //  1. Native WhatsApp Reply → exact message SID match (best)
-    //  2. Only one fixture pending → unambiguous
-    //  3. User already selected from a menu
-    //  4. Multiple fixtures, no selection → send numbered menu
+    //  1. awaitingScoreInput — user tapped "Submit Score" button (clearest signal)
+    //  2. repliedFixture — native WhatsApp Reply to a specific message
+    //  3. Only one fixture pending — unambiguous
+    //  4. User already selected from the menu
+    //  5. Multiple pending, no selection — send numbered menu
     let target = null;
 
-    if (repliedFixture && activeFixtures.find(f => f.fixtureId === repliedFixture.fixtureId)) {
-      // User replied directly to the specific score reminder message
+    if (
+      pendingData.awaitingScoreInput &&
+      fixturesMap[pendingData.awaitingScoreInput] &&
+      activeFixtures.find(f => f.fixtureId === pendingData.awaitingScoreInput)
+    ) {
+      // User tapped the "Submit Score" button — we know exactly which fixture
+      target = { fixtureId: pendingData.awaitingScoreInput, ...fixturesMap[pendingData.awaitingScoreInput] };
+    } else if (repliedFixture && activeFixtures.find(f => f.fixtureId === repliedFixture.fixtureId)) {
+      // User used WhatsApp's native Reply on a specific reminder message
       target = repliedFixture;
     } else if (activeFixtures.length === 1) {
       // Only one pending game — unambiguous
@@ -488,7 +527,7 @@ exports.whatsappWebhook = onRequest(async (req, res) => {
       fixturesMap[pendingData.selectedFixtureId] &&
       activeFixtures.find(f => f.fixtureId === pendingData.selectedFixtureId)
     ) {
-      // User already picked a fixture from the menu
+      // User already picked from the menu
       target = { fixtureId: pendingData.selectedFixtureId, ...fixturesMap[pendingData.selectedFixtureId] };
     } else {
       // Multiple fixtures, no selection yet — send a numbered menu
@@ -496,16 +535,11 @@ exports.whatsappWebhook = onRequest(async (req, res) => {
       const lines = activeFixtures.map((f, i) =>
         `${i + 1}. ${f.homeTeam} vs ${f.awayTeam}${f.date ? ' · ' + _fmtDate(f.date) : ''}`
       );
-      await pendingRef.set(
-        { menuOrder: order, selectedFixtureId: null },
-        { merge: true }
-      );
+      await pendingRef.set({ menuOrder: order, selectedFixtureId: null }, { merge: true });
       return twiml(
-        `📋 You have ${activeFixtures.length} matches pending.\n\n` +
-        `*Tip:* Use WhatsApp's Reply on the specific reminder message to score it directly.\n\n` +
-        `Or reply with the number of the match you are scoring:\n\n` +
+        `📋 You have ${activeFixtures.length} matches pending. Reply with the number of the match:\n\n` +
         lines.join('\n') +
-        '\n\nThen reply with your score (e.g. *6-3*, your score first).'
+        '\n\nThen reply with the score (e.g. *6-3*, your score first).'
       );
     }
 
@@ -528,11 +562,12 @@ exports.whatsappWebhook = onRequest(async (req, res) => {
       fixtures[idx].awayScore = awayScore;
       await leagueRef.update({ fixtures });
 
-      // Remove this fixture from the pending map; clear menu/selection state
+      // Remove this fixture from the pending map; clear all state
       await pendingRef.update({
-        [`fixtures.${fixtureId}`]:            admin.firestore.FieldValue.delete(),
-        menuOrder:                            admin.firestore.FieldValue.delete(),
-        selectedFixtureId:                    admin.firestore.FieldValue.delete(),
+        [`fixtures.${fixtureId}`]: admin.firestore.FieldValue.delete(),
+        menuOrder:                 admin.firestore.FieldValue.delete(),
+        selectedFixtureId:        admin.firestore.FieldValue.delete(),
+        awaitingScoreInput:       admin.firestore.FieldValue.delete(),
       });
 
       // Audit log
