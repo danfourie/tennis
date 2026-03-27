@@ -414,23 +414,64 @@ const NotificationService = (() => {
     if (DB.getUsers().length === 0) await DB.loadUsers();
   }
 
+  /**
+   * Normalise a phone number to E.164 (+27...) for comparison.
+   * Returns null if the input is blank or unrecognisable.
+   */
+  function _normPhone(phone) {
+    if (!phone) return null;
+    const c = String(phone).replace(/[\s\-\(\)\.]/g, '');
+    if (c.startsWith('+'))  return c;
+    if (c.startsWith('27')) return '+' + c;
+    if (c.startsWith('0'))  return '+27' + c.slice(1);
+    return c.length >= 7 ? c : null;
+  }
+
+  /**
+   * Resolve UIDs for a list of school IDs.
+   * Primary  : users whose `schoolId` field matches.
+   * Secondary: users whose email OR phone matches a school organizer entry.
+   *
+   * The secondary lookup is necessary when a user is a school contact
+   * (listed as organizer) but has not set their schoolId in their profile
+   * (e.g. master/admin accounts used during setup or testing).
+   */
+  function _uidsForSchools(schoolIds) {
+    const allUsers = DB.getUsers();
+    const uidSet   = new Set();
+
+    // Primary: explicit schoolId link
+    allUsers.filter(u => schoolIds.includes(u.schoolId)).forEach(u => uidSet.add(u.uid));
+
+    // Secondary: email / phone match against school organizer list
+    DB.getSchools()
+      .filter(s => schoolIds.includes(s.id))
+      .forEach(school => {
+        (school.organizers || []).forEach(org => {
+          const orgEmail = (org.email || '').toLowerCase();
+          const orgPhone = _normPhone(org.phone);
+
+          allUsers.forEach(u => {
+            if (orgEmail && u.email && u.email.toLowerCase() === orgEmail) uidSet.add(u.uid);
+            if (orgPhone && u.phone && _normPhone(u.phone) === orgPhone)   uidSet.add(u.uid);
+          });
+        });
+      });
+
+    return [...uidSet];
+  }
+
   // ── Target helpers ───────────────────────────────────────────
   async function sendToSchool(schoolId, payload) {
     if (!schoolId) return;
     await _ensureUsers();
-    const uids = DB.getUsers()
-      .filter(u => u.schoolId === schoolId)
-      .map(u => u.uid);
-    send({ ...payload, recipientUids: uids });
+    send({ ...payload, recipientUids: _uidsForSchools([schoolId]) });
   }
 
   async function sendToSchoolGroup(schoolIds, payload) {
     const ids = Array.isArray(schoolIds) ? schoolIds : [schoolIds];
     await _ensureUsers();
-    const uids = [...new Set(
-      DB.getUsers().filter(u => ids.includes(u.schoolId)).map(u => u.uid)
-    )];
-    send({ ...payload, recipientUids: uids });
+    send({ ...payload, recipientUids: _uidsForSchools(ids) });
   }
 
   async function sendToLeagueParticipants(leagueId, payload) {
@@ -547,12 +588,34 @@ const NotificationService = (() => {
   async function checkPendingReminders() {
     const profile = Auth.getProfile();
     if (!profile) return;
-    // Admin/master users have no schoolId — they still need reminders for
-    // leagues they manage, so we don't gate on schoolId here.
-    const myUid      = profile.uid;
+
+    const myUid   = profile.uid;
+    const today   = toDateStr(new Date());
+    const in7days = toDateStr(addDays(new Date(), 7));
+
+    // Build the full set of school IDs this user is associated with.
+    // Primary  : profile.schoolId (explicit link)
+    // Secondary: any school where the user's email or phone is listed as
+    //            an organizer — catches admin/master users who are school
+    //            contacts but haven't set schoolId in their profile.
+    const mySchoolIds = new Set();
+    if (profile.schoolId) mySchoolIds.add(profile.schoolId);
+
+    const myEmail = (profile.email || '').toLowerCase();
+    const myPhone = _normPhone(profile.phone || '');
+    DB.getSchools().forEach(s => {
+      (s.organizers || []).forEach(org => {
+        const orgEmail = (org.email || '').toLowerCase();
+        const orgPhone = _normPhone(org.phone);
+        if ((myEmail && orgEmail && myEmail === orgEmail) ||
+            (myPhone && orgPhone && myPhone === orgPhone)) {
+          mySchoolIds.add(s.id);
+        }
+      });
+    });
+
+    // For backward compat keep a single value for simple comparisons
     const mySchoolId = profile.schoolId || null;
-    const today      = toDateStr(new Date());
-    const in7days    = toDateStr(addDays(new Date(), 7));
 
     // Fetch existing reminder notifications for this user to avoid duplicates
     let existing = [];
@@ -579,7 +642,8 @@ const NotificationService = (() => {
       for (const f of (league.fixtures || [])) {
         if (!f.date || f.date >= today) continue;
         if (f.homeScore !== null && f.homeScore !== undefined) continue;
-        if (f.homeSchoolId !== mySchoolId && f.awaySchoolId !== mySchoolId) continue;
+        // User must be associated with at least one of the fixture's schools
+        if (!mySchoolIds.has(f.homeSchoolId) && !mySchoolIds.has(f.awaySchoolId)) continue;
         if (alreadyForFixture(f.id)) continue;
 
         newNotifs.push({
@@ -605,7 +669,7 @@ const NotificationService = (() => {
     for (const league of DB.getLeagues()) {
       if (!league.startDate) continue;
       if (league.startDate < today || league.startDate > in7days) continue;
-      const isParticipant = (league.participants || []).some(p => p.schoolId === mySchoolId);
+      const isParticipant = (league.participants || []).some(p => mySchoolIds.has(p.schoolId));
       if (!isParticipant) continue;
       if (alreadyForLeague(league.id)) continue;
 
