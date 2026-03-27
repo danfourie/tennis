@@ -654,7 +654,7 @@ const NotificationService = (() => {
           uid:          myUid,
           type:         'score_reminder',
           title:        'Score not submitted',
-          body:         `${f.homeSchoolName || 'Home'} vs ${f.awaySchoolName || 'Away'} on ${formatDate(f.date)} still has no score recorded.`,
+          body:         `${f.homeSchoolName || 'Home'} vs ${f.awaySchoolName || 'Away'} on ${formatDate(f.date)} — please reply with the score (e.g. 6-3) or log in to enter it.`,
           read:         false,
           leagueId:     league.id,
           fixtureId:    f.id,

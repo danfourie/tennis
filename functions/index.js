@@ -103,7 +103,14 @@ function _buildTextMessage(notif) {
     team_registration_reminder:  '📝',
   };
   const icon = icons[notif.type] || '🔔';
-  return `${icon} *Court Campus*\n${notif.title}\n${notif.body}\n\n🔗 ${APP_URL}`;
+
+  // For score reminders, append the reply instruction so the user knows they
+  // can submit the score directly here instead of opening the app.
+  const replyHint = notif.type === 'score_reminder'
+    ? '\n\nReply with your score (e.g. *6-3*, your score first) to record it directly here.'
+    : '';
+
+  return `${icon} *Court Campus*\n${notif.title}\n${notif.body}${replyHint}\n\n🔗 ${APP_URL}`;
 }
 
 /**

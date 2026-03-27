@@ -582,7 +582,7 @@ const Leagues = (() => {
 
                 // Send one notification per fixture to each school involved
                 for (const f of fixtures) {
-                  const fixtureBody = `${f.homeSchoolName || 'Home'} vs ${f.awaySchoolName || 'Away'} on ${formatDate(f.date)} — please submit the score.`;
+                  const fixtureBody = `${f.homeSchoolName || 'Home'} vs ${f.awaySchoolName || 'Away'} on ${formatDate(f.date)} — please reply with the score (e.g. 6-3) or log in to enter it.`;
                   const extra = {
                     type:         'score_reminder',
                     title,
