@@ -107,7 +107,7 @@ function _buildTextMessage(notif) {
   // For score reminders, append the reply instruction so the user knows they
   // can submit the score directly here instead of opening the app.
   const replyHint = notif.type === 'score_reminder'
-    ? '\n\nReply with your score (e.g. *6-3*, your score first) to record it directly here.'
+    ? '\n\n*Reply to this message* with your score (e.g. *6-3*, your score first) to record it directly here.'
     : '';
 
   return `${icon} *Court Campus*\n${notif.title}\n${notif.body}${replyHint}\n\n🔗 ${APP_URL}`;
@@ -258,9 +258,11 @@ exports.onNewNotification = onDocumentCreated(
       console.log(`[WhatsApp] Sent ${notif.type} to ${phone} — SID: ${msg.sid} status: ${msg.status} template: ${usedTemplate} errorCode: ${msg.errorCode || 'none'} errorMessage: ${msg.errorMessage || 'none'}`);
 
       // For score reminders: add this fixture to the pending-score map so a
-      // WhatsApp reply of the form "6-3" can update the correct fixture.
-      // Stored as fixtures.{fixtureId} so multiple outstanding fixtures accumulate
-      // rather than overwriting each other (a school may have several pending games).
+      // WhatsApp reply can update the correct fixture.
+      // • msgSid is stored so that a native WhatsApp "Reply" to this exact
+      //   message lets the webhook identify the fixture without any menu.
+      // • The fixtures map accumulates all pending fixtures per phone so that
+      //   a plain new message still works via numbered-menu fallback.
       if (notif.type === 'score_reminder' && notif.fixtureId && notif.leagueId) {
         const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000); // 48 h
         await admin.firestore().doc(`whatsappPendingScores/${phone}`).set(
@@ -273,13 +275,14 @@ exports.onNewNotification = onDocumentCreated(
                 date:         notif.date         || '',
                 homeSchoolId: notif.homeSchoolId || null,
                 awaySchoolId: notif.awaySchoolId || null,
+                msgSid:       msg.sid,           // used to correlate a native Reply
                 expiresAt,
               },
             },
           },
-          { merge: true }   // merge into map so sibling fixtures are not overwritten
+          { merge: true }
         );
-        console.log(`[WhatsApp] Pending score stored for ${phone} fixture ${notif.fixtureId}`);
+        console.log(`[WhatsApp] Pending score stored for ${phone} fixture ${notif.fixtureId} msgSid ${msg.sid}`);
       }
     } catch (err) {
       console.error(`[WhatsApp] Send failed for ${phone} type=${notif.type}:`, err.message);
@@ -394,6 +397,25 @@ exports.whatsappWebhook = onRequest(async (req, res) => {
     pendingRef.update(purge).catch(() => {});
   }
 
+  // ── Native WhatsApp "Reply" correlation ────────────────────────────────
+  // When the user long-presses a message and taps Reply, Twilio includes
+  // OriginalRepliedMessageSid — the SID of the outbound message they replied
+  // to. We store msgSid in each fixture record so we can identify the exact
+  // fixture without asking the user to pick from a menu.
+  const repliedSid    = req.body && req.body.OriginalRepliedMessageSid
+    ? String(req.body.OriginalRepliedMessageSid)
+    : null;
+  const repliedEntry  = repliedSid
+    ? Object.entries(fixturesMap).find(([, f]) => f.msgSid === repliedSid)
+    : null;
+  const repliedFixture = repliedEntry
+    ? { fixtureId: repliedEntry[0], ...repliedEntry[1] }
+    : null;
+
+  if (repliedFixture) {
+    console.log(`[WhatsApp] Native reply to msgSid ${repliedSid} → fixture ${repliedFixture.fixtureId}`);
+  }
+
   // ── Near-miss score format detection ───────────────────────────────────
   const noSpace    = rawBody.replace(/\s/g, '');
   const scoreMatch = noSpace.match(/^(\d{1,3})-(\d{1,3})$/);
@@ -410,10 +432,11 @@ exports.whatsappWebhook = onRequest(async (req, res) => {
   }
 
   // ── Menu selection reply (single digit) ────────────────────────────────
-  // When the user has multiple pending fixtures we send a numbered menu.
-  // A single-digit reply chooses a match; the next score reply then targets it.
+  // Fallback when the user sends a plain new message (no native Reply context)
+  // and has multiple fixtures pending. A number selects a match; the next
+  // score reply then targets the selected fixture.
   const menuOrder = Array.isArray(pendingData.menuOrder) ? pendingData.menuOrder : [];
-  const numMatch  = rawBody.match(/^(\d+)$/);
+  const numMatch  = !repliedFixture && rawBody.match(/^(\d+)$/);
 
   if (numMatch && menuOrder.length > 1) {
     const idx    = parseInt(numMatch[1], 10) - 1;
@@ -447,10 +470,17 @@ exports.whatsappWebhook = onRequest(async (req, res) => {
       );
     }
 
-    // Determine which fixture to score
+    // Determine which fixture to score — priority order:
+    //  1. Native WhatsApp Reply → exact message SID match (best)
+    //  2. Only one fixture pending → unambiguous
+    //  3. User already selected from a menu
+    //  4. Multiple fixtures, no selection → send numbered menu
     let target = null;
 
-    if (activeFixtures.length === 1) {
+    if (repliedFixture && activeFixtures.find(f => f.fixtureId === repliedFixture.fixtureId)) {
+      // User replied directly to the specific score reminder message
+      target = repliedFixture;
+    } else if (activeFixtures.length === 1) {
       // Only one pending game — unambiguous
       target = activeFixtures[0];
     } else if (
@@ -471,7 +501,9 @@ exports.whatsappWebhook = onRequest(async (req, res) => {
         { merge: true }
       );
       return twiml(
-        `📋 You have ${activeFixtures.length} matches pending. Reply with the number of the match you are scoring:\n\n` +
+        `📋 You have ${activeFixtures.length} matches pending.\n\n` +
+        `*Tip:* Use WhatsApp's Reply on the specific reminder message to score it directly.\n\n` +
+        `Or reply with the number of the match you are scoring:\n\n` +
         lines.join('\n') +
         '\n\nThen reply with your score (e.g. *6-3*, your score first).'
       );
