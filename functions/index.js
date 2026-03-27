@@ -62,6 +62,15 @@ const TEMPLATE_SIDS = {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+/** Format an ISO date string (YYYY-MM-DD) as "15 Mar" for WhatsApp messages. */
+function _fmtDate(iso) {
+  if (!iso) return '';
+  const parts = iso.split('-');
+  if (parts.length < 3) return iso;
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return `${parseInt(parts[2])} ${months[parseInt(parts[1]) - 1] || ''}`;
+}
+
 /** Normalise a South African phone to E.164 format (+27...) */
 function _toE164(phone) {
   if (!phone) return null;
@@ -241,20 +250,28 @@ exports.onNewNotification = onDocumentCreated(
 
       console.log(`[WhatsApp] Sent ${notif.type} to ${phone} — SID: ${msg.sid} status: ${msg.status} template: ${usedTemplate} errorCode: ${msg.errorCode || 'none'} errorMessage: ${msg.errorMessage || 'none'}`);
 
-      // For score reminders: store a pending-score record so a WhatsApp reply
-      // of the form "HOME-AWAY" (e.g. "6-3") can update the fixture directly.
+      // For score reminders: add this fixture to the pending-score map so a
+      // WhatsApp reply of the form "6-3" can update the correct fixture.
+      // Stored as fixtures.{fixtureId} so multiple outstanding fixtures accumulate
+      // rather than overwriting each other (a school may have several pending games).
       if (notif.type === 'score_reminder' && notif.fixtureId && notif.leagueId) {
         const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000); // 48 h
-        await admin.firestore().doc(`whatsappPendingScores/${phone}`).set({
-          fixtureId:    notif.fixtureId,
-          leagueId:     notif.leagueId,
-          homeTeam:     notif.homeTeam     || '',
-          awayTeam:     notif.awayTeam     || '',
-          homeSchoolId: notif.homeSchoolId || null,
-          awaySchoolId: notif.awaySchoolId || null,
-          sentAt:       admin.firestore.FieldValue.serverTimestamp(),
-          expiresAt,
-        });
+        await admin.firestore().doc(`whatsappPendingScores/${phone}`).set(
+          {
+            fixtures: {
+              [notif.fixtureId]: {
+                leagueId:     notif.leagueId,
+                homeTeam:     notif.homeTeam     || '',
+                awayTeam:     notif.awayTeam     || '',
+                date:         notif.date         || '',
+                homeSchoolId: notif.homeSchoolId || null,
+                awaySchoolId: notif.awaySchoolId || null,
+                expiresAt,
+              },
+            },
+          },
+          { merge: true }   // merge into map so sibling fixtures are not overwritten
+        );
         console.log(`[WhatsApp] Pending score stored for ${phone} fixture ${notif.fixtureId}`);
       }
     } catch (err) {
@@ -341,16 +358,41 @@ exports.whatsappWebhook = onRequest(async (req, res) => {
   }
   const user = userDoc.data();
 
-  // ── Score reply detection ───────────────────────────────────────────────
-  // Accept only strict HOME-AWAY format: one to three digits, a hyphen, one to
-  // three digits — no spaces, no other separators.
-  const noSpace = rawBody.replace(/\s/g, '');
-  const scoreMatch = noSpace.match(/^(\d{1,3})-(\d{1,3})$/);
+  // ── Load all pending fixtures for this phone ───────────────────────────
+  // The pending doc stores a `fixtures` map keyed by fixtureId so multiple
+  // outstanding games from the same school accumulate without overwriting.
+  const pendingRef  = db.doc(`whatsappPendingScores/${e164}`);
+  const pendingDoc  = await pendingRef.get();
+  const pendingData = pendingDoc.exists ? pendingDoc.data() : {};
+  const fixturesMap = pendingData.fixtures || {};
 
-  // Detect common near-miss formats and give specific guidance
-  const nearMiss = !scoreMatch && (
-    /^\d+\s*[-:,/]\s*\d+$/.test(rawBody) ||  // spaces / wrong separator
-    /^\d{1,3}\s+\d{1,3}$/.test(rawBody)       // "6 3"
+  // Resolve active (non-expired) fixtures from the map
+  const nowMs = Date.now();
+  const activeFixtures = Object.entries(fixturesMap)
+    .map(([fid, f]) => ({ fixtureId: fid, ...f }))
+    .filter(f => {
+      if (!f.expiresAt) return true;
+      const expMs = f.expiresAt.toMillis
+        ? f.expiresAt.toMillis()
+        : new Date(f.expiresAt).getTime();
+      return nowMs < expMs;
+    });
+
+  // Purge expired entries from Firestore (fire-and-forget)
+  const expiredIds = Object.keys(fixturesMap)
+    .filter(id => !activeFixtures.find(f => f.fixtureId === id));
+  if (expiredIds.length) {
+    const purge = {};
+    expiredIds.forEach(id => { purge[`fixtures.${id}`] = admin.firestore.FieldValue.delete(); });
+    pendingRef.update(purge).catch(() => {});
+  }
+
+  // ── Near-miss score format detection ───────────────────────────────────
+  const noSpace    = rawBody.replace(/\s/g, '');
+  const scoreMatch = noSpace.match(/^(\d{1,3})-(\d{1,3})$/);
+  const nearMiss   = !scoreMatch && (
+    /^\d+\s*[-:,/]\s*\d+$/.test(rawBody) ||   // spaces or wrong separator
+    /^\d{1,3}\s+\d{1,3}$/.test(rawBody)        // "6 3"
   );
   if (nearMiss) {
     return twiml(
@@ -360,6 +402,29 @@ exports.whatsappWebhook = onRequest(async (req, res) => {
     );
   }
 
+  // ── Menu selection reply (single digit) ────────────────────────────────
+  // When the user has multiple pending fixtures we send a numbered menu.
+  // A single-digit reply chooses a match; the next score reply then targets it.
+  const menuOrder = Array.isArray(pendingData.menuOrder) ? pendingData.menuOrder : [];
+  const numMatch  = rawBody.match(/^(\d+)$/);
+
+  if (numMatch && menuOrder.length > 1) {
+    const idx    = parseInt(numMatch[1], 10) - 1;
+    const selId  = menuOrder[idx];
+    const selFix = selId ? fixturesMap[selId] : null;
+
+    if (!selFix || idx < 0) {
+      return twiml(`⚠️ Please reply with a number between 1 and ${menuOrder.length}.`);
+    }
+
+    await pendingRef.set({ selectedFixtureId: selId }, { merge: true });
+    return twiml(
+      `✅ *${selFix.homeTeam} vs ${selFix.awayTeam}* selected.\n` +
+      `Now reply with the score, your score first (e.g. *6-3*).`
+    );
+  }
+
+  // ── Score reply ─────────────────────────────────────────────────────────
   if (scoreMatch) {
     const homeScore = parseInt(scoreMatch[1], 10);
     const awayScore = parseInt(scoreMatch[2], 10);
@@ -368,37 +433,54 @@ exports.whatsappWebhook = onRequest(async (req, res) => {
       return twiml('❌ Score values too large. Please enter realistic scores (e.g. 6-3 or 42-12).');
     }
 
-    // Look up pending score request keyed on E.164 phone
-    const pendingRef = db.doc(`whatsappPendingScores/${e164}`);
-    const pending    = await pendingRef.get();
-
-    if (!pending.exists) {
+    if (activeFixtures.length === 0) {
       return twiml(
         '❓ No score request is pending for your number.\n' +
         `Please enter the score in the app: ${APP_URL}`
       );
     }
 
-    const { fixtureId, leagueId, homeTeam, awayTeam, expiresAt } = pending.data();
+    // Determine which fixture to score
+    let target = null;
 
-    if (expiresAt && new Date() > new Date(expiresAt.toMillis ? expiresAt.toMillis() : expiresAt)) {
-      await pendingRef.delete();
+    if (activeFixtures.length === 1) {
+      // Only one pending game — unambiguous
+      target = activeFixtures[0];
+    } else if (
+      pendingData.selectedFixtureId &&
+      fixturesMap[pendingData.selectedFixtureId] &&
+      activeFixtures.find(f => f.fixtureId === pendingData.selectedFixtureId)
+    ) {
+      // User already picked a fixture from the menu
+      target = { fixtureId: pendingData.selectedFixtureId, ...fixturesMap[pendingData.selectedFixtureId] };
+    } else {
+      // Multiple fixtures, no selection yet — send a numbered menu
+      const order = activeFixtures.map(f => f.fixtureId);
+      const lines = activeFixtures.map((f, i) =>
+        `${i + 1}. ${f.homeTeam} vs ${f.awayTeam}${f.date ? ' · ' + _fmtDate(f.date) : ''}`
+      );
+      await pendingRef.set(
+        { menuOrder: order, selectedFixtureId: null },
+        { merge: true }
+      );
       return twiml(
-        '⏰ Score request has expired (48 h window).\n' +
-        `Please enter the score in the app: ${APP_URL}`
+        `📋 You have ${activeFixtures.length} matches pending. Reply with the number of the match you are scoring:\n\n` +
+        lines.join('\n') +
+        '\n\nThen reply with your score (e.g. *6-3*, your score first).'
       );
     }
 
+    // Apply the score to the chosen fixture
     try {
+      const { fixtureId, leagueId, homeTeam, awayTeam } = target;
       const leagueRef = db.doc(`leagues/${leagueId}`);
       const leagueDoc = await leagueRef.get();
       if (!leagueDoc.exists) throw new Error('League not found');
 
       const fixtures = leagueDoc.data().fixtures || [];
-      const idx = fixtures.findIndex(f => f.id === fixtureId);
+      const idx      = fixtures.findIndex(f => f.id === fixtureId);
       if (idx === -1) throw new Error('Fixture not found');
 
-      // If a score already exists, confirm the overwrite in the reply
       const prev = fixtures[idx].homeScore != null
         ? ` (overwrites previous ${fixtures[idx].homeScore}-${fixtures[idx].awayScore})`
         : '';
@@ -407,8 +489,12 @@ exports.whatsappWebhook = onRequest(async (req, res) => {
       fixtures[idx].awayScore = awayScore;
       await leagueRef.update({ fixtures });
 
-      // Clean up pending entry
-      await pendingRef.delete();
+      // Remove this fixture from the pending map; clear menu/selection state
+      await pendingRef.update({
+        [`fixtures.${fixtureId}`]:            admin.firestore.FieldValue.delete(),
+        menuOrder:                            admin.firestore.FieldValue.delete(),
+        selectedFixtureId:                    admin.firestore.FieldValue.delete(),
+      });
 
       // Audit log
       await db.collection('auditLog').add({
@@ -423,12 +509,18 @@ exports.whatsappWebhook = onRequest(async (req, res) => {
       });
 
       console.log(`[WhatsApp] Score saved ${homeTeam} ${homeScore}-${awayScore} ${awayTeam} by ${fromPhone}`);
+
+      // Check if more fixtures are still pending
+      const remaining = activeFixtures.filter(f => f.fixtureId !== fixtureId);
+      const followUp  = remaining.length > 0
+        ? `\n\n⏳ You still have ${remaining.length} more match${remaining.length > 1 ? 'es' : ''} awaiting a score — reply with a score when ready.`
+        : '';
+
       return twiml(
         `✅ Score received and saved!\n\n` +
         `${homeTeam}  ${homeScore}  –  ${awayScore}  ${awayTeam}` +
-        `${prev}\n\n` +
-        `Need to correct it? Log in to the app and update the score there:\n` +
-        `🔗 ${APP_URL}`
+        `${prev}${followUp}\n\n` +
+        `Need to correct it? Log in to the app:\n🔗 ${APP_URL}`
       );
     } catch (err) {
       console.error('[WhatsApp] Score update failed:', err.message);
