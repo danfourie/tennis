@@ -564,19 +564,17 @@ const Leagues = (() => {
               body:           `This is a reminder to submit outstanding scores for ${l.name}. Please update your results as soon as possible.`,
               recipientLabel: `📬 Recipients: ${participantNames || 'All participants'}`,
               sendFn: async (title, body) => {
-                // Send per-fixture notifications so the WhatsApp template gets
-                // the correct homeTeam / awayTeam / date variables ({{1}} {{2}} {{3}}).
-                // Scope to fixtures that have no score recorded and a past date.
-                const today    = new Date().toISOString().slice(0, 10);
+                // Send one notification per unscored fixture so the WhatsApp
+                // quick-reply template gets {{1}} homeTeam, {{2}} awayTeam,
+                // {{3}} date, {{4}} fixtureId for the button payload.
+                // Include all unscored fixtures (past and future) — the admin
+                // is explicitly requesting reminders so we trust their timing.
                 const fixtures = (l.fixtures || []).filter(f =>
-                  f.homeScore == null && f.awayScore == null && f.date && f.date <= today
+                  f.homeScore == null && f.awayScore == null
                 );
 
                 if (fixtures.length === 0) {
-                  // No outstanding past fixtures — send a generic league-wide reminder
-                  await NotificationService.sendToLeagueParticipants(l.id, {
-                    type: 'score_reminder', title, body, leagueId: l.id,
-                  });
+                  toast('No unscored fixtures found for this league.', 'info');
                   return;
                 }
 

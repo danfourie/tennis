@@ -404,30 +404,59 @@ exports.whatsappWebhook = onRequest(async (req, res) => {
   // The score_reminder template has a button with id = "score_{{4}}" where
   // {{4}} is the fixtureId. When tapped, Twilio sends ButtonPayload =
   // "score_<fixtureId>" — no SID lookup or menu needed.
-  const buttonPayload  = req.body && req.body.ButtonPayload ? String(req.body.ButtonPayload) : null;
-  const buttonFixtureId = buttonPayload && buttonPayload.startsWith('score_')
-    ? buttonPayload.slice('score_'.length)
-    : null;
+  //
+  // Guard: if fixtureId was empty when the template was sent (old notification
+  // format), ButtonPayload = "score_" and buttonFixtureId will be empty string.
+  // In that case we fall through to the pending-fixtures lookup below.
+  const buttonPayload   = req.body && req.body.ButtonPayload ? String(req.body.ButtonPayload) : null;
+  const isScoreButton   = buttonPayload && buttonPayload.startsWith('score_');
+  const buttonFixtureId = isScoreButton ? (buttonPayload.slice('score_'.length) || null) : null;
 
-  if (buttonFixtureId) {
-    console.log(`[WhatsApp] "Submit Score" button tapped for fixture ${buttonFixtureId}`);
-    const btnFix = fixturesMap[buttonFixtureId];
+  if (isScoreButton) {
+    console.log(`[WhatsApp] "Submit Score" button tapped — fixtureId="${buttonFixtureId || 'none'}"`);
 
-    if (btnFix && activeFixtures.find(f => f.fixtureId === buttonFixtureId)) {
-      // Prompt for the score and store which fixture we're waiting for
-      await pendingRef.set({ awaitingScoreInput: buttonFixtureId }, { merge: true });
-      const dateStr = btnFix.date ? ` · ${_fmtDate(btnFix.date)}` : '';
-      return twiml(
-        `⏰ *${btnFix.homeTeam} vs ${btnFix.awayTeam}${dateStr}*\n\n` +
-        `Reply with the score — *${btnFix.homeTeam}'s score first*.\n\n` +
-        `  If *${btnFix.homeTeam}* won 6-3 → reply *6-3*\n` +
-        `  If *${btnFix.awayTeam}* won 6-3 → reply *3-6*`
-      );
+    if (buttonFixtureId) {
+      // ── Happy path: fixtureId embedded in payload ────────────────────
+      const btnFix = fixturesMap[buttonFixtureId];
+
+      if (btnFix && activeFixtures.find(f => f.fixtureId === buttonFixtureId)) {
+        await pendingRef.set({ awaitingScoreInput: buttonFixtureId }, { merge: true });
+        const dateStr = btnFix.date ? ` · ${_fmtDate(btnFix.date)}` : '';
+        return twiml(
+          `⏰ *${btnFix.homeTeam} vs ${btnFix.awayTeam}${dateStr}*\n\n` +
+          `Reply with the score — *${btnFix.homeTeam}'s score first*.\n\n` +
+          `  If *${btnFix.homeTeam}* won 6-3 → reply *6-3*\n` +
+          `  If *${btnFix.awayTeam}* won 6-3 → reply *3-6*`
+        );
+      }
+
+      return twiml(`❓ This score reminder has already been submitted or has expired.\n🔗 ${APP_URL}`);
     }
 
-    // Fixture not found — already submitted or expired
+    // ── Fallback: no fixtureId in payload (notification sent before fix) ─
+    // Use the pending-fixtures map to identify what to score.
+    if (activeFixtures.length === 0) {
+      return twiml(`❓ No score requests are pending for your number.\n🔗 ${APP_URL}`);
+    }
+    if (activeFixtures.length === 1) {
+      const f = activeFixtures[0];
+      await pendingRef.set({ awaitingScoreInput: f.fixtureId }, { merge: true });
+      const dateStr = f.date ? ` · ${_fmtDate(f.date)}` : '';
+      return twiml(
+        `⏰ *${f.homeTeam} vs ${f.awayTeam}${dateStr}*\n\n` +
+        `Reply with the score — *${f.homeTeam}'s score first* (e.g. *6-3*).`
+      );
+    }
+    // Multiple fixtures pending — show a numbered menu
+    const order = activeFixtures.map(f => f.fixtureId);
+    const lines = activeFixtures.map((f, i) =>
+      `${i + 1}. ${f.homeTeam} vs ${f.awayTeam}${f.date ? ' · ' + _fmtDate(f.date) : ''}`
+    );
+    await pendingRef.set({ menuOrder: order, selectedFixtureId: null, awaitingScoreInput: null }, { merge: true });
     return twiml(
-      `❓ This score reminder has already been submitted or has expired.\n🔗 ${APP_URL}`
+      `📋 Multiple matches pending. Which match are you scoring?\n\n` +
+      lines.join('\n') +
+      '\n\nReply with the number.'
     );
   }
 
