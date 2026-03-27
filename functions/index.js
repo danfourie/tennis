@@ -23,6 +23,7 @@
 
 const { onDocumentCreated } = require('firebase-functions/v2/firestore');
 const { onCall, onRequest }  = require('firebase-functions/v2/https');
+const { onSchedule }         = require('firebase-functions/v2/scheduler');
 const { defineSecret }       = require('firebase-functions/params');
 const admin  = require('firebase-admin');
 const twilio = require('twilio');
@@ -718,5 +719,96 @@ exports.getTwilioUsage = onCall(
                          : null,
       balanceCurrency: balanceData ? (balanceData.currency || 'USD') : 'USD',
     };
+  }
+);
+
+// ── 4. Scheduled: daily score reminder at 17:00 SAST ─────────────────────────
+// Fires at 17:00 Africa/Johannesburg every day.  Finds every unscored fixture
+// whose date matches today (SAST) and sends one score_reminder notification to
+// each school involved, exactly as the manual admin trigger does.
+exports.dailyScoreReminder = onSchedule(
+  {
+    schedule: '0 17 * * *',
+    timeZone: 'Africa/Johannesburg',
+    secrets:  [TWILIO_SID, TWILIO_TOKEN, TWILIO_FROM],
+  },
+  async () => {
+    const db = admin.firestore();
+
+    // Today's date in SAST (the function runs in the correct timezone)
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' });
+    console.log(`[ScoreReminder] Daily run for ${today}`);
+
+    // Fetch all leagues
+    const leaguesSnap = await db.collection('leagues').get();
+    const notifications = [];
+
+    leaguesSnap.forEach(leagueDoc => {
+      const league = { id: leagueDoc.id, ...leagueDoc.data() };
+      (league.fixtures || []).forEach(f => {
+        if (!f.date || f.date !== today) return;
+        if (f.homeScore != null || f.awayScore != null) return; // already scored
+        if (!f.homeSchoolId || !f.awaySchoolId) return;
+        notifications.push({ league, fixture: f });
+      });
+    });
+
+    if (notifications.length === 0) {
+      console.log('[ScoreReminder] No unscored fixtures today — nothing to send.');
+      return;
+    }
+
+    // Fetch all users (to resolve school→uid mapping)
+    const usersSnap = await db.collection('users').get();
+    const users = usersSnap.docs.map(d => ({ uid: d.id, ...d.data() }));
+
+    const now = new Date().toISOString();
+
+    let sent = 0;
+    for (const { league, fixture: f } of notifications) {
+      const schoolIds = [f.homeSchoolId, f.awaySchoolId];
+
+      // Find uids for both schools (by schoolId or as organizer)
+      const recipientUids = [...new Set(
+        users
+          .filter(u => schoolIds.includes(u.schoolId))
+          .map(u => u.uid)
+      )];
+
+      if (recipientUids.length === 0) {
+        console.log(`[ScoreReminder] No users for fixture ${f.id} — skipping`);
+        continue;
+      }
+
+      const title = 'Please submit match result';
+      const body  = `${f.homeSchoolName || 'Home'} vs ${f.awaySchoolName || 'Away'} on ${today} — please submit the match score.`;
+
+      const batch = db.batch();
+      for (const uid of recipientUids) {
+        const ref = db.collection('notifications').doc();
+        batch.set(ref, {
+          uid,
+          type:         'score_reminder',
+          title,
+          body,
+          leagueId:     league.id,
+          fixtureId:    f.id,
+          homeTeam:     f.homeSchoolName  || '',
+          awayTeam:     f.awaySchoolName  || '',
+          date:         f.date,
+          homeSchoolId: f.homeSchoolId,
+          awaySchoolId: f.awaySchoolId,
+          read:         false,
+          createdAt:    now,
+          createdBy:    null,
+          fromName:     'Court Campus',
+        });
+      }
+      await batch.commit();
+      sent += recipientUids.length;
+      console.log(`[ScoreReminder] Sent for fixture ${f.id} (${f.homeSchoolName} vs ${f.awaySchoolName}) to ${recipientUids.length} users`);
+    }
+
+    console.log(`[ScoreReminder] Done — ${sent} notifications written for ${notifications.length} fixtures`);
   }
 );

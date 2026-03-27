@@ -272,6 +272,9 @@ const Admin = (() => {
             data-pr-away="${f.awaySchoolId}"
             data-pr-league="${league.id}"
             data-pr-fixture="${f.id}"
+            data-pr-home-team="${esc(f.homeSchoolName || '')}"
+            data-pr-away-team="${esc(f.awaySchoolName || '')}"
+            data-pr-date="${f.date || ''}"
             data-pr-notify-title="${esc(notifyTitle)}"
             data-pr-notify-body="${esc(notifyBody)}">🔔 Notify</button>
         </div>
@@ -305,11 +308,16 @@ const Admin = (() => {
         btn.disabled = true; btn.textContent = 'Sending…';
         try {
           await NotificationService.sendToSchoolGroup([homeId, awayId], {
-            type:      'score_reminder',
-            title:     btn.dataset.prNotifyTitle,
-            body:      btn.dataset.prNotifyBody,
+            type:         'score_reminder',
+            title:        btn.dataset.prNotifyTitle,
+            body:         btn.dataset.prNotifyBody,
             leagueId,
             fixtureId,
+            homeTeam:     btn.dataset.prHomeTeam     || '',
+            awayTeam:     btn.dataset.prAwayTeam     || '',
+            date:         btn.dataset.prDate         || '',
+            homeSchoolId: homeId,
+            awaySchoolId: awayId,
           });
           toast('Reminder sent ✓', 'success');
           btn.textContent = '✓ Sent';

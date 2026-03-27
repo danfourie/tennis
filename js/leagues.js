@@ -567,10 +567,10 @@ const Leagues = (() => {
                 // Send one notification per unscored fixture so the WhatsApp
                 // quick-reply template gets {{1}} homeTeam, {{2}} awayTeam,
                 // {{3}} date, {{4}} fixtureId for the button payload.
-                // Include all unscored fixtures (past and future) — the admin
-                // is explicitly requesting reminders so we trust their timing.
+                // Only past fixtures — today's games are auto-reminded at 17:00.
+                const _today = new Date().toISOString().slice(0, 10);
                 const fixtures = (l.fixtures || []).filter(f =>
-                  f.homeScore == null && f.awayScore == null
+                  f.homeScore == null && f.awayScore == null && f.date && f.date <= _today
                 );
 
                 if (fixtures.length === 0) {
