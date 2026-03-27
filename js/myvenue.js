@@ -73,6 +73,17 @@ const MyVenue = (() => {
       if (isOrg) venueMap.set(venue.id, { venue, school });
     });
 
+    // ── Pass 0: explicitly assigned venue IDs on user profile ───
+    // Admin can tick venues directly on a user row in the Admin panel.
+    // This is the most direct link and overrides all other discovery.
+    (profile.managedVenueIds || []).forEach(venueId => {
+      if (venueMap.has(venueId)) return;
+      const venue = DB.getVenues().find(v => v.id === venueId);
+      if (!venue) return;
+      const ownerSchool = DB.getSchools().find(s => s.venueId === venueId) || null;
+      venueMap.set(venueId, { venue, school: ownerSchool });
+    });
+
     // ── Pass 3: direct venue contacts ───────────────────────────
     // Catches venues where the user is listed in venue.contacts but is not
     // an organiser on any school that owns that venue.

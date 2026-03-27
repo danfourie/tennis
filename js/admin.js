@@ -423,6 +423,7 @@ const Admin = (() => {
     if (countEl) countEl.textContent = users.length;
 
     const schools = DB.getSchools();
+    const venues  = DB.getVenues();
 
     // Populate school filter dropdown (preserve current selection)
     const schoolSel = document.getElementById('usersSchoolFilter');
@@ -497,6 +498,18 @@ const Admin = (() => {
                  </div>`
               : '<div class="text-muted" style="font-size:.78rem;margin-top:.1rem">🔘 No login recorded yet</div>'}
             ${loginHistoryHtml}
+            ${venues.length > 0 ? `
+            <div style="margin-top:.4rem;display:flex;align-items:flex-start;gap:.4rem;flex-wrap:wrap">
+              <span style="font-size:.74rem;color:var(--text-muted);white-space:nowrap;padding-top:.15rem">📍 Extra venues:</span>
+              <div class="venue-checks" data-user-uid="${u.uid}" style="display:flex;gap:.3rem;flex-wrap:wrap">
+                ${venues.map(v => `
+                  <label style="font-size:.73rem;cursor:pointer;display:inline-flex;align-items:center;gap:.25rem;padding:.15rem .45rem;border-radius:4px;background:var(--surface2,#f8fafc);border:1px solid var(--border,#e2e8f0)">
+                    <input type="checkbox" class="venue-checkbox" data-venue-id="${esc(v.id)}"
+                      ${(u.managedVenueIds || []).includes(v.id) ? 'checked' : ''}>
+                    ${esc(v.name)}
+                  </label>`).join('')}
+              </div>
+            </div>` : ''}
           </div>
           <div class="item-actions">
             <label style="font-size:.75rem;color:var(--text-muted);margin-right:.25rem">Role:</label>
@@ -549,6 +562,28 @@ const Admin = (() => {
         );
         toast(`School updated`, 'success');
         renderUsers();
+      });
+    });
+
+    // ── Managed Venues (extra venue access) ──────────────────────────────
+    el.querySelectorAll('.venue-checkbox').forEach(cb => {
+      cb.addEventListener('change', () => {
+        const venueId = cb.dataset.venueId;
+        const userUid = cb.closest('.venue-checks').dataset.userUid;
+        const user    = DB.getUsers().find(u => u.uid === userUid);
+        if (!user) return;
+        const current = user.managedVenueIds || [];
+        const updated = cb.checked
+          ? [...new Set([...current, venueId])]
+          : current.filter(id => id !== venueId);
+        DB.updateUser({ ...user, managedVenueIds: updated });
+        const venueName = DB.getVenues().find(v => v.id === venueId)?.name || venueId;
+        DB.writeAudit(
+          'user_venue_access_changed', 'user',
+          `Venue access ${cb.checked ? 'granted' : 'removed'} for ${esc(user.displayName || user.email)}: ${esc(venueName)}`,
+          userUid, user.displayName || user.email
+        );
+        toast(cb.checked ? `Venue access granted ✓` : `Venue access removed`, 'success');
       });
     });
 
