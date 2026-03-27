@@ -332,10 +332,16 @@ exports.sendWhatsAppInvite = onCall(
 //   Twilio Console → Messaging → WhatsApp → Sender → "A message comes in" → Webhook
 //   URL: https://whatsappwebhook-y4qyzqnkpq-uc.a.run.app
 exports.whatsappWebhook = onRequest(async (req, res) => {
-  const fromRaw = req.body && req.body.From ? String(req.body.From) : null;
-  const rawBody = req.body && req.body.Body  ? String(req.body.Body).trim() : null;
+  const fromRaw      = req.body && req.body.From          ? String(req.body.From).trim()          : null;
+  const rawBody      = req.body && req.body.Body          ? String(req.body.Body).trim()          : null;
+  const buttonPayloadRaw = req.body && req.body.ButtonPayload ? String(req.body.ButtonPayload).trim() : null;
 
-  if (!fromRaw || !rawBody) return res.sendStatus(200);
+  // Log every inbound event for debugging (button taps have no Body)
+  console.log(`[WhatsApp] Inbound — From=${fromRaw || 'none'} Body=${JSON.stringify(rawBody)} ButtonPayload=${JSON.stringify(buttonPayloadRaw)}`);
+
+  // Drop requests with no sender; allow through even if Body is empty (button taps)
+  if (!fromRaw) return res.sendStatus(200);
+  if (!rawBody && !buttonPayloadRaw) return res.sendStatus(200);
 
   const fromPhone = fromRaw.replace(/^whatsapp:/i, '');
   const e164      = _toE164(fromPhone) || fromPhone;
@@ -400,9 +406,7 @@ exports.whatsappWebhook = onRequest(async (req, res) => {
   // always includes this when a user taps a quick-reply button (WhatsApp
   // treats button taps as contextual replies to the original message).
   // msgSid is stored in the pending-score fixture record at send time.
-  const buttonPayload = req.body && req.body.ButtonPayload ? String(req.body.ButtonPayload) : null;
-
-  if (buttonPayload === 'submit_score') {
+  if (buttonPayloadRaw === 'submit_score') {
     const origSid = req.body && req.body.OriginalRepliedMessageSid
       ? String(req.body.OriginalRepliedMessageSid) : null;
 
@@ -463,6 +467,9 @@ exports.whatsappWebhook = onRequest(async (req, res) => {
   if (repliedFixture) {
     console.log(`[WhatsApp] Native reply to msgSid ${repliedSid} → fixture ${repliedFixture.fixtureId}`);
   }
+
+  // ── No text body — nothing more to process (button already handled above) ──
+  if (!rawBody) return res.sendStatus(200);
 
   // ── Near-miss score format detection ───────────────────────────────────
   const noSpace    = rawBody.replace(/\s/g, '');
