@@ -1,30 +1,92 @@
 /**
  * myvenue.js — "My Venue" view.
  *
- * Shows every fixture scheduled at the school's home venue across all
+ * Shows every fixture scheduled at the user's managed venue(s) across all
  * leagues, grouped by date.  Overloaded dates (total courtsBooked >
  * venue.courts) are highlighted in red so the organiser can spot
  * scheduling conflicts at a glance and make adjustments.
+ *
+ * Multi-venue support: a user may manage more than one venue if they are
+ * listed as an organiser on multiple schools.  When that is the case a
+ * venue-selector bar is shown at the top of the view.
  */
 
 const MyVenue = (() => {
 
   // ── state ────────────────────────────────────────────────────
   let _showUpcomingOnly = false;   // toggle: all | upcoming
+  let _activeVenueId    = null;    // null = auto-select first venue
 
   // ── helpers ─────────────────────────────────────────────────
-  function _activeSchoolId() {
-    // Delegate to MySchool so impersonation context is respected
-    return MySchool.getActiveSchoolId();
+
+  /** Normalise a phone number to digits-only starting with country code. */
+  function _normPhone(p) {
+    if (!p) return '';
+    return p.replace(/\D/g, '').replace(/^0/, '27');
+  }
+
+  /**
+   * Return all {venue, school} pairs this user manages.
+   *
+   * Priority order:
+   *  1. profile.schoolId → school.venueId  (primary – always first)
+   *  2. Any school where user's email or phone is in school.organizers
+   *
+   * Duplicate venue IDs are collapsed (each venue appears once).
+   * Result is sorted: primary school's venue first, then alphabetically.
+   */
+  function _getMyVenues() {
+    if (!Auth.isLoggedIn()) return [];
+    const profile = Auth.getProfile();
+    if (!profile) return [];
+
+    const email      = (profile.email || '').toLowerCase();
+    const phone      = _normPhone(profile.phone);
+    const mySchoolId = profile.schoolId;
+
+    const venueMap = new Map(); // venueId → { venue, school }
+
+    DB.getSchools().forEach(school => {
+      if (!school.venueId) return;
+      if (venueMap.has(school.venueId)) return; // already captured
+
+      const venue = DB.getVenues().find(v => v.id === school.venueId);
+      if (!venue) return;
+
+      // Primary school
+      if (school.id === mySchoolId) {
+        venueMap.set(venue.id, { venue, school });
+        return;
+      }
+
+      // School where user is listed as organiser
+      const isOrg = (school.organizers || []).some(org => {
+        const orgEmail = (org.email || '').toLowerCase();
+        const orgPhone = _normPhone(org.phone);
+        return (email && orgEmail && email === orgEmail) ||
+               (phone && orgPhone && phone === orgPhone);
+      });
+      if (isOrg) venueMap.set(venue.id, { venue, school });
+    });
+
+    const entries = [...venueMap.values()];
+
+    // Sort: primary school's venue first, then alphabetically by venue name
+    entries.sort((a, b) => {
+      const aPri = a.school.id === mySchoolId ? 0 : 1;
+      const bPri = b.school.id === mySchoolId ? 0 : 1;
+      if (aPri !== bPri) return aPri - bPri;
+      return a.venue.name.localeCompare(b.venue.name);
+    });
+
+    return entries;
   }
 
   // ── nav button ───────────────────────────────────────────────
   function _syncNav() {
     const btn = document.querySelector('[data-view="myvenue"]');
     if (!btn) return;
-    const schoolId = _activeSchoolId();
-    const school   = schoolId ? DB.getSchools().find(s => s.id === schoolId) : null;
-    const hasVenue = Auth.isLoggedIn() && school && !!school.venueId;
+    const hasVenue = Auth.isLoggedIn() && _getMyVenues().length > 0;
     btn.classList.toggle('hidden', !hasVenue);
     if (!hasVenue) {
       const view = document.getElementById('view-myvenue');
@@ -76,33 +138,24 @@ const MyVenue = (() => {
 
     _syncToggleBtns();
 
-    const schoolId = _activeSchoolId();
-    if (!schoolId) {
+    // ── Resolve which venues this user manages ───────────────────
+    const myVenues = _getMyVenues();
+
+    if (!Auth.isLoggedIn() || myVenues.length === 0) {
       container.innerHTML = `<div class="empty-state">
         <div class="empty-icon">🏟</div>
-        <p>No school linked to your account. Contact an admin.</p>
+        <p>No venue is linked to your account.<br>
+           Ask an admin to assign a home venue to your school.</p>
       </div>`;
       return;
     }
 
-    const school = DB.getSchools().find(s => s.id === schoolId);
-    if (!school || !school.venueId) {
-      container.innerHTML = `<div class="empty-state">
-        <div class="empty-icon">🏟</div>
-        <p>No home venue configured for your school.<br>
-           Ask an admin to set a home venue for your school.</p>
-      </div>`;
-      return;
+    // Ensure _activeVenueId points to a valid entry (reset if stale)
+    if (!myVenues.find(e => e.venue.id === _activeVenueId)) {
+      _activeVenueId = myVenues[0].venue.id;
     }
 
-    const venue = DB.getVenues().find(v => v.id === school.venueId);
-    if (!venue) {
-      container.innerHTML = `<div class="empty-state">
-        <div class="empty-icon">🏟</div>
-        <p>Venue not found. Contact an admin.</p>
-      </div>`;
-      return;
-    }
+    const { venue, school } = myVenues.find(e => e.venue.id === _activeVenueId);
 
     // Update page heading
     const title = document.getElementById('myvenueTitle');
@@ -111,24 +164,31 @@ const MyVenue = (() => {
     const totalCourts = venue.courts || 0;
     const today       = new Date().toISOString().slice(0, 10);
 
-    // Collect all fixtures at this venue across every league
-    const allLeagues = DB.getLeagues();
-    const fixturesByDate = new Map(); // date → [{fixture, league}]
+    // ── Venue selector (shown only when the user manages > 1 venue) ──
+    let html = '';
 
-    allLeagues.forEach(league => {
-      (league.fixtures || []).forEach(f => {
-        if (f.venueId !== school.venueId) return;
-        if (_showUpcomingOnly && f.date && f.date < today) return;
-        if (!fixturesByDate.has(f.date)) fixturesByDate.set(f.date, []);
-        fixturesByDate.get(f.date).push({ fixture: f, league });
+    if (myVenues.length > 1) {
+      html += `<div class="card" style="margin-bottom:1rem;padding:.75rem 1rem">
+        <div style="font-size:.82rem;font-weight:600;color:var(--text-muted,#64748b);margin-bottom:.5rem">
+          🏟 Select venue
+        </div>
+        <div style="display:flex;gap:.5rem;flex-wrap:wrap">`;
+
+      myVenues.forEach(({ venue: v }) => {
+        const active = v.id === _activeVenueId;
+        html += `<button
+          class="btn btn-sm ${active ? 'btn-primary' : 'btn-secondary'}"
+          data-venue-select="${esc(v.id)}"
+          style="${active ? '' : 'opacity:.85'}">
+          ${esc(v.name)}
+        </button>`;
       });
-    });
 
-    // Sort dates
-    const sortedDates = [...fixturesByDate.keys()].sort();
+      html += `</div></div>`;
+    }
 
-    // Venue header
-    let html = `<div class="myschool-header" style="justify-content:space-between;align-items:flex-start">
+    // ── Venue header ─────────────────────────────────────────────
+    html += `<div class="myschool-header" style="justify-content:space-between;align-items:flex-start">
       <div style="display:flex;gap:.75rem;align-items:flex-start">
         <div style="font-size:2rem;line-height:1">🏟</div>
         <div>
@@ -139,17 +199,16 @@ const MyVenue = (() => {
         </div>
       </div>
       <button class="btn btn-sm btn-secondary" id="mv-settings-shortcut"
+          data-school-id="${esc(school.id)}"
           title="Open school &amp; venue settings" style="flex-shrink:0;white-space:nowrap">
         ⚙️ Settings
       </button>
     </div>`;
 
     // ── All bookings at this venue (excluding rejected) ──────────────────────
-    // Confirmed bookings are shown with a "Cancel" button so plans can be
-    // reversed.  Only truly rejected bookings are hidden.
-    const allBookings  = DB.getBookings();
+    const allBookings   = DB.getBookings();
     const venueBookings = allBookings
-      .filter(b => b.venueId === school.venueId && b.status !== 'rejected')
+      .filter(b => b.venueId === venue.id && b.status !== 'rejected')
       .slice()
       .sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.timeSlot || '').localeCompare(b.timeSlot || ''));
     const pendingCount  = venueBookings.filter(b => b.status !== 'confirmed').length;
@@ -158,7 +217,9 @@ const MyVenue = (() => {
     html += `<div class="card" style="margin-bottom:1.5rem;border-left:4px solid ${borderColor}">
       <div class="card-header">
         <div class="card-title" style="margin:0">📩 Venue Bookings
-          ${pendingCount > 0 ? `<span class="badge" style="background:#fef9c3;color:#854d0e;margin-left:.5rem">${pendingCount} awaiting confirmation</span>` : `<span class="badge" style="background:#dcfce7;color:#166534;margin-left:.5rem">All confirmed ✓</span>`}
+          ${pendingCount > 0
+            ? `<span class="badge" style="background:#fef9c3;color:#854d0e;margin-left:.5rem">${pendingCount} awaiting confirmation</span>`
+            : `<span class="badge" style="background:#dcfce7;color:#166534;margin-left:.5rem">All confirmed ✓</span>`}
         </div>
       </div>
       <div class="card-body" style="padding:.25rem .75rem .75rem">`;
@@ -169,14 +230,12 @@ const MyVenue = (() => {
       venueBookings.forEach(b => {
         const isConfirmed = b.status === 'confirmed';
         const isPending   = b.status === 'pending';
-        // Badge colour: green = confirmed, yellow = pending request, blue = admin-scheduled
         const statusBadge = isConfirmed
           ? `<span class="badge" style="background:#dcfce7;color:#166534;font-size:.7rem">Confirmed ✓</span>`
           : isPending
             ? `<span class="badge" style="background:#fef9c3;color:#854d0e;font-size:.7rem">Request</span>`
             : `<span class="badge" style="background:#e0f2fe;color:#0369a1;font-size:.7rem">Admin-scheduled</span>`;
 
-        // Confirmed bookings only need a "Cancel" button; unconfirmed get Approve+Reject.
         const actionBtns = isConfirmed
           ? `<button class="btn btn-sm btn-danger mv-reject-btn" data-id="${esc(b.id)}" data-label="Cancel">Cancel</button>`
           : `<button class="btn btn-sm btn-danger mv-reject-btn" data-id="${esc(b.id)}" data-label="${isPending ? 'Reject' : 'Delete'}">${isPending ? 'Reject' : 'Delete'}</button>
@@ -204,24 +263,38 @@ const MyVenue = (() => {
     }
     html += `</div></div>`;
 
-    // ── Fixtures by date ─────────────────────────────────────────
+    // ── Fixtures at this venue across all leagues ────────────────
+    const allLeagues    = DB.getLeagues();
+    const fixturesByDate = new Map(); // date → [{fixture, league}]
+
+    allLeagues.forEach(league => {
+      (league.fixtures || []).forEach(f => {
+        if (f.venueId !== venue.id) return;
+        if (_showUpcomingOnly && f.date && f.date < today) return;
+        if (!fixturesByDate.has(f.date)) fixturesByDate.set(f.date, []);
+        fixturesByDate.get(f.date).push({ fixture: f, league });
+      });
+    });
+
+    const sortedDates = [...fixturesByDate.keys()].sort();
+
     if (sortedDates.length === 0) {
       html += `<div class="empty-state" style="margin-top:1rem">
         <div class="empty-icon">📅</div>
         <p>No ${_showUpcomingOnly ? 'upcoming ' : ''}fixtures scheduled at <strong>${esc(venue.name)}</strong>.</p>
       </div>`;
       container.innerHTML = html;
-      _wireBookingHandlers(container, venue);
+      _wireHandlers(container, venue, school);
       return;
     }
 
     // One card per date
     sortedDates.forEach(date => {
-      const entries   = fixturesByDate.get(date);
-      const booked    = entries.reduce((sum, e) => sum + (e.fixture.courtsBooked || 3), 0);
-      const isOver    = totalCourts > 0 && booked > totalCourts;
-      const isNear    = totalCourts > 0 && !isOver && booked >= totalCourts;
-      const isPast    = date && date < today;
+      const entries = fixturesByDate.get(date);
+      const booked  = entries.reduce((sum, e) => sum + (e.fixture.courtsBooked || 3), 0);
+      const isOver  = totalCourts > 0 && booked > totalCourts;
+      const isNear  = totalCourts > 0 && !isOver && booked >= totalCourts;
+      const isPast  = date && date < today;
 
       const statusColor = isOver ? 'var(--danger, #ef4444)'
                         : isNear ? 'var(--warning, #f59e0b)'
@@ -244,7 +317,7 @@ const MyVenue = (() => {
         </div>
         <div class="card-body" style="padding:.25rem .75rem .75rem">`;
 
-      // Sort fixtures on this date by time then league name
+      // Sort fixtures by time then league name
       const sorted = [...entries].sort((a, b) => {
         const tA = a.fixture.timeSlot || a.fixture.matchTime || '';
         const tB = b.fixture.timeSlot || b.fixture.matchTime || '';
@@ -261,12 +334,9 @@ const MyVenue = (() => {
         const hColor     = homeSchool ? homeSchool.color : '#666';
         const aColor     = awaySchool ? awaySchool.color : '#666';
 
-        let scoreHtml;
-        if (hasScore) {
-          scoreHtml = `<strong>${f.homeScore} — ${f.awayScore}</strong>`;
-        } else {
-          scoreHtml = `<span class="text-muted">vs</span>`;
-        }
+        const scoreHtml = hasScore
+          ? `<strong>${f.homeScore} — ${f.awayScore}</strong>`
+          : `<span class="text-muted">vs</span>`;
 
         html += `<div class="myschool-fixture" style="margin:.5rem 0;background:var(--surface2,#f8fafc);border-radius:6px;padding:.5rem .75rem">
           <div class="fixture-meta" style="margin-bottom:.2rem">
@@ -290,21 +360,39 @@ const MyVenue = (() => {
     });
 
     container.innerHTML = html;
-    _wireBookingHandlers(container, venue);
+    _wireHandlers(container, venue, school);
   }
 
-  // ── Wire approve/reject handlers after render ─────────────────
-  function _wireBookingHandlers(container, venue) {
-    // Settings shortcut — navigate to My School and open the settings card
-    const settingsShortcut = container.querySelector('#mv-settings-shortcut');
-    if (settingsShortcut) {
-      settingsShortcut.addEventListener('click', () => {
-        if (typeof MySchool !== 'undefined') MySchool.openSettings();
+  // ── Wire all interactive handlers after render ────────────────
+  function _wireHandlers(container, venue, school) {
+
+    // ── Venue selector buttons ──────────────────────────────────
+    container.querySelectorAll('[data-venue-select]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        _activeVenueId = btn.dataset.venueSelect;
+        _render();
+      });
+    });
+
+    // ── Settings shortcut ───────────────────────────────────────
+    // If the selected venue belongs to a school other than the user's primary
+    // school, impersonate that school so My School opens in the right context.
+    const settingsBtn = container.querySelector('#mv-settings-shortcut');
+    if (settingsBtn && typeof MySchool !== 'undefined') {
+      settingsBtn.addEventListener('click', () => {
+        const btnSchoolId  = settingsBtn.dataset.schoolId;
+        const activeSchool = MySchool.getActiveSchoolId();
+        if (btnSchoolId && btnSchoolId !== activeSchool) {
+          MySchool.impersonate(btnSchoolId);
+        }
+        MySchool.openSettings();
       });
     }
+
+    // ── Booking approve ──────────────────────────────────────────
     container.querySelectorAll('.mv-approve-btn').forEach(btn => {
       btn.addEventListener('click', () => {
-        const id = btn.dataset.id;
+        const id      = btn.dataset.id;
         const booking = DB.getBookings().find(b => b.id === id);
         btn.disabled = true; btn.textContent = 'Approving…';
         DB.approveBooking(id);
@@ -323,12 +411,13 @@ const MyVenue = (() => {
       });
     });
 
+    // ── Booking reject / cancel ──────────────────────────────────
     container.querySelectorAll('.mv-reject-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
         const id      = btn.dataset.id;
-        const label   = btn.dataset.label || 'Reject';   // 'Reject', 'Delete', or 'Cancel'
+        const label   = btn.dataset.label || 'Reject';
         const booking = DB.getBookings().find(b => b.id === id);
-        const wasCancelling = label === 'Cancel';        // previously-confirmed booking
+        const wasCancelling = label === 'Cancel';
         const confirmMsg = wasCancelling
           ? `Cancel this confirmed booking?\n\n"${booking ? (booking.label || 'Booking') : 'Booking'}" on ${booking && booking.date ? formatDate(booking.date) : '—'}\n\nThis will notify the requester.`
           : `${label} this booking request?`;
@@ -348,14 +437,8 @@ const MyVenue = (() => {
                 : `Your request to book ${esc(booking.label || venue.name)} on ${booking.date ? formatDate(booking.date) : ''} has been declined.`,
             };
             if (booking.requestedBy) {
-              // Always notify the original requester, even if they are also the one
-              // cancelling (e.g. admin acting in a dual role as school organiser) —
-              // they need a record of the cancellation in their notification feed.
               NotificationService.send({ ...notifPayload, recipientUids: [booking.requestedBy] });
             } else if (booking.schoolId) {
-              // Legacy booking has no requestedBy (created before that field was added).
-              // sendToSchool() calls _ensureUsers() internally so it works even when
-              // DB.getUsers() is empty (i.e. users not yet loaded by the admin panel).
               NotificationService.sendToSchool(booking.schoolId, notifPayload);
             }
           }
