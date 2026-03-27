@@ -50,12 +50,7 @@ const TEMPLATE_SIDS = {
   booking_cancelled:     'HXee12c3a33516b940bf69451dbb79c04d',
   fixture_changed:       'HX0a0982228b2086b1796c24c3a0dff47d',
   fixture_cancelled:     'HX330caa9222ff757a219ff5e1777295bd',
-  // score_reminder_v3 (HX24c495de9ff7f39a1537bba9c10f44da) — quick-reply,
-  // static button "Submit Score", no variables in button (Meta requirement).
-  // Submitted for UTILITY approval 2026-03-27. Temporarily disabled below
-  // (plain-text fallback used) until Meta approves; re-enable by replacing
-  // 'HX_FILL_score_reminder' with 'HX24c495de9ff7f39a1537bba9c10f44da'.
-  score_reminder:        'HX_FILL_score_reminder',
+  score_reminder:        'HX24c495de9ff7f39a1537bba9c10f44da',  // quick-reply v3 — Meta approved 2026-03-27
   league_entry:          'HX06da6c17895c1513873dd8f663545681',
   league_created:        'HX11b97f0a334fc41da1ac39f478af02f2',
   league_start_reminder: 'HXdc7cd1e18ad060dfdc38bba852ee739f',
