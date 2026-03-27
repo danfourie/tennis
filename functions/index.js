@@ -205,22 +205,40 @@ exports.onNewNotification = onDocumentCreated(
 
     try {
       const msgParams = { from, to: `whatsapp:${phone}` };
+      let usedTemplate = false;
 
       if (USE_CONTENT_TEMPLATES) {
         const tpl = _buildTemplate(notif);
         if (tpl) {
           msgParams.contentSid       = tpl.contentSid;
           msgParams.contentVariables = tpl.contentVariables;
+          usedTemplate = true;
         } else {
-          // Fallback to plain text if no template mapped
           msgParams.body = _buildTextMessage(notif);
         }
       } else {
         msgParams.body = _buildTextMessage(notif);
       }
 
-      const msg = await client.messages.create(msgParams);
-      console.log(`[WhatsApp] Sent ${notif.type} to ${phone} — SID: ${msg.sid} status: ${msg.status} errorCode: ${msg.errorCode || 'none'} errorMessage: ${msg.errorMessage || 'none'}`);
+      let msg;
+      try {
+        msg = await client.messages.create(msgParams);
+      } catch (tplErr) {
+        // Template send failed (pending approval, rejected, or invalid variables).
+        // Fall back to plain text so the message still reaches the recipient.
+        if (usedTemplate) {
+          console.warn(`[WhatsApp] Template failed for ${notif.type} (${tplErr.message}) — falling back to plain text`);
+          delete msgParams.contentSid;
+          delete msgParams.contentVariables;
+          msgParams.body = _buildTextMessage(notif);
+          usedTemplate = false;
+          msg = await client.messages.create(msgParams);
+        } else {
+          throw tplErr;
+        }
+      }
+
+      console.log(`[WhatsApp] Sent ${notif.type} to ${phone} — SID: ${msg.sid} status: ${msg.status} template: ${usedTemplate} errorCode: ${msg.errorCode || 'none'} errorMessage: ${msg.errorMessage || 'none'}`);
 
       // For score reminders: store a pending-score record so a WhatsApp reply
       // of the form "HOME-AWAY" (e.g. "6-3") can update the fixture directly.
@@ -239,7 +257,7 @@ exports.onNewNotification = onDocumentCreated(
         console.log(`[WhatsApp] Pending score stored for ${phone} fixture ${notif.fixtureId}`);
       }
     } catch (err) {
-      console.error(`[WhatsApp] Send failed for ${phone}:`, err.message);
+      console.error(`[WhatsApp] Send failed for ${phone} type=${notif.type}:`, err.message);
     }
     return null;
   }
