@@ -568,7 +568,7 @@ exports.whatsappWebhook = onRequest(async (req, res) => {
 
     // Apply the score to the chosen fixture
     try {
-      const { fixtureId, leagueId, homeTeam, awayTeam } = target;
+      const { fixtureId, leagueId, homeTeam, awayTeam, homeSchoolId, awaySchoolId } = target;
       const leagueRef = db.doc(`leagues/${leagueId}`);
       const leagueDoc = await leagueRef.get();
       if (!leagueDoc.exists) throw new Error('League not found');
@@ -577,48 +577,166 @@ exports.whatsappWebhook = onRequest(async (req, res) => {
       const idx      = fixtures.findIndex(f => f.id === fixtureId);
       if (idx === -1) throw new Error('Fixture not found');
 
-      const prev = fixtures[idx].homeScore != null
-        ? ` (overwrites previous ${fixtures[idx].homeScore}-${fixtures[idx].awayScore})`
-        : '';
+      // Determine if submitter is home or away team
+      const submitterSchoolId = user.schoolId || null;
+      const isHome = submitterSchoolId && submitterSchoolId === homeSchoolId;
+      const isAway = submitterSchoolId && submitterSchoolId === awaySchoolId;
 
-      fixtures[idx].homeScore = homeScore;
-      fixtures[idx].awayScore = awayScore;
-      await leagueRef.update({ fixtures });
+      // Twilio client for sending WhatsApp to other team
+      const twilioSid   = TWILIO_SID.value();
+      const twilioToken = TWILIO_TOKEN.value();
+      const twilioFrom  = TWILIO_FROM.value();
+      const wClient     = twilio(twilioSid, twilioToken);
 
-      // Remove this fixture from the pending map; clear all state
-      await pendingRef.update({
-        [`fixtures.${fixtureId}`]: admin.firestore.FieldValue.delete(),
-        menuOrder:                 admin.firestore.FieldValue.delete(),
-        selectedFixtureId:        admin.firestore.FieldValue.delete(),
-        awaitingScoreInput:       admin.firestore.FieldValue.delete(),
-      });
+      /** Send a plain WhatsApp message to all users of a given school */
+      async function _notifySchool(schoolId, msg) {
+        if (!schoolId || !twilioFrom) return;
+        const snap = await db.collection('users').where('schoolId', '==', schoolId).get();
+        for (const doc of snap.docs) {
+          const ph  = doc.data().phone;
+          const ph164 = _toE164(ph);
+          if (ph164) {
+            try {
+              await wClient.messages.create({ from: twilioFrom, to: `whatsapp:${ph164}`, body: msg });
+            } catch (e) {
+              console.warn(`[WhatsApp] Could not notify ${ph164}:`, e.message);
+            }
+          }
+        }
+      }
 
-      // Audit log
-      await db.collection('auditLog').add({
-        action:   'score_submitted',
-        category: 'fixture',
-        details:  `WhatsApp score: ${homeTeam} ${homeScore} - ${awayScore} ${awayTeam}${prev}`,
-        itemId:   fixtureId,
-        itemName: `${homeTeam} vs ${awayTeam}`,
-        at:       new Date().toISOString(),
-        by:       user.uid,
-        byName:   user.displayName || fromPhone,
-      });
+      if (isHome || isAway) {
+        // Store this team's submission separately
+        if (isHome) {
+          fixtures[idx].homeTeamSubmission = { homeScore, awayScore };
+        } else {
+          fixtures[idx].awayTeamSubmission = { homeScore, awayScore };
+        }
 
-      console.log(`[WhatsApp] Score saved ${homeTeam} ${homeScore}-${awayScore} ${awayTeam} by ${fromPhone}`);
+        const hSub = fixtures[idx].homeTeamSubmission;
+        const aSub = fixtures[idx].awayTeamSubmission;
 
-      // Check if more fixtures are still pending
-      const remaining = activeFixtures.filter(f => f.fixtureId !== fixtureId);
-      const followUp  = remaining.length > 0
-        ? `\n\n⏳ You still have ${remaining.length} more match${remaining.length > 1 ? 'es' : ''} awaiting a score — reply with a score when ready.`
-        : '';
+        if (hSub && aSub) {
+          // Both teams have submitted — compare scores
+          if (hSub.homeScore === aSub.homeScore && hSub.awayScore === aSub.awayScore) {
+            // ✅ MATCH → auto-verify
+            fixtures[idx].homeScore          = hSub.homeScore;
+            fixtures[idx].awayScore          = hSub.awayScore;
+            fixtures[idx].homeTeamVerified   = true;
+            fixtures[idx].awayTeamVerified   = true;
+            fixtures[idx].homeTeamSubmission = null;
+            fixtures[idx].awayTeamSubmission = null;
+            await leagueRef.update({ fixtures });
 
-      return twiml(
-        `✅ Score received and saved!\n\n` +
-        `${homeTeam}  ${homeScore}  –  ${awayScore}  ${awayTeam}` +
-        `${prev}${followUp}\n\n` +
-        `Need to correct it? Log in to the app:\n🔗 ${APP_URL}`
-      );
+            const confirmMsg =
+              `✅ Score verified for ${homeTeam} vs ${awayTeam}` +
+              (target.date ? ` (${target.date})` : '') + `.\n` +
+              `Result: ${hSub.homeScore}–${hSub.awayScore}. Both teams agreed — score is confirmed.`;
+
+            // Notify the OTHER team
+            const otherSchoolId = isHome ? awaySchoolId : homeSchoolId;
+            await _notifySchool(otherSchoolId, confirmMsg);
+
+            await db.collection('auditLog').add({
+              action: 'score_verified', category: 'fixture',
+              details: `WhatsApp auto-verify: ${homeTeam} ${hSub.homeScore}-${hSub.awayScore} ${awayTeam}`,
+              itemId: fixtureId, itemName: `${homeTeam} vs ${awayTeam}`,
+              at: new Date().toISOString(), by: user.uid, byName: user.displayName || fromPhone,
+            });
+            console.log(`[WhatsApp] Auto-verified ${homeTeam} ${hSub.homeScore}-${hSub.awayScore} ${awayTeam}`);
+
+            return twiml(confirmMsg);
+          } else {
+            // ⚠️ MISMATCH → clear submissions, notify both teams
+            fixtures[idx].homeTeamSubmission = null;
+            fixtures[idx].awayTeamSubmission = null;
+            await leagueRef.update({ fixtures });
+
+            const mismatchMsg =
+              `⚠️ Score mismatch for ${homeTeam} vs ${awayTeam}` +
+              (target.date ? ` (${target.date})` : '') + `.\n` +
+              `Home team submitted: ${hSub.homeScore}–${hSub.awayScore}\n` +
+              `Away team submitted: ${aSub.homeScore}–${aSub.awayScore}\n` +
+              `Scores don't match — please resubmit the correct score.`;
+
+            const otherSchoolId = isHome ? awaySchoolId : homeSchoolId;
+            await _notifySchool(otherSchoolId, mismatchMsg);
+
+            console.log(`[WhatsApp] Score mismatch ${homeTeam} vs ${awayTeam}: home=${hSub.homeScore}-${hSub.awayScore} away=${aSub.homeScore}-${aSub.awayScore}`);
+            return twiml(mismatchMsg);
+          }
+        } else {
+          // Only one team submitted — save preliminary score and wait for other team
+          fixtures[idx].homeScore = homeScore;
+          fixtures[idx].awayScore = awayScore;
+          await leagueRef.update({ fixtures });
+
+          const teamLabel    = isHome ? homeTeam : awayTeam;
+          const otherTeam    = isHome ? awayTeam : homeTeam;
+          const otherSchoolId = isHome ? awaySchoolId : homeSchoolId;
+
+          // Notify other team that a score has been submitted and awaits their confirmation
+          await _notifySchool(otherSchoolId,
+            `📋 Score submitted for ${homeTeam} vs ${awayTeam}` +
+            (target.date ? ` (${target.date})` : '') + `.\n` +
+            `${teamLabel} reported: ${homeScore}–${awayScore}\n` +
+            `Please submit your score via the app or reply to your score reminder to confirm.`
+          );
+
+          console.log(`[WhatsApp] Score received from ${isHome ? 'home' : 'away'} team: ${homeTeam} ${homeScore}-${awayScore} ${awayTeam}`);
+
+          await pendingRef.update({
+            [`fixtures.${fixtureId}`]: admin.firestore.FieldValue.delete(),
+            menuOrder:          admin.firestore.FieldValue.delete(),
+            selectedFixtureId:  admin.firestore.FieldValue.delete(),
+            awaitingScoreInput: admin.firestore.FieldValue.delete(),
+          });
+
+          const remainingFix = activeFixtures.filter(f => f.fixtureId !== fixtureId);
+          const followUp = remainingFix.length > 0
+            ? `\n\n⏳ You still have ${remainingFix.length} more match${remainingFix.length > 1 ? 'es' : ''} awaiting a score.`
+            : '';
+
+          return twiml(
+            `✅ Score received!\n\n` +
+            `${homeTeam}  ${homeScore}  –  ${awayScore}  ${awayTeam}\n\n` +
+            `Waiting for ${otherTeam} to confirm. We'll let both teams know once scores match.` +
+            `${followUp}`
+          );
+        }
+      } else {
+        // Submitter's school is not part of this match (admin/organiser contact) — save directly
+        const prev = fixtures[idx].homeScore != null
+          ? ` (overwrites previous ${fixtures[idx].homeScore}-${fixtures[idx].awayScore})`
+          : '';
+        fixtures[idx].homeScore = homeScore;
+        fixtures[idx].awayScore = awayScore;
+        await leagueRef.update({ fixtures });
+
+        await db.collection('auditLog').add({
+          action: 'score_submitted', category: 'fixture',
+          details: `WhatsApp score (admin): ${homeTeam} ${homeScore} - ${awayScore} ${awayTeam}${prev}`,
+          itemId: fixtureId, itemName: `${homeTeam} vs ${awayTeam}`,
+          at: new Date().toISOString(), by: user.uid, byName: user.displayName || fromPhone,
+        });
+
+        await pendingRef.update({
+          [`fixtures.${fixtureId}`]: admin.firestore.FieldValue.delete(),
+          menuOrder:          admin.firestore.FieldValue.delete(),
+          selectedFixtureId:  admin.firestore.FieldValue.delete(),
+          awaitingScoreInput: admin.firestore.FieldValue.delete(),
+        });
+
+        const remainingFix = activeFixtures.filter(f => f.fixtureId !== fixtureId);
+        const followUp = remainingFix.length > 0
+          ? `\n\n⏳ You still have ${remainingFix.length} more match${remainingFix.length > 1 ? 'es' : ''} awaiting a score.`
+          : '';
+
+        console.log(`[WhatsApp] Score saved (admin) ${homeTeam} ${homeScore}-${awayScore} ${awayTeam} by ${fromPhone}`);
+        return twiml(
+          `✅ Score received and saved!\n\n${homeTeam}  ${homeScore}  –  ${awayScore}  ${awayTeam}${prev}${followUp}\n\nNeed to correct it? Log in to the app:\n🔗 ${APP_URL}`
+        );
+      }
     } catch (err) {
       console.error('[WhatsApp] Score update failed:', err.message);
       return twiml(`❌ Could not save the score. Please enter it in the app: ${APP_URL}`);

@@ -1381,36 +1381,28 @@ const Leagues = (() => {
     // and dates where any home venue in the round has a full-venue full-day closure.
     const excludedSet = new Set(excludedDates || []);
 
-    /** True if ANY venue used as a home ground (or the neutral venue) in this round
-     *  has an all-day, all-court closure covering dateStr. */
-    function _roundVenueClosed(round, dateStr) {
-      const venueIds = new Set();
-      round.forEach(m => {
-        const vid = m.home.venueId || neutralVenueId;
-        if (vid) venueIds.add(vid);
+    /** True if the given venue has an all-day, all-court closure covering dateStr. */
+    function _matchVenueClosed(venueId, dateStr) {
+      if (!venueId) return false;
+      return DB.getClosures().some(c => {
+        if (c.venueId !== venueId) return false;
+        if (dateStr < c.startDate || dateStr > c.endDate) return false;
+        // Only whole-venue closures (courtIndex null/'') — court-specific may still leave room
+        if (c.courtIndex !== null && c.courtIndex !== undefined && c.courtIndex !== '') return false;
+        // Only full-day closures — time-specific closures don't block the whole day
+        if (c.timeStart && c.timeEnd) return false;
+        return true;
       });
-      const closures = DB.getClosures();
-      for (const venueId of venueIds) {
-        const closed = closures.some(c => {
-          if (c.venueId !== venueId) return false;
-          if (dateStr < c.startDate || dateStr > c.endDate) return false;
-          // Only whole-venue closures (courtIndex null/'') — court-specific may still leave room
-          if (c.courtIndex !== null && c.courtIndex !== undefined && c.courtIndex !== '') return false;
-          // Only full-day closures — time-specific closures don't block the whole day
-          if (c.timeStart && c.timeEnd) return false;
-          return true;
-        });
-        if (closed) return true;
-      }
-      return false;
     }
 
+    // Dates are assigned per-round using only excludedDates.
+    // Venue closures are handled per-match inside the fixture loop below —
+    // only the affected match is postponed, not the whole round.
     const validPlayingDates = [];
     let _cd = new Date(baseDate);
     for (let _i = 0; validPlayingDates.length < allRounds.length && _i < allRounds.length + 200; _i++) {
-      const roundIdx = validPlayingDates.length;
       const ds = toDateStr(_cd);
-      if (!excludedSet.has(ds) && !_roundVenueClosed(allRounds[roundIdx], ds)) {
+      if (!excludedSet.has(ds)) {
         validPlayingDates.push(ds);
       }
       _cd = addDays(_cd, 7);
@@ -1480,13 +1472,15 @@ const Leagues = (() => {
           ? Math.max(baseSlots, 2)
           : baseSlots;
 
-        // All fixtures in a round share the same date — never push to another week.
-        // Venue clashes within a round are flagged for the master to resolve.
-        const roundDate   = validPlayingDates[roundIdx] || toDateStr(addDays(baseDate, roundIdx * 7));
-        let assignedDate  = roundDate;
+        // Each match checks its own home venue for closures.
+        // If closed, the match is postponed past the last regular round;
+        // other matches in the round still play on the round's date.
+        const roundDate  = validPlayingDates[roundIdx] || toDateStr(addDays(baseDate, roundIdx * 7));
+        const isClosed   = _matchVenueClosed(venueId || neutralVenueId, roundDate);
+        let assignedDate = isClosed ? null : roundDate;
         let assignedCourt = 0;
 
-        if (venueId && effectiveMaxSlots > 0) {
+        if (!isClosed && venueId && effectiveMaxSlots > 0) {
           const taken = _takenCourts(venueId, roundDate);
           if (taken.length < effectiveMaxSlots) {
             // Free court slot available — claim it (step by 2, post-proc redistributes)
@@ -1511,17 +1505,43 @@ const Leagues = (() => {
           awaySchoolName:    match.away.name,
           venueId,
           venueName,
-          isNeutral:    !hasHome,
-          date:         assignedDate,
-          timeSlot:     matchTime || '14:00',
-          courtIndex:   assignedCourt,
-          courtsBooked: COURTS_PER_MATCH,   // overwritten by _redistributeCourts below
-          homeScore:    null,
-          awayScore:    null,
-          round:        roundIdx + 1,
+          isNeutral:     !hasHome,
+          date:          assignedDate,
+          timeSlot:      matchTime || '14:00',
+          courtIndex:    assignedCourt,
+          courtsBooked:  COURTS_PER_MATCH,   // overwritten by _redistributeCourts below
+          homeScore:     null,
+          awayScore:     null,
+          round:         roundIdx + 1,
+          postponed:     isClosed ? true      : undefined,
+          originalDate:  isClosed ? roundDate : undefined,
+          originalRound: isClosed ? roundIdx + 1 : undefined,
         });
       });
     });
+
+    // ── Postponed match rescheduling ─────────────────────────────
+    // Matches where the home venue was closed on the round's date are placed
+    // after all regular rounds, on the earliest weekly date where the venue is open.
+    // Multiple postponed matches can share a week if they are at different venues.
+    const postponedFixtures = fixtures.filter(f => f.postponed && !f.date);
+    if (postponedFixtures.length > 0) {
+      let scanDate  = addDays(new Date(validPlayingDates.at(-1) || toDateStr(baseDate)), 7);
+      const remaining = [...postponedFixtures];
+      for (let safety = 0; remaining.length > 0 && safety < 200; safety++) {
+        const ds = toDateStr(scanDate);
+        if (!excludedSet.has(ds)) {
+          const canPlay = remaining.filter(f => !_matchVenueClosed(f.venueId || neutralVenueId, ds));
+          canPlay.forEach(f => {
+            f.date = ds;
+            remaining.splice(remaining.indexOf(f), 1);
+          });
+        }
+        scanDate = addDays(scanDate, 7);
+      }
+      // Safety: any still unscheduled get consecutive dates
+      remaining.forEach(f => { f.date = toDateStr(scanDate); scanDate = addDays(scanDate, 7); });
+    }
 
     // ── Post-processing: redistribute court blocks ───────────────
     // Groups fixtures by venue+date and divides courts evenly (max 3 each).
@@ -2009,6 +2029,9 @@ const Leagues = (() => {
 
         const clashRow      = _clashBadge(f, league.id, clashedIds);
         const changeReqRow  = _changeRequestBadge(f, league.id);
+        const postponedRow  = f.postponed
+          ? `<span class="badge" style="background:#fef9c3;color:#854d0e;font-size:.75rem">⚠️ Postponed — venue closed on original date (Rd ${f.originalRound} · ${f.originalDate ? formatDate(f.originalDate) : '—'})</span>`
+          : '';
 
         const editBtn = isAdmin
           ? `<td><button class="btn btn-xs btn-secondary" data-fixture-edit="${f.id}" title="Edit fixture">✏️</button></td>`
@@ -2023,8 +2046,9 @@ const Leagues = (() => {
           <td style="font-size:.78rem">${f.isNeutral ? '<span class="badge badge-gray">Neutral</span> ' : ''}${venueCell}</td>
           ${editBtn}
         </tr>
-        ${clashRow    ? `<tr class="fixture-sub-row"><td colspan="${isAdmin ? 7 : 6}">${clashRow}</td></tr>` : ''}
-        ${changeReqRow ? `<tr class="fixture-sub-row"><td colspan="${isAdmin ? 7 : 6}">${changeReqRow}</td></tr>` : ''}`;
+        ${clashRow     ? `<tr class="fixture-sub-row"><td colspan="${isAdmin ? 7 : 6}">${clashRow}</td></tr>` : ''}
+        ${changeReqRow ? `<tr class="fixture-sub-row"><td colspan="${isAdmin ? 7 : 6}">${changeReqRow}</td></tr>` : ''}
+        ${postponedRow ? `<tr class="fixture-sub-row"><td colspan="${isAdmin ? 7 : 6}">${postponedRow}</td></tr>` : ''}`;
       });
 
       html += `</tbody></table></div>`;
