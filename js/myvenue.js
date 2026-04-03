@@ -166,18 +166,25 @@ const MyVenue = (() => {
 
   // ── inline settings section ──────────────────────────────────
   function _settingsHtml(venue, school) {
+    const isRestricted = !!venue.restrictedMode;
     const closures = DB.getClosures()
-      .filter(c => c.venueId === venue.id && !c.courtIndex)
+      .filter(c => c.venueId === venue.id && !c.courtIndex &&
+        (isRestricted ? c.type === 'open' : (!c.type || c.type === 'block')))
       .sort((a, b) => (a.startDate || '').localeCompare(b.startDate || ''));
+
+    const emptyMsg = isRestricted
+      ? 'No open windows added yet — all dates are blocked.'
+      : 'No blocked dates.';
 
     const closureRows = closures.map(c => `
       <div class="ms-closure-row" style="display:flex;gap:.5rem;align-items:center;margin-bottom:.3rem;flex-wrap:wrap">
         <span style="font-size:.85rem">
           ${formatDate(c.startDate)}${c.endDate && c.endDate !== c.startDate ? ' → ' + formatDate(c.endDate) : ''}
+          ${c.timeStart && c.timeEnd ? ` <span class="text-muted">⏰ ${esc(c.timeStart)}–${esc(c.timeEnd)}</span>` : ''}
         </span>
         ${c.reason ? `<span class="text-muted" style="font-size:.8rem">${esc(c.reason)}</span>` : ''}
         <button class="btn btn-xs btn-danger mv-closure-del" data-id="${esc(c.id)}" title="Remove">✕</button>
-      </div>`).join('') || '<span class="text-muted" style="font-size:.85rem">No blocked dates.</span>';
+      </div>`).join('') || `<span class="text-muted" style="font-size:.85rem">${emptyMsg}</span>`;
 
     return `
       <div class="card" id="mv-settings-card"
@@ -198,17 +205,43 @@ const MyVenue = (() => {
             </div>
           </div>
 
-          <!-- Blocked dates -->
+          <!-- Restricted mode toggle -->
           <div>
-            <label style="font-weight:600;display:block;margin-bottom:.4rem">🚫 Blocked dates (courts unavailable)</label>
+            <label style="font-weight:600;display:block;margin-bottom:.5rem">📅 Availability mode</label>
+            <div style="display:flex;align-items:center;gap:.75rem">
+              <label class="toggle-switch" style="margin:0">
+                <input type="checkbox" id="mv-restricted-toggle" ${isRestricted ? 'checked' : ''}>
+                <span class="toggle-slider"></span>
+              </label>
+              <div>
+                <span style="font-weight:500">Restricted mode</span>
+                <div class="text-muted" style="font-size:.78rem">
+                  ${isRestricted
+                    ? 'All dates blocked — only listed open windows are bookable'
+                    : 'All dates open — only blocked dates are unavailable'}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Blocked dates / Open windows -->
+          <div>
+            <label style="font-weight:600;display:block;margin-bottom:.4rem">
+              ${isRestricted ? '✅ Open windows' : '🚫 Blocked dates (courts unavailable)'}
+            </label>
             <div id="mv-closures-list" style="margin-bottom:.5rem">${closureRows}</div>
             <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
               <input type="date" id="mv-block-start" style="flex:1;min-width:130px">
               <span class="text-muted" style="white-space:nowrap">to</span>
               <input type="date" id="mv-block-end" style="flex:1;min-width:130px">
-              <input type="text" id="mv-block-reason" placeholder="Reason (optional)"
+              ${isRestricted ? `
+              <input type="time" id="mv-block-time-start" style="flex:1;min-width:110px" placeholder="From time">
+              <span class="text-muted" style="white-space:nowrap">–</span>
+              <input type="time" id="mv-block-time-end" style="flex:1;min-width:110px" placeholder="To time">
+              ` : ''}
+              <input type="text" id="mv-block-reason" placeholder="${isRestricted ? 'Label (optional)' : 'Reason (optional)'}"
                 style="flex:2;min-width:140px">
-              <button class="btn btn-sm btn-secondary" id="mv-block-add">+ Add</button>
+              <button class="btn btn-sm btn-secondary" id="mv-block-add">+ ${isRestricted ? 'Add window' : 'Add'}</button>
             </div>
           </div>
 
@@ -468,15 +501,35 @@ const MyVenue = (() => {
         .catch(err => toast('Save failed — ' + err.message, 'error'));
     });
 
-    // ── Settings: add blocked date ──────────────────────────────
+    // ── Settings: restricted mode toggle ───────────────────────
+    container.querySelector('#mv-restricted-toggle')?.addEventListener('change', function () {
+      const updated = { ...venue, restrictedMode: this.checked };
+      DB.updateVenue(updated)
+        .then(() => {
+          toast(this.checked ? 'Restricted mode on — only open windows are bookable' : 'Normal mode — all dates open by default', 'success');
+          if (typeof Calendar !== 'undefined') Calendar.refresh();
+          _render();
+        })
+        .catch(err => { toast('Save failed — ' + err.message, 'error'); this.checked = !this.checked; });
+    });
+
+    // ── Settings: add blocked date / open window ────────────────
     container.querySelector('#mv-block-add')?.addEventListener('click', () => {
-      const start  = document.getElementById('mv-block-start').value;
-      const end    = document.getElementById('mv-block-end').value || start;
-      const reason = document.getElementById('mv-block-reason').value.trim();
+      const isRestricted = !!venue.restrictedMode;
+      const start      = document.getElementById('mv-block-start').value;
+      const end        = document.getElementById('mv-block-end').value || start;
+      const reason     = document.getElementById('mv-block-reason').value.trim();
+      const timeStart  = isRestricted ? (document.getElementById('mv-block-time-start')?.value || '') : '';
+      const timeEnd    = isRestricted ? (document.getElementById('mv-block-time-end')?.value || '') : '';
       if (!start) { toast('Select a start date', 'error'); return; }
       if (end < start) { toast('End date must be on or after start date', 'error'); return; }
-      DB.addClosure({ venueId: venue.id, startDate: start, endDate: end, reason });
-      toast('Blocked date added ✓', 'success');
+      if (isRestricted && (!timeStart || !timeEnd)) { toast('Enter a time range for the open window', 'error'); return; }
+      if (isRestricted && timeEnd <= timeStart) { toast('End time must be after start time', 'error'); return; }
+      const closure = { venueId: venue.id, startDate: start, endDate: end, reason, type: isRestricted ? 'open' : 'block' };
+      if (timeStart) closure.timeStart = timeStart;
+      if (timeEnd)   closure.timeEnd   = timeEnd;
+      DB.addClosure(closure);
+      toast(isRestricted ? 'Open window added ✓' : 'Blocked date added ✓', 'success');
       _render();
     });
 
