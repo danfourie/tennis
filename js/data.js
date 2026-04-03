@@ -486,13 +486,34 @@ const DB = {
 // ============================================================
 
 function isCourtClosed(venueId, courtIndex, dateStr, timeStr) {
-  return DB.getClosures().some(c => {
-    if (c.venueId !== venueId) return false;
+  const venue    = (DB.getVenues()   || []).find(v => v.id === venueId);
+  const closures = (DB.getClosures() || []).filter(c => c.venueId === venueId);
+
+  if (venue && venue.restrictedMode) {
+    // Restricted mode: everything blocked unless covered by an open window
+    const openWindows  = closures.filter(c => c.type === 'open');
+    const inOpenWindow = openWindows.some(c => {
+      if (dateStr < c.startDate || dateStr > c.endDate) return false;
+      if (c.timeStart && c.timeEnd && timeStr) return timeStr >= c.timeStart && timeStr < c.timeEnd;
+      return true; // window covers all day
+    });
+    if (!inOpenWindow) return true; // not in any open window → blocked
+
+    // Inside an open window — still honour block closures (e.g. a specific court under repair)
+    return closures.filter(c => !c.type || c.type === 'block').some(c => {
+      if (c.courtIndex !== null && c.courtIndex !== undefined && c.courtIndex !== '' && c.courtIndex != courtIndex) return false;
+      if (dateStr < c.startDate || dateStr > c.endDate) return false;
+      if (c.timeStart && c.timeEnd && timeStr) { if (timeStr < c.timeStart || timeStr >= c.timeEnd) return false; }
+      return true;
+    });
+  }
+
+  // Normal mode: blocked if it matches any block closure (open windows are ignored)
+  return closures.some(c => {
+    if (c.type === 'open') return false;
     if (c.courtIndex !== null && c.courtIndex !== undefined && c.courtIndex !== '' && c.courtIndex != courtIndex) return false;
     if (dateStr < c.startDate || dateStr > c.endDate) return false;
-    if (c.timeStart && c.timeEnd && timeStr) {
-      if (timeStr < c.timeStart || timeStr >= c.timeEnd) return false;
-    }
+    if (c.timeStart && c.timeEnd && timeStr) { if (timeStr < c.timeStart || timeStr >= c.timeEnd) return false; }
     return true;
   });
 }

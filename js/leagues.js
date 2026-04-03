@@ -1381,15 +1381,26 @@ const Leagues = (() => {
     // and dates where any home venue in the round has a full-venue full-day closure.
     const excludedSet = new Set(excludedDates || []);
 
-    /** True if the given venue has an all-day, all-court closure covering dateStr. */
+    /** True if the given venue is unavailable for a match on dateStr.
+     *  In restricted mode: blocked unless the date falls inside an open window.
+     *  In normal mode: blocked if there is a full-day, whole-venue block closure. */
     function _matchVenueClosed(venueId, dateStr) {
       if (!venueId) return false;
-      return DB.getClosures().some(c => {
+      const venue    = DB.getVenues().find(v => v.id === venueId);
+      const closures = DB.getClosures();
+
+      if (venue && venue.restrictedMode) {
+        // Restricted mode: only dates inside an open window are valid for fixtures
+        const openWindows = closures.filter(c => c.venueId === venueId && c.type === 'open');
+        return !openWindows.some(c => dateStr >= c.startDate && dateStr <= c.endDate);
+      }
+
+      // Normal mode: blocked if there is a full-day, whole-venue block closure on this date
+      return closures.some(c => {
         if (c.venueId !== venueId) return false;
+        if (c.type === 'open') return false;
         if (dateStr < c.startDate || dateStr > c.endDate) return false;
-        // Only whole-venue closures (courtIndex null/'') — court-specific may still leave room
         if (c.courtIndex !== null && c.courtIndex !== undefined && c.courtIndex !== '') return false;
-        // Only full-day closures — time-specific closures don't block the whole day
         if (c.timeStart && c.timeEnd) return false;
         return true;
       });

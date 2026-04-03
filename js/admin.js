@@ -68,7 +68,7 @@ const Admin = (() => {
     // Closure buttons
     document.getElementById('addClosureBtn').addEventListener('click', () => openClosureModal());
     document.getElementById('closureSubmitBtn').addEventListener('click', saveClosure);
-    document.getElementById('closureVenue').addEventListener('change', updateClosureCourtList);
+    document.getElementById('closureVenue').addEventListener('change', () => { updateClosureCourtList(); _updateClosureModalTitle(); });
 
     // League admin buttons (in admin tab — different IDs from public view)
     document.getElementById('addLeagueBtnAdmin').addEventListener('click', () => Leagues.openLeagueModal());
@@ -872,10 +872,11 @@ const Admin = (() => {
 
   function openVenueModal(id) {
     const v = id ? DB.getVenues().find(x => x.id === id) : null;
-    document.getElementById('venueModalTitle').textContent = v ? 'Edit Venue' : 'Add Venue';
-    document.getElementById('venueName').value             = v ? v.name : '';
-    document.getElementById('venueAddress').value          = v ? (v.address || '') : '';
-    document.getElementById('venueEmail').value            = v ? (v.email  || '') : '';
+    document.getElementById('venueModalTitle').textContent    = v ? 'Edit Venue' : 'Add Venue';
+    document.getElementById('venueName').value                = v ? v.name : '';
+    document.getElementById('venueAddress').value             = v ? (v.address || '') : '';
+    document.getElementById('venueEmail').value               = v ? (v.email  || '') : '';
+    document.getElementById('venueRestrictedMode').checked    = !!(v && v.restrictedMode);
     document.getElementById('venuePhone').value            = v ? (v.phone  || '') : '';
     document.getElementById('venueCourtCount').value       = v ? (v.courts || 4) : 4;
     document.getElementById('venueEditId').value           = v ? v.id : '';
@@ -909,10 +910,11 @@ const Admin = (() => {
     const venue = {
       id: id || uid(),
       name,
-      address: document.getElementById('venueAddress').value.trim(),
-      email:   document.getElementById('venueEmail').value.trim(),
+      address:        document.getElementById('venueAddress').value.trim(),
+      email:          document.getElementById('venueEmail').value.trim(),
       phone,
-      courts:  parseInt(document.getElementById('venueCourtCount').value) || 4,
+      courts:         parseInt(document.getElementById('venueCourtCount').value) || 4,
+      restrictedMode: document.getElementById('venueRestrictedMode').checked,
       contacts,
     };
     Modal.close('venueModal');
@@ -1278,13 +1280,17 @@ function _orgRow(o) {
     }
     el.innerHTML = `<div class="admin-list">` +
       closures.map(c => {
-        const venue     = DB.getVenues().find(v => v.id === c.venueId);
+        const venue      = DB.getVenues().find(v => v.id === c.venueId);
         const courtLabel = c.courtIndex !== null && c.courtIndex !== undefined && c.courtIndex !== ''
           ? ` · Court ${parseInt(c.courtIndex) + 1}` : '';
         const timeLabel  = c.timeStart && c.timeEnd ? ` · ${c.timeStart}–${c.timeEnd}` : '';
+        const isOpen     = c.type === 'open';
+        const typeBadge  = isOpen
+          ? `<span class="badge" style="background:#d1fae5;color:#065f46;font-size:.7rem;margin-left:.4rem">Open window</span>`
+          : `<span class="badge" style="background:#fee2e2;color:#991b1b;font-size:.7rem;margin-left:.4rem">Blocked</span>`;
         return `<div class="admin-list-item">
           <div>
-            <strong>${venue ? esc(venue.name) : 'Unknown'}${courtLabel}</strong>
+            <span><strong>${venue ? esc(venue.name) : 'Unknown'}${courtLabel}</strong>${typeBadge}</span>
             <div class="text-muted">${formatDate(c.startDate)} → ${formatDate(c.endDate)}${timeLabel}</div>
             ${c.reason ? `<div class="text-muted">${esc(c.reason)}</div>` : ''}
           </div>
@@ -1323,7 +1329,15 @@ function _orgRow(o) {
     document.getElementById('closureTimeStart').value = '';
     document.getElementById('closureTimeEnd').value   = '';
     document.getElementById('closureReason').value    = '';
+    _updateClosureModalTitle();
     Modal.open('closureModal');
+  }
+
+  function _updateClosureModalTitle() {
+    const venueId = document.getElementById('closureVenue').value;
+    const venue   = DB.getVenues().find(v => v.id === venueId);
+    const titleEl = document.querySelector('#closureModal .modal-header h3');
+    if (titleEl) titleEl.textContent = (venue && venue.restrictedMode) ? 'Add Open Window' : 'Add Court Closure';
   }
 
   function updateClosureCourtList() {
@@ -1348,6 +1362,7 @@ function _orgRow(o) {
     const venue     = DB.getVenues().find(v => v.id === venueId);
     const reason    = document.getElementById('closureReason').value.trim();
 
+    const isRestricted = !!(venue && venue.restrictedMode);
     DB.addClosure({
       venueId,
       courtIndex: courtVal !== '' ? parseInt(courtVal) : null,
@@ -1355,6 +1370,7 @@ function _orgRow(o) {
       timeStart: document.getElementById('closureTimeStart').value || null,
       timeEnd:   document.getElementById('closureTimeEnd').value   || null,
       reason,
+      type: isRestricted ? 'open' : 'block',
     });
     DB.writeAudit(
       'closure_added', 'admin',

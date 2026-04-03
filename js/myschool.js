@@ -322,23 +322,45 @@ const MySchool = (() => {
       });
     }
 
-    // Blocked dates: add
-    const blockAddBtn = document.getElementById('ms-block-add');
-    if (blockAddBtn) {
-      blockAddBtn.addEventListener('click', () => {
+    // Restricted mode toggle
+    const restrictedToggle = document.getElementById('ms-restricted-toggle');
+    if (restrictedToggle) {
+      restrictedToggle.addEventListener('change', async () => {
         if (!_guardOwnSchool()) return;
-        const start  = document.getElementById('ms-block-start').value;
-        const end    = document.getElementById('ms-block-end').value || start;
-        const reason = document.getElementById('ms-block-reason').value.trim();
-        if (!start) { toast('Select a start date', 'error'); return; }
-        DB.addClosure({ venueId: school.venueId, startDate: start, endDate: end, reason, courtIndex: '' });
-        toast('Blocked date added ✓', 'success');
+        const venue = DB.getVenues().find(v => v.id === school.venueId);
+        if (!venue) return;
+        venue.restrictedMode = restrictedToggle.checked;
+        DB.updateVenue(venue).catch(console.warn);
+        toast(venue.restrictedMode ? 'Restricted mode on — add open windows below' : 'Normal mode — add blocked dates below', 'success');
         Calendar.refresh();
         _render();
       });
     }
 
-    // Blocked dates: delete
+    // Closures / open windows: add
+    const blockAddBtn = document.getElementById('ms-block-add');
+    if (blockAddBtn) {
+      blockAddBtn.addEventListener('click', () => {
+        if (!_guardOwnSchool()) return;
+        const venue = DB.getVenues().find(v => v.id === school.venueId);
+        const isRestricted = !!(venue && venue.restrictedMode);
+        const start  = document.getElementById('ms-block-start').value;
+        const end    = document.getElementById('ms-block-end').value || start;
+        const reason = document.getElementById('ms-block-reason').value.trim();
+        if (!start) { toast('Select a start date', 'error'); return; }
+        const tsEl = document.getElementById('ms-block-time-start');
+        const teEl = document.getElementById('ms-block-time-end');
+        const timeStart = (isRestricted && tsEl) ? (tsEl.value || null) : null;
+        const timeEnd   = (isRestricted && teEl) ? (teEl.value || null) : null;
+        if (isRestricted && (!timeStart || !timeEnd)) { toast('Enter open time window (From time and To time)', 'error'); return; }
+        DB.addClosure({ venueId: school.venueId, startDate: start, endDate: end, reason, courtIndex: '', timeStart, timeEnd, type: isRestricted ? 'open' : 'block' });
+        toast(isRestricted ? 'Open window added ✓' : 'Blocked date added ✓', 'success');
+        Calendar.refresh();
+        _render();
+      });
+    }
+
+    // Closures / open windows: delete
     container.querySelectorAll('.ms-closure-del').forEach(btn => {
       btn.addEventListener('click', () => {
         if (!_guardOwnSchool()) return;
@@ -1102,8 +1124,10 @@ const MySchool = (() => {
 
   // ── My School Settings section ────────────────────────────────
   function _settingsSection(school, venue) {
+    const restricted = !!(venue && venue.restrictedMode);
     const closures = venue
-      ? DB.getClosures().filter(c => c.venueId === venue.id && !c.courtIndex)
+      ? DB.getClosures()
+          .filter(c => c.venueId === venue.id && !c.courtIndex && (c.type === (restricted ? 'open' : 'block') || (!c.type && !restricted)))
           .sort((a, b) => (a.startDate || '').localeCompare(b.startDate || ''))
       : [];
 
@@ -1124,9 +1148,10 @@ const MySchool = (() => {
 
     const closureRows = closures.map(c => `
       <div class="ms-closure-row" style="display:flex;gap:.5rem;align-items:center;margin-bottom:.3rem;flex-wrap:wrap">
-        <span style="font-size:.85rem">${formatDate(c.startDate)}${c.endDate && c.endDate !== c.startDate ? ' → ' + formatDate(c.endDate) : ''}</span>
+        <span style="font-size:.85rem">📅 ${formatDate(c.startDate)}${c.endDate && c.endDate !== c.startDate ? ' → ' + formatDate(c.endDate) : ''}</span>
+        ${c.timeStart && c.timeEnd ? `<span class="text-muted" style="font-size:.8rem">⏰ ${c.timeStart}–${c.timeEnd}</span>` : ''}
         ${c.reason ? `<span class="text-muted" style="font-size:.8rem">${esc(c.reason)}</span>` : ''}
-        <button class="btn btn-xs btn-danger ms-closure-del" data-id="${c.id}" title="Remove block">✕</button>
+        <button class="btn btn-xs btn-danger ms-closure-del" data-id="${c.id}" title="Remove">✕</button>
       </div>`).join('');
 
     return `
@@ -1155,18 +1180,44 @@ const MySchool = (() => {
             </div>
           </div>
 
-          <!-- Block dates -->
+          <!-- Availability mode + closures / open windows -->
           <div>
-            <label style="font-weight:600;display:block;margin-bottom:.4rem">🚫 Blocked dates (courts unavailable)</label>
-            <div id="ms-closures-list">${closureRows || '<span class="text-muted" style="font-size:.85rem">No blocked dates.</span>'}</div>
+            ${venue ? `
+            <!-- Restricted mode toggle -->
+            <div style="display:flex;align-items:center;gap:.75rem;margin-bottom:.75rem">
+              <label class="toggle-switch">
+                <input type="checkbox" id="ms-restricted-toggle" ${restricted ? 'checked' : ''}>
+                <span class="toggle-slider"></span>
+              </label>
+              <div>
+                <span style="font-weight:600">Restricted mode</span>
+                <div class="text-muted" style="font-size:.78rem">
+                  ${restricted
+                    ? 'All dates blocked — only listed open windows are bookable'
+                    : 'All dates open — only listed blocked dates are unavailable'}
+                </div>
+              </div>
+            </div>` : ''}
+
+            <label style="font-weight:600;display:block;margin-bottom:.4rem">
+              ${restricted ? '✅ Open windows (all other dates are blocked)' : '🚫 Blocked dates (courts unavailable)'}
+            </label>
+            <div id="ms-closures-list">${closureRows ||
+              `<span class="text-muted" style="font-size:.85rem">${restricted ? 'No open windows — venue is fully blocked.' : 'No blocked dates.'}</span>`}
+            </div>
+
             ${venue ? `
             <div style="display:flex;gap:.5rem;align-items:center;margin-top:.5rem;flex-wrap:wrap">
               <input type="date" id="ms-block-start" style="flex:1;min-width:130px">
               <span class="text-muted">to</span>
               <input type="date" id="ms-block-end" style="flex:1;min-width:130px">
-              <input type="text" id="ms-block-reason" placeholder="Reason (optional)" style="flex:2;min-width:140px">
-              <button class="btn btn-sm btn-secondary" id="ms-block-add">+ Add</button>
-            </div>` : `<span class="text-muted" style="font-size:.8rem">Link a venue in Admin to manage blocked dates.</span>`}
+              ${restricted ? `
+              <input type="time" id="ms-block-time-start" style="flex:1;min-width:110px">
+              <span class="text-muted">–</span>
+              <input type="time" id="ms-block-time-end" style="flex:1;min-width:110px">` : ''}
+              <input type="text" id="ms-block-reason" placeholder="${restricted ? 'Label (e.g. Match day)' : 'Reason (optional)'}" style="flex:2;min-width:140px">
+              <button class="btn btn-sm btn-secondary" id="ms-block-add">+ ${restricted ? 'Add open window' : 'Add block'}</button>
+            </div>` : `<span class="text-muted" style="font-size:.8rem">Link a venue in Admin to manage dates.</span>`}
           </div>
 
           <!-- Organisers -->
