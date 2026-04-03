@@ -25,8 +25,9 @@ const { onDocumentCreated } = require('firebase-functions/v2/firestore');
 const { onCall, onRequest }  = require('firebase-functions/v2/https');
 const { onSchedule }         = require('firebase-functions/v2/scheduler');
 const { defineSecret }       = require('firebase-functions/params');
-const admin  = require('firebase-admin');
-const twilio = require('twilio');
+const admin      = require('firebase-admin');
+const twilio     = require('twilio');
+const nodemailer = require('nodemailer');
 
 admin.initializeApp();
 
@@ -35,6 +36,10 @@ admin.initializeApp();
 const TWILIO_SID   = defineSecret('TWILIO_ACCOUNT_SID');
 const TWILIO_TOKEN = defineSecret('TWILIO_AUTH_TOKEN');
 const TWILIO_FROM  = defineSecret('TWILIO_WHATSAPP_FROM');
+// Email: firebase functions:secrets:set EMAIL_USER  (e.g. noreply@courtcampus.co.za)
+//        firebase functions:secrets:set EMAIL_PASS  (app password for the SMTP account)
+const EMAIL_USER   = defineSecret('EMAIL_USER');
+const EMAIL_PASS   = defineSecret('EMAIL_PASS');
 
 // ── App config ────────────────────────────────────────────────────────────────
 const APP_URL = 'https://www.courtcampus.co.za/';
@@ -312,22 +317,150 @@ exports.sendWhatsAppInvite = onCall(
     const token = TWILIO_TOKEN.value();
     const from  = TWILIO_FROM.value();
 
-    const client  = twilio(sid, token);
-    const greeting = contactName ? `Hi ${contactName}` : 'Hi';
-    const body = [
-      `👋 *Court Campus*`,
-      `${greeting}, you're invited to join Court Campus — the tennis league planner for ${schoolName || 'your school'}.`,
-      ``,
-      `Register here: ${APP_URL}`,
-    ].join('\n');
+    const client = twilio(sid, token);
+    const msgParams = { from, to: `whatsapp:${e164}` };
+    let usedTemplate = false;
 
-    const msg = await client.messages.create({ from, to: `whatsapp:${e164}`, body });
-    console.log(`[WhatsApp] Invite sent to ${e164} — SID: ${msg.sid}`);
+    if (USE_CONTENT_TEMPLATES && TEMPLATE_SIDS.registration_invite) {
+      msgParams.contentSid       = TEMPLATE_SIDS.registration_invite;
+      msgParams.contentVariables = JSON.stringify({ '1': contactName || '', '2': schoolName || '' });
+      usedTemplate = true;
+    } else {
+      const greeting = contactName ? `Hi ${contactName}` : 'Hi';
+      msgParams.body = [
+        `👋 *Court Campus*`,
+        `${greeting}, you're invited to join Court Campus — the tennis league planner for ${schoolName || 'your school'}.`,
+        ``,
+        `Register here: ${APP_URL}`,
+      ].join('\n');
+    }
+
+    let msg;
+    try {
+      msg = await client.messages.create(msgParams);
+    } catch (tplErr) {
+      if (usedTemplate) {
+        console.warn(`[WhatsApp] Invite template failed — ${tplErr.message} — falling back to plain text`);
+        delete msgParams.contentSid;
+        delete msgParams.contentVariables;
+        const greeting = contactName ? `Hi ${contactName}` : 'Hi';
+        msgParams.body = [
+          `👋 *Court Campus*`,
+          `${greeting}, you're invited to join Court Campus — the tennis league planner for ${schoolName || 'your school'}.`,
+          ``,
+          `Register here: ${APP_URL}`,
+        ].join('\n');
+        usedTemplate = false;
+        msg = await client.messages.create(msgParams);
+      } else {
+        throw tplErr;
+      }
+    }
+    console.log(`[WhatsApp] Invite sent to ${e164} — SID: ${msg.sid} template: ${usedTemplate}`);
     return { success: true, sid: msg.sid };
   }
 );
 
-// ── 3. Inbound: Twilio webhook — user replied on WhatsApp ─────────────────────
+// ── 3. Outbound: admin sends email invite to an unregistered organizer ────────
+exports.sendEmailInvite = onCall(
+  { secrets: [EMAIL_USER, EMAIL_PASS] },
+  async (request) => {
+    if (!request.auth) throw new Error('Unauthenticated');
+
+    const callerDoc = await admin.firestore().doc(`users/${request.auth.uid}`).get();
+    const caller    = callerDoc.exists ? callerDoc.data() : null;
+    if (!caller || !['master', 'admin'].includes(caller.role)) {
+      throw new Error('Permission denied — admins only');
+    }
+
+    const { email, contactName, schoolName } = request.data || {};
+    if (!email) throw new Error('email is required');
+
+    const user = EMAIL_USER.value();
+    const pass = EMAIL_PASS.value();
+    if (!user || !pass) throw new Error('Email credentials not configured — set EMAIL_USER and EMAIL_PASS secrets');
+
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: { user, pass },
+    });
+
+    const greeting  = contactName ? `Hi ${contactName}` : 'Hi there';
+    const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: Arial, sans-serif; background: #f4f7fb; margin: 0; padding: 0; }
+    .container { max-width: 560px; margin: 32px auto; background: #fff; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,.1); }
+    .header { background: #3b82f6; padding: 28px 32px; text-align: center; }
+    .header h1 { color: #fff; margin: 0; font-size: 22px; }
+    .header p  { color: #dbeafe; margin: 6px 0 0; font-size: 14px; }
+    .body { padding: 28px 32px; color: #1e293b; line-height: 1.6; }
+    .body p { margin: 0 0 14px; }
+    .cta { display: block; margin: 24px 0; text-align: center; }
+    .cta a { background: #3b82f6; color: #fff !important; text-decoration: none; padding: 13px 32px; border-radius: 6px; font-size: 15px; font-weight: 600; display: inline-block; }
+    .note { background: #f0f9ff; border-left: 4px solid #38bdf8; border-radius: 4px; padding: 12px 16px; font-size: 13px; color: #0369a1; margin: 20px 0 0; }
+    .footer { text-align: center; padding: 16px 32px; font-size: 11px; color: #94a3b8; border-top: 1px solid #e2e8f0; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🎾 Court Campus</h1>
+      <p>Tennis League Management Platform</p>
+    </div>
+    <div class="body">
+      <p>${greeting},</p>
+      <p>You've been invited to join <strong>Court Campus</strong> — the online platform used by <strong>${schoolName || 'your school'}</strong> to manage tennis leagues, fixtures, scores, and venue bookings.</p>
+      <p>As a registered user you'll be able to:</p>
+      <ul>
+        <li>View and manage your school's fixtures and results</li>
+        <li>Receive match reminders and schedule updates</li>
+        <li>Submit scores and track league standings</li>
+        <li>Coordinate venue bookings</li>
+      </ul>
+      <div class="cta">
+        <a href="${APP_URL}">Register on Court Campus →</a>
+      </div>
+      <div class="note">
+        📲 <strong>Also check your WhatsApp</strong> — you'll receive a separate WhatsApp message prompting you to register. Either the link above or the WhatsApp link will get you set up.
+      </div>
+    </div>
+    <div class="footer">
+      Court Campus · <a href="${APP_URL}" style="color:#94a3b8">${APP_URL}</a><br>
+      You received this because an admin invited you on behalf of ${schoolName || 'your school'}.
+    </div>
+  </div>
+</body>
+</html>`;
+
+    const text = [
+      `${greeting},`,
+      ``,
+      `You've been invited to join Court Campus — the online platform used by ${schoolName || 'your school'} to manage tennis leagues, fixtures, scores, and venue bookings.`,
+      ``,
+      `Register here: ${APP_URL}`,
+      ``,
+      `Also check your WhatsApp — you'll receive a separate message prompting you to register.`,
+    ].join('\n');
+
+    const info = await transporter.sendMail({
+      from:    `"Court Campus" <${user}>`,
+      to:      email,
+      subject: `You're invited to Court Campus${schoolName ? ' — ' + schoolName : ''}`,
+      text,
+      html,
+    });
+
+    console.log(`[Email] Invite sent to ${email} — messageId: ${info.messageId}`);
+    return { success: true, messageId: info.messageId };
+  }
+);
+
+// ── 4. Inbound: Twilio webhook — user replied on WhatsApp ─────────────────────
 // Register the deployed URL of this function in:
 //   Twilio Console → Messaging → WhatsApp → Sender → "A message comes in" → Webhook
 //   URL: https://whatsappwebhook-y4qyzqnkpq-uc.a.run.app

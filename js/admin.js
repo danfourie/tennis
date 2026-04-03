@@ -1078,7 +1078,8 @@ function _orgRow(o) {
                     <span>👤 ${esc(o.name)}${o.email ? ' · ' + esc(o.email) : ''}${o.phone ? ' · ' + esc(o.phone) : ''}</span>
                     ${_isRegistered(o)
                       ? `<span class="badge badge-green" style="font-size:.72rem">✅ Registered</span>`
-                      : o.phone ? `<button class="btn btn-xs btn-success wa-invite-btn" data-phone="${esc(o.phone)}" data-name="${esc(o.name)}" data-school="${esc(s.name)}" title="Send WhatsApp invitation">📲 Invite</button>` : ''}
+                      : `${o.phone ? `<button class="btn btn-xs btn-success wa-invite-btn" data-phone="${esc(o.phone)}" data-name="${esc(o.name)}" data-school="${esc(s.name)}" title="Send WhatsApp invitation">📲 WhatsApp</button>` : ''}
+                         ${o.email ? `<button class="btn btn-xs btn-info email-invite-btn" data-email="${esc(o.email)}" data-name="${esc(o.name)}" data-school="${esc(s.name)}" title="Send email invitation">✉️ Email</button>` : ''}`}
                   </div>`).join('')
                 : s.contact ? `<div class="text-muted">👤 ${esc(s.contact)}${s.email ? ' · ' + esc(s.email) : ''}${s.phone ? ' · ' + esc(s.phone) : ''}</div>` : '')}
             <div class="school-teams" style="margin-top:.35rem">${teamsBadges}</div>
@@ -1104,6 +1105,9 @@ function _orgRow(o) {
     });
     el.querySelectorAll('.wa-invite-btn').forEach(btn => {
       btn.addEventListener('click', () => _sendWhatsAppInvite(btn));
+    });
+    el.querySelectorAll('.email-invite-btn').forEach(btn => {
+      btn.addEventListener('click', () => _sendEmailInvite(btn));
     });
     el.querySelectorAll('[data-school-notif]').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -1249,6 +1253,29 @@ function _orgRow(o) {
       toast('Could not send invite — ' + (err.message || 'check Twilio credentials'), 'error');
       btn.disabled    = false;
       btn.textContent = '📲 Invite';
+    }
+  }
+
+  /** Send an email invitation to a school organizer via the Cloud Function. */
+  async function _sendEmailInvite(btn) {
+    const email      = btn.dataset.email;
+    const name       = btn.dataset.name;
+    const schoolName = btn.dataset.school;
+    if (!email) { toast('No email address on record for this organizer', 'error'); return; }
+
+    btn.disabled    = true;
+    btn.textContent = 'Sending…';
+
+    try {
+      const fn = firebase.functions().httpsCallable('sendEmailInvite');
+      await fn({ email, contactName: name, schoolName });
+      toast(`Email invite sent to ${name || email} ✓`, 'success');
+      btn.textContent = '✓ Sent';
+    } catch (err) {
+      console.error('[Email] Invite failed:', err);
+      toast('Could not send email — ' + (err.message || 'check email credentials'), 'error');
+      btn.disabled    = false;
+      btn.textContent = '✉️ Email';
     }
   }
 

@@ -28,6 +28,7 @@ const Auth = (() => {
   let _profile          = null;   // Firestore user profile document
   let _role             = null;   // 'master' | 'admin' | 'user' | null
   let _profileUnsub     = null;   // unsubscribe fn for profile live-listener
+  let _registering      = false;  // true while register() is writing the profile doc
 
   // ── Bootstrap ─────────────────────────────────────────────
   function init() {
@@ -38,7 +39,9 @@ const Auth = (() => {
 
         // _loadProfile signs out deleted users — _profile will be null in that case.
         // Guard against continuing as if authenticated.
+        // Exception: if register() is in flight the profile hasn't been written yet.
         if (!_profile) {
+          if (_registering) return; // register() will set _profile and refresh UI
           _user = null;
           if (typeof toast === 'function') {
             toast('Your account has been removed. Please register again.', 'error');
@@ -68,6 +71,10 @@ const Auth = (() => {
   // If no profile document exists (e.g. Firestore write failed at registration),
   // we create one automatically. First user in the collection becomes master.
   async function _loadProfile(uid) {
+    // During registration, register() sets _profile/_role directly and attaches
+    // the live listener itself. Skip all Firestore reads here to avoid auth-token
+    // timing issues that could trigger the catch-block signOut.
+    if (_registering) return;
     try {
       const db  = firebase.firestore();
       const ref = db.collection('users').doc(uid);
@@ -109,6 +116,9 @@ const Auth = (() => {
         const snap = await db.collection('users').limit(1).get();
         if (!snap.empty) {
           // Other users exist → this account was deleted. Sign out.
+          // Exception: if register() is currently in flight the profile hasn't
+          // been written yet — don't sign out, it will appear momentarily.
+          if (_registering) return;
           console.warn('[Auth] No profile found for uid:', uid, '— account was deleted. Signing out.');
           await firebase.auth().signOut();
           _profile = null;
@@ -173,10 +183,16 @@ const Auth = (() => {
   }
 
   async function register(email, password, displayName, schoolId = null, phone = null, whatsappOptIn = false) {
+    _registering = true;
     try {
       // 1. Create Firebase Auth account
       const cred = await firebase.auth().createUserWithEmailAndPassword(email, password);
       await cred.user.updateProfile({ displayName });
+
+      // Ensure Firestore receives the new auth token before making any reads/writes.
+      // Without this, the Firestore SDK may still treat the request as unauthenticated
+      // immediately after account creation, causing "Missing or insufficient permissions".
+      await cred.user.getIdToken(true);
 
       // 2. Determine role: first registered user becomes master
       const snap = await firebase.firestore().collection('users').limit(1).get();
@@ -194,19 +210,37 @@ const Auth = (() => {
         whatsappOptIn:  !!(normPhone && whatsappOptIn),
         createdAt:      new Date().toISOString(),
       };
-      await firebase.firestore().collection('users').doc(cred.user.uid).set(profile);
+      const ref = firebase.firestore().collection('users').doc(cred.user.uid);
+      await ref.set(profile);
 
+      // 4. Set profile/role directly — avoid calling _loadProfile while
+      //    onAuthStateChanged may already have a _loadProfile in flight.
+      _registering = false;
       _profile = profile;
       _role    = role;
 
-      // Re-sync UI now that role is confirmed — onAuthStateChanged fired
-      // earlier (before the profile doc existed) and set role to 'user'.
+      // 5. Attach the live profile listener (role changes reflected without re-login).
+      if (_profileUnsub) _profileUnsub();
+      _profileUnsub = ref.onSnapshot(s => {
+        if (!s.exists || !_user) return;
+        const updated = s.data();
+        _profile = updated;
+        _role    = updated.role || 'user';
+        _updateUI();
+        _refreshViews();
+      }, () => {});
+
+      // 6. Load bookings (onAuthStateChanged returned early, so they weren't loaded).
+      await DB.loadBookings();
+
       _updateUI();
       _refreshViews();
 
       return { ok: true, role };
     } catch (err) {
       return { ok: false, error: _authMsg(err) };
+    } finally {
+      _registering = false;
     }
   }
 
