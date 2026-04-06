@@ -1545,9 +1545,11 @@ const Leagues = (() => {
           homeScore:     null,
           awayScore:     null,
           round:         roundIdx + 1,
-          postponed:     isClosed ? true      : undefined,
-          originalDate:  isClosed ? roundDate : undefined,
-          originalRound: isClosed ? roundIdx + 1 : undefined,
+          ...(isClosed ? {
+            postponed:     true,
+            originalDate:  roundDate,
+            originalRound: roundIdx + 1,
+          } : {}),
         });
       });
     });
