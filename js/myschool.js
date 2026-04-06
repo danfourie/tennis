@@ -47,7 +47,7 @@ const MySchool = (() => {
   function _syncNav() {
     const btn = document.querySelector('[data-view="myschool"]');
     if (!btn) return;
-    const hasSchool = Auth.isLoggedIn() && (_impersonateSchoolId || _activeSchoolId());
+    const hasSchool = Auth.isLoggedIn() && (Auth.isAdmin() || _impersonateSchoolId || _activeSchoolId());
     btn.classList.toggle('hidden', !hasSchool);
     // If the nav button is now hidden but the view is active, fall back to calendar
     if (!hasSchool) {
@@ -134,12 +134,40 @@ const MySchool = (() => {
     if (!container) return;
 
     const schoolId = _activeSchoolId();
-    if (!schoolId) {
-      container.innerHTML = `<div class="empty-state">
-        <div class="empty-icon">🏫</div>
-        <p>No school is linked to your account yet.<br>
-           Contact an admin to link your account to your school.</p>
+
+    // ── School selector (admins only) ────────────────────────────
+    function _schoolSelectorHtml(activeSchId) {
+      const schools = DB.getSchools().slice().sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+      return `<div class="card" style="margin-bottom:1rem;padding:.75rem 1rem">
+        <div style="font-size:.82rem;font-weight:600;color:var(--text-muted,#64748b);margin-bottom:.5rem">
+          🏫 Select school
+        </div>
+        <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+          ${schools.map(s => `<button class="btn btn-sm ${s.id === activeSchId ? 'btn-primary' : 'btn-secondary'}"
+            data-school-select="${esc(s.id)}">${esc(s.name)}</button>`).join('')}
+        </div>
       </div>`;
+    }
+
+    if (!schoolId) {
+      if (Auth.isAdmin()) {
+        container.innerHTML = _schoolSelectorHtml(null) +
+          `<div class="empty-state"><div class="empty-icon">🏫</div>
+           <p>Select a school above to view its details and manage settings.</p></div>`;
+        container.querySelectorAll('[data-school-select]').forEach(btn => {
+          btn.addEventListener('click', () => {
+            _impersonateSchoolId = btn.dataset.schoolSelect;
+            _updateBanner(DB.getSchools().find(s => s.id === _impersonateSchoolId));
+            _render();
+          });
+        });
+      } else {
+        container.innerHTML = `<div class="empty-state">
+          <div class="empty-icon">🏫</div>
+          <p>No school is linked to your account yet.<br>
+             Contact an admin to link your account to your school.</p>
+        </div>`;
+      }
       return;
     }
 
@@ -191,9 +219,12 @@ const MySchool = (() => {
     // Show school header
     const currentProfile = Auth.getProfile();
     const isOwnSchool    = currentProfile && currentProfile.schoolId === schoolId;
-    const canSeeSettings = (isOwnSchool || Auth.isAdmin()) && !_impersonateSchoolId;
+    // Admins can always see settings (whether impersonating or using the school selector)
+    const canSeeSettings = Auth.isAdmin() || (isOwnSchool && !_impersonateSchoolId);
 
-    let html = `<div class="myschool-header" style="justify-content:space-between;align-items:flex-start">
+    // Prepend school selector for admins
+    let html = Auth.isAdmin() ? _schoolSelectorHtml(schoolId) : '';
+    html += `<div class="myschool-header" style="justify-content:space-between;align-items:flex-start">
       <div style="display:flex;gap:.75rem;align-items:flex-start">
         <span class="color-dot" style="background:${school.color};width:20px;height:20px;flex-shrink:0;margin-top:.2rem"></span>
         <div>
@@ -270,6 +301,15 @@ const MySchool = (() => {
     }
 
     container.innerHTML = html;
+
+    // ── School selector buttons (admin) ───────────────────────────
+    container.querySelectorAll('[data-school-select]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        _impersonateSchoolId = btn.dataset.schoolSelect;
+        _updateBanner(DB.getSchools().find(s => s.id === _impersonateSchoolId));
+        _render();
+      });
+    });
 
     // ── Settings collapse toggle + shortcut button ────────────────
     function _openSettings() {
