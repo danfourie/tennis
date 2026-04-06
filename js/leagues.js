@@ -1565,8 +1565,20 @@ const Leagues = (() => {
       for (let safety = 0; remaining.length > 0 && safety < 200; safety++) {
         const ds = toDateStr(scanDate);
         if (!excludedSet.has(ds)) {
-          const canPlay = remaining.filter(f => !_matchVenueClosed(f.venueId || neutralVenueId, ds));
-          canPlay.forEach(f => {
+          // Build the set of schools already playing on this date (regular + already-assigned postponed)
+          const busySchools = new Set(
+            fixtures.filter(f => f.date === ds).flatMap(f => [f.homeSchoolId, f.awaySchoolId])
+          );
+          const toAssign = [];
+          for (const f of remaining) {
+            if (_matchVenueClosed(f.venueId || neutralVenueId, ds)) continue;
+            if (busySchools.has(f.homeSchoolId) || busySchools.has(f.awaySchoolId)) continue;
+            toAssign.push(f);
+            // Claim these schools for this date so later matches in the same pass don't clash
+            busySchools.add(f.homeSchoolId);
+            busySchools.add(f.awaySchoolId);
+          }
+          toAssign.forEach(f => {
             f.date = ds;
             remaining.splice(remaining.indexOf(f), 1);
           });
