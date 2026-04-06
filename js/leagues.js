@@ -1058,6 +1058,13 @@ const Leagues = (() => {
   }
 
   function saveLeague(detailsOnly = false) {
+    try { _saveLeagueImpl(detailsOnly); } catch (err) {
+      console.error('[saveLeague] Unexpected error:', err);
+      toast('Save failed — ' + err.message, 'error');
+    }
+  }
+
+  function _saveLeagueImpl(detailsOnly) {
     const name = document.getElementById('leagueName').value.trim();
     if (!name) { toast('League name required', 'error'); return; }
 
@@ -1129,7 +1136,10 @@ const Leagues = (() => {
     }
 
     // ── Full save with fixture generation ────────────────────────
-    const box          = document.getElementById('leagueSchoolsCheckboxes');
+    if (!startDate) { toast('Start date is required to generate fixtures', 'error'); return; }
+
+    const box = document.getElementById('leagueSchoolsCheckboxes');
+    if (!box) { toast('Could not find school list — please close and reopen the modal', 'error'); return; }
     const participants = [];
     box.querySelectorAll('.school-cb:checked').forEach(cb => {
       const schoolId  = cb.value;
@@ -1156,6 +1166,11 @@ const Leagues = (() => {
       return;
     }
 
+    if (!generatedFixtures || generatedFixtures.length === 0) {
+      toast('No fixtures could be generated — check start date, playing day, and venue settings', 'error');
+      return;
+    }
+
     const league = {
       id: id || uid(),
       name,
@@ -1178,9 +1193,9 @@ const Leagues = (() => {
     if (id) {
       DB.updateLeague(league)
         .then(() => {
-          DB.writeAudit('league_updated', 'league', `Updated league: ${name}`, league.id, name);
+          DB.writeAudit('league_updated', 'league', `Updated league: ${name} (${generatedFixtures.length} fixtures)`, league.id, name);
           _autoApproveEntriesForParticipants(league);
-          toast('League updated ✓', 'success');
+          toast(`League updated — ${generatedFixtures.length} fixtures generated ✓`, 'success');
         })
         .catch(err => {
           console.error('[Leagues] updateLeague failed:', err);
