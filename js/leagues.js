@@ -1402,6 +1402,16 @@ const Leagues = (() => {
     // and dates where any home venue in the round has a full-venue full-day closure.
     const excludedSet = new Set(excludedDates || []);
 
+    /** True if the school has marked itself unavailable on dateStr. */
+    function _schoolUnavailable(schoolId, dateStr) {
+      if (!schoolId) return false;
+      return DB.getClosures().some(c =>
+        c.schoolId === schoolId &&
+        c.type === 'school_block' &&
+        dateStr >= c.startDate && dateStr <= c.endDate
+      );
+    }
+
     /** True if the given venue is unavailable for a match on dateStr.
      *  In restricted mode: blocked unless the date falls inside an open window.
      *  In normal mode: blocked if there is a full-day, whole-venue block closure. */
@@ -1504,11 +1514,13 @@ const Leagues = (() => {
           ? Math.max(baseSlots, 2)
           : baseSlots;
 
-        // Each match checks its own home venue for closures.
-        // If closed, the match is postponed past the last regular round;
+        // Each match checks its home venue closure AND both schools' unavailability.
+        // If any applies, the match is postponed past the last regular round;
         // other matches in the round still play on the round's date.
         const roundDate  = validPlayingDates[roundIdx] || toDateStr(addDays(baseDate, roundIdx * 7));
-        const isClosed   = _matchVenueClosed(venueId || neutralVenueId, roundDate);
+        const isClosed   = _matchVenueClosed(venueId || neutralVenueId, roundDate)
+                        || _schoolUnavailable(match.home.schoolId, roundDate)
+                        || _schoolUnavailable(match.away.schoolId, roundDate);
         let assignedDate = isClosed ? null : roundDate;
         let assignedCourt = 0;
 
@@ -1572,6 +1584,8 @@ const Leagues = (() => {
           const toAssign = [];
           for (const f of remaining) {
             if (_matchVenueClosed(f.venueId || neutralVenueId, ds)) continue;
+            if (_schoolUnavailable(f.homeSchoolId, ds)) continue;
+            if (_schoolUnavailable(f.awaySchoolId, ds)) continue;
             if (busySchools.has(f.homeSchoolId) || busySchools.has(f.awaySchoolId)) continue;
             toAssign.push(f);
             // Claim these schools for this date so later matches in the same pass don't clash

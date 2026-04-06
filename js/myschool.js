@@ -371,6 +371,31 @@ const MySchool = (() => {
       });
     });
 
+    // Team unavailability: add
+    const sbAddBtn = document.getElementById('ms-sb-add');
+    if (sbAddBtn) {
+      sbAddBtn.addEventListener('click', () => {
+        if (!_guardOwnSchool()) return;
+        const start  = document.getElementById('ms-sb-start').value;
+        const end    = document.getElementById('ms-sb-end').value || start;
+        const reason = document.getElementById('ms-sb-reason').value.trim();
+        if (!start) { toast('Select a start date', 'error'); return; }
+        DB.addClosure({ schoolId: school.id, startDate: start, endDate: end, reason: reason || null, type: 'school_block' });
+        toast('Unavailability date added ✓', 'success');
+        _render();
+      });
+    }
+
+    // Team unavailability: delete
+    container.querySelectorAll('.ms-school-block-del').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (!_guardOwnSchool()) return;
+        DB.deleteClosure(btn.dataset.id).catch(console.warn);
+        toast('Unavailability date removed', 'success');
+        _render();
+      });
+    });
+
     // Organisers: add row
     const orgAddBtn = document.getElementById('ms-org-add');
     if (orgAddBtn) {
@@ -1131,6 +1156,10 @@ const MySchool = (() => {
           .sort((a, b) => (a.startDate || '').localeCompare(b.startDate || ''))
       : [];
 
+    const schoolBlocks = DB.getClosures()
+      .filter(c => c.schoolId === school.id && c.type === 'school_block')
+      .sort((a, b) => (a.startDate || '').localeCompare(b.startDate || ''));
+
     const orgs = (school.organizers && school.organizers.length)
       ? school.organizers
       : (school.contact ? [{ name: school.contact, email: school.email || '', phone: school.phone || '' }] : [{ name: '', email: '', phone: '' }]);
@@ -1227,6 +1256,31 @@ const MySchool = (() => {
             <div style="display:flex;gap:.5rem;margin-top:.4rem">
               <button class="btn btn-sm btn-secondary" id="ms-org-add">+ Add organiser</button>
               <button class="btn btn-sm btn-primary" id="ms-org-save">Save organisers</button>
+            </div>
+          </div>
+
+          <!-- Team unavailability -->
+          <div>
+            <label style="font-weight:600;display:block;margin-bottom:.2rem">🚫 Team unavailability</label>
+            <p class="text-muted" style="font-size:.8rem;margin:0 0 .5rem">
+              Dates when the team cannot play at all — home <em>and</em> away fixtures will be rescheduled to after the last regular round when fixtures are regenerated.
+            </p>
+            <div id="ms-school-blocks-list">${
+              schoolBlocks.length
+                ? schoolBlocks.map(c => `
+                  <div class="ms-closure-row" style="display:flex;gap:.5rem;align-items:center;margin-bottom:.3rem;flex-wrap:wrap">
+                    <span style="font-size:.85rem">📅 ${formatDate(c.startDate)}${c.endDate && c.endDate !== c.startDate ? ' → ' + formatDate(c.endDate) : ''}</span>
+                    ${c.reason ? `<span class="text-muted" style="font-size:.8rem">${esc(c.reason)}</span>` : ''}
+                    <button class="btn btn-xs btn-danger ms-school-block-del" data-id="${c.id}" title="Remove">✕</button>
+                  </div>`).join('')
+                : `<span class="text-muted" style="font-size:.85rem">No unavailability dates.</span>`
+            }</div>
+            <div style="display:flex;gap:.5rem;align-items:center;margin-top:.5rem;flex-wrap:wrap">
+              <input type="date" id="ms-sb-start" style="flex:1;min-width:130px">
+              <span class="text-muted">to</span>
+              <input type="date" id="ms-sb-end" style="flex:1;min-width:130px">
+              <input type="text" id="ms-sb-reason" placeholder="Reason (e.g. School tour)" style="flex:2;min-width:140px">
+              <button class="btn btn-sm btn-secondary" id="ms-sb-add">+ Add</button>
             </div>
           </div>
 

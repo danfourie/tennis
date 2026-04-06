@@ -62,11 +62,18 @@ service cloud.firestore {
       allow read: if true;
       // Admin role can manage all closures (covers multi-venue managers)
       allow write: if isAdminRole();
-      // School contacts may manage closures for their own primary school's venue
+      // School contacts may manage venue closures for their own school's home venue
       allow create: if isSignedIn() && getUserSchoolId() != null
         && get(/databases/$(database)/documents/schools/$(getUserSchoolId())).data.venueId == request.resource.data.venueId;
       allow delete: if isSignedIn() && getUserSchoolId() != null
         && get(/databases/$(database)/documents/schools/$(getUserSchoolId())).data.venueId == resource.data.venueId;
+      // School contacts may manage their own school's team unavailability (type: 'school_block')
+      allow create: if isSignedIn() && getUserSchoolId() != null
+        && request.resource.data.type == 'school_block'
+        && request.resource.data.schoolId == getUserSchoolId();
+      allow delete: if isSignedIn() && getUserSchoolId() != null
+        && resource.data.type == 'school_block'
+        && resource.data.schoolId == getUserSchoolId();
     }
 
     // ── Settings ─────────────────────────────────────────────────────────────
