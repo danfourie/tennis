@@ -893,6 +893,7 @@ const Leagues = (() => {
   // LEAGUE MODAL (create / edit)
   // ════════════════════════════════════════════════════════════
   function openLeagueModal(id) {
+    try {
     const schools = DB.getSchools();
     const venues  = DB.getVenues();
     const l       = id ? DB.getLeagues().find(x => x.id === id) : null;
@@ -950,6 +951,7 @@ const Leagues = (() => {
     const existingMap = new Map(); // schoolId → count
     if (l) {
       _getParticipants(l).forEach(p => {
+        if (!p || !p.schoolId) return;
         existingMap.set(p.schoolId, (existingMap.get(p.schoolId) || 0) + 1);
       });
     }
@@ -1049,6 +1051,10 @@ const Leagues = (() => {
     });
 
     Modal.open('leagueModal');
+    } catch (err) {
+      console.error('[openLeagueModal] Error opening league modal:', err);
+      if (typeof toast === 'function') toast('Could not open league editor — ' + err.message, 'error');
+    }
   }
 
   function saveLeague(detailsOnly = false) {
@@ -1208,7 +1214,7 @@ const Leagues = (() => {
     const profile      = Auth.getProfile();
     const approverName = profile ? (profile.displayName || profile.email) : 'Admin';
     const approverUid  = profile ? profile.uid : null;
-    const participantSchoolIds = new Set(league.participants.map(p => p.schoolId));
+    const participantSchoolIds = new Set((league.participants || []).filter(Boolean).map(p => p.schoolId));
 
     const pending = DB.getEntriesForLeague(league.id).filter(
       e => e.status === 'pending' && participantSchoolIds.has(e.schoolId)
@@ -1778,7 +1784,7 @@ const Leagues = (() => {
     if (Auth.isAdmin()) {
       body.querySelectorAll('.fixture-venue-sel').forEach(sel => {
         sel.addEventListener('change', () => {
-          const fixture = league.fixtures.find(f => f.id === sel.dataset.fixture);
+          const fixture = (league.fixtures || []).find(f => f.id === sel.dataset.fixture);
           if (fixture) {
             fixture.venueId   = sel.value;
             const v = DB.getVenues().find(v => v.id === sel.value);
