@@ -511,7 +511,12 @@ const Admin = (() => {
               <span style="font-size:.74rem;color:var(--text-muted);white-space:nowrap">📍 Extra venues:</span>
               <select class="venue-multiselect" data-user-uid="${u.uid}" multiple
                 style="font-size:.73rem;padding:.2rem .3rem;border-radius:6px;border:1.5px solid var(--border,#e2e8f0);background:var(--surface,#fff);min-width:140px;max-width:260px;height:auto">
-                ${venues.map(v => `
+                ${[...venues].sort((a, b) => {
+                    const asel = (u.managedVenueIds || []).includes(a.id);
+                    const bsel = (u.managedVenueIds || []).includes(b.id);
+                    if (asel !== bsel) return asel ? -1 : 1;
+                    return a.name.localeCompare(b.name);
+                  }).map(v => `
                   <option value="${esc(v.id)}" ${(u.managedVenueIds || []).includes(v.id) ? 'selected' : ''}>
                     ${esc(v.name)}
                   </option>`).join('')}
@@ -586,6 +591,7 @@ const Admin = (() => {
           userUid, user.displayName || user.email
         );
         toast('Venue access updated ✓', 'success');
+        renderUsers();
       });
     });
 
