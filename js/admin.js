@@ -521,6 +521,10 @@ const Admin = (() => {
                     ${esc(v.name)}
                   </option>`).join('')}
               </select>
+              ${(u.managedVenueIds || []).length > 0
+                ? `<button class="btn btn-xs btn-secondary venue-clear-btn" data-user-uid="${u.uid}"
+                     title="Clear all extra venue access" style="flex-shrink:0">✕ Clear</button>`
+                : ''}
             </div>` : ''}
           </div>
           <div class="item-actions">
@@ -578,6 +582,20 @@ const Admin = (() => {
     });
 
     // ── Managed Venues (extra venue access) ──────────────────────────────
+    el.querySelectorAll('.venue-clear-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const userUid = btn.dataset.userUid;
+        const user    = DB.getUsers().find(u => u.uid === userUid);
+        if (!user) return;
+        DB.updateUser({ ...user, managedVenueIds: [] });
+        DB.writeAudit('user_venue_access_changed', 'user',
+          `Extra venue access cleared for ${esc(user.displayName || user.email)}`,
+          userUid, user.displayName || user.email);
+        toast('Venue access cleared', 'success');
+        renderUsers();
+      });
+    });
+
     el.querySelectorAll('.venue-multiselect').forEach(sel => {
       // Save on blur (after user finishes selecting) so multi-select isn't
       // interrupted by a re-render firing on every individual click.
