@@ -579,11 +579,15 @@ const Admin = (() => {
 
     // ── Managed Venues (extra venue access) ──────────────────────────────
     el.querySelectorAll('.venue-multiselect').forEach(sel => {
-      sel.addEventListener('change', () => {
+      // Save on blur (after user finishes selecting) so multi-select isn't
+      // interrupted by a re-render firing on every individual click.
+      sel.addEventListener('blur', () => {
         const userUid = sel.dataset.userUid;
         const user    = DB.getUsers().find(u => u.uid === userUid);
         if (!user) return;
         const updated = Array.from(sel.selectedOptions).map(o => o.value);
+        const prev    = user.managedVenueIds || [];
+        if (JSON.stringify([...updated].sort()) === JSON.stringify([...prev].sort())) return;
         DB.updateUser({ ...user, managedVenueIds: updated });
         DB.writeAudit(
           'user_venue_access_changed', 'user',
@@ -591,7 +595,6 @@ const Admin = (() => {
           userUid, user.displayName || user.email
         );
         toast('Venue access updated ✓', 'success');
-        renderUsers();
       });
     });
 
