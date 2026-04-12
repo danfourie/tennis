@@ -507,16 +507,15 @@ const Admin = (() => {
               : '<div class="text-muted" style="font-size:.78rem;margin-top:.1rem">🔘 No login recorded yet</div>'}
             ${loginHistoryHtml}
             ${venues.length > 0 ? `
-            <div style="margin-top:.4rem;display:flex;align-items:flex-start;gap:.4rem;flex-wrap:wrap">
-              <span style="font-size:.74rem;color:var(--text-muted);white-space:nowrap;padding-top:.15rem">📍 Extra venues:</span>
-              <div class="venue-checks" data-user-uid="${u.uid}" style="display:flex;gap:.3rem;flex-wrap:wrap">
+            <div style="margin-top:.4rem;display:flex;align-items:center;gap:.4rem;flex-wrap:wrap">
+              <span style="font-size:.74rem;color:var(--text-muted);white-space:nowrap">📍 Extra venues:</span>
+              <select class="venue-multiselect" data-user-uid="${u.uid}" multiple
+                style="font-size:.73rem;padding:.2rem .3rem;border-radius:6px;border:1.5px solid var(--border,#e2e8f0);background:var(--surface,#fff);min-width:140px;max-width:260px;height:auto">
                 ${venues.map(v => `
-                  <label style="font-size:.73rem;cursor:pointer;display:inline-flex;align-items:center;gap:.25rem;padding:.15rem .45rem;border-radius:4px;background:var(--surface2,#f8fafc);border:1px solid var(--border,#e2e8f0)">
-                    <input type="checkbox" class="venue-checkbox" data-venue-id="${esc(v.id)}"
-                      ${(u.managedVenueIds || []).includes(v.id) ? 'checked' : ''}>
+                  <option value="${esc(v.id)}" ${(u.managedVenueIds || []).includes(v.id) ? 'selected' : ''}>
                     ${esc(v.name)}
-                  </label>`).join('')}
-              </div>
+                  </option>`).join('')}
+              </select>
             </div>` : ''}
           </div>
           <div class="item-actions">
@@ -574,24 +573,19 @@ const Admin = (() => {
     });
 
     // ── Managed Venues (extra venue access) ──────────────────────────────
-    el.querySelectorAll('.venue-checkbox').forEach(cb => {
-      cb.addEventListener('change', () => {
-        const venueId = cb.dataset.venueId;
-        const userUid = cb.closest('.venue-checks').dataset.userUid;
+    el.querySelectorAll('.venue-multiselect').forEach(sel => {
+      sel.addEventListener('change', () => {
+        const userUid = sel.dataset.userUid;
         const user    = DB.getUsers().find(u => u.uid === userUid);
         if (!user) return;
-        const current = user.managedVenueIds || [];
-        const updated = cb.checked
-          ? [...new Set([...current, venueId])]
-          : current.filter(id => id !== venueId);
+        const updated = Array.from(sel.selectedOptions).map(o => o.value);
         DB.updateUser({ ...user, managedVenueIds: updated });
-        const venueName = DB.getVenues().find(v => v.id === venueId)?.name || venueId;
         DB.writeAudit(
           'user_venue_access_changed', 'user',
-          `Venue access ${cb.checked ? 'granted' : 'removed'} for ${esc(user.displayName || user.email)}: ${esc(venueName)}`,
+          `Extra venue access updated for ${esc(user.displayName || user.email)}: ${updated.map(id => DB.getVenues().find(v => v.id === id)?.name || id).join(', ') || 'none'}`,
           userUid, user.displayName || user.email
         );
-        toast(cb.checked ? `Venue access granted ✓` : `Venue access removed`, 'success');
+        toast('Venue access updated ✓', 'success');
       });
     });
 
