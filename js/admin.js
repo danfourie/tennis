@@ -587,6 +587,15 @@ const Admin = (() => {
         if (!user) return;
         const updated = Array.from(sel.selectedOptions).map(o => o.value);
         const prev    = user.managedVenueIds || [];
+
+        // Re-sort options in-place: selected first, then alphabetical
+        Array.from(sel.options)
+          .sort((a, b) => {
+            if (a.selected !== b.selected) return a.selected ? -1 : 1;
+            return a.text.localeCompare(b.text);
+          })
+          .forEach(o => sel.appendChild(o));
+
         if (JSON.stringify([...updated].sort()) === JSON.stringify([...prev].sort())) return;
         DB.updateUser({ ...user, managedVenueIds: updated });
         DB.writeAudit(
