@@ -219,7 +219,7 @@ const Admin = (() => {
         // Unverified scores show regardless of date (scores can be entered early)
         if (hasScore && !isVerified) {
           unverified.push({ fixture: f, league });
-        } else if (!hasScore && f.date < today) {
+        } else if (!hasScore && f.date <= today) {
           // No score: only flag past fixtures (future fixtures haven't been played yet)
           noScore.push({ fixture: f, league });
         }
