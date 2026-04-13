@@ -998,7 +998,7 @@ exports.whatsappWebhook = onRequest({ secrets: [TWILIO_SID, TWILIO_TOKEN, TWILIO
               [fixtureId]: {
                 ...fixtureBase,
                 awaitingConfirmation: true,
-                confirmMsgSid,
+                confirmMsgSid: confMsgSid,
                 pendingHome: homeScore,
                 pendingAway: awayScore,
                 submittedBySchoolId: submitterSchoolId,
