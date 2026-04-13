@@ -465,7 +465,7 @@ exports.sendEmailInvite = onCall(
 // Register the deployed URL of this function in:
 //   Twilio Console → Messaging → WhatsApp → Sender → "A message comes in" → Webhook
 //   URL: https://whatsappwebhook-y4qyzqnkpq-uc.a.run.app
-exports.whatsappWebhook = onRequest(async (req, res) => {
+exports.whatsappWebhook = onRequest({ secrets: [TWILIO_SID, TWILIO_TOKEN, TWILIO_FROM] }, async (req, res) => {
   const fromRaw      = req.body && req.body.From          ? String(req.body.From).trim()          : null;
   const rawBody      = req.body && req.body.Body          ? String(req.body.Body).trim()          : null;
   const buttonPayloadRaw = req.body && req.body.ButtonPayload ? String(req.body.ButtonPayload).trim() : null;
