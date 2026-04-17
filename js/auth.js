@@ -219,6 +219,15 @@ const Auth = (() => {
       _profile = profile;
       _role    = role;
 
+      // 4b. Audit log — record the registration event.
+      if (typeof DB !== 'undefined') {
+        DB.writeAudit(
+          'user_registered', 'user',
+          `${displayName} (${email}) registered${role === 'master' ? ' as master' : ''}`,
+          cred.user.uid, displayName
+        );
+      }
+
       // 5. Attach the live profile listener (role changes reflected without re-login).
       if (_profileUnsub) _profileUnsub();
       _profileUnsub = ref.onSnapshot(s => {
