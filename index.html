@@ -943,6 +943,23 @@
         <div class="form-group">
           <div id="notifCtxRecipients" class="notif-ctx-recipients"></div>
         </div>
+        <div class="form-group hidden" id="notifCtxChannels">
+          <label>Delivery channels</label>
+          <div style="display:flex;flex-direction:column;gap:.35rem;margin-top:.3rem">
+            <label style="display:flex;align-items:center;gap:.5rem;font-size:.9rem;color:#64748b;cursor:default">
+              <input type="checkbox" checked disabled style="opacity:.5;pointer-events:none">
+              🔔 In-app notification
+            </label>
+            <label style="display:flex;align-items:center;gap:.5rem;font-size:.9rem;color:#64748b;cursor:default">
+              <input type="checkbox" checked disabled style="opacity:.5;pointer-events:none">
+              💬 WhatsApp <span style="font-size:.8rem;color:#94a3b8">(auto — opted-in users only)</span>
+            </label>
+            <label style="display:flex;align-items:center;gap:.5rem;font-size:.9rem;cursor:pointer">
+              <input type="checkbox" id="notifCtxEmailCb" checked>
+              📧 Email <span style="font-size:.8rem;color:#94a3b8">(all registered users in group)</span>
+            </label>
+          </div>
+        </div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" data-modal="notifContextModal">Cancel</button>

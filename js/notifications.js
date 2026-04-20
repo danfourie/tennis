@@ -64,12 +64,23 @@ const NotificationService = (() => {
     if (typeSel) typeSel.addEventListener('change', _onCtxTypeChange);
     const sendBtn = document.getElementById('notifCtxSendBtn');
     if (sendBtn) sendBtn.addEventListener('click', _onCtxSend);
+    // Update send button label whenever the email checkbox is toggled
+    const emailCb = document.getElementById('notifCtxEmailCb');
+    if (emailCb) emailCb.addEventListener('change', _updateSendBtnLabel);
   }
 
   /**
    * Open the reusable notification context modal.
-   * config: { title, types: [{ value, label, subject, body, recipientLabel, schoolSelect?, sendFn }] }
-   * sendFn receives (title, body, selectedSchoolIds?) and should call the appropriate send helper.
+   * config: {
+   *   title,
+   *   types: [{
+   *     value, label, subject, body, recipientLabel,
+   *     schoolSelect?,    // show school checkboxes
+   *     sendFn,           // async (title, body, selectedSchoolIds?) → void
+   *     getRecipientUids? // async (selectedSchoolIds?) → uid[] — required for email delivery
+   *   }]
+   * }
+   * Any type that includes getRecipientUids will show the email delivery channel toggle.
    */
   function openContextModal(config) {
     _ctxConfig = config;
@@ -118,6 +129,21 @@ const NotificationService = (() => {
         }
       }
     }
+
+    // Show the delivery channels panel only when this type supports email
+    const channelsEl = document.getElementById('notifCtxChannels');
+    if (channelsEl) channelsEl.classList.toggle('hidden', !typeConfig.getRecipientUids);
+
+    // Update send button label to reflect active channels
+    _updateSendBtnLabel();
+  }
+
+  function _updateSendBtnLabel() {
+    const sendBtn    = document.getElementById('notifCtxSendBtn');
+    if (!sendBtn) return;
+    const emailCb    = document.getElementById('notifCtxEmailCb');
+    const emailOn    = emailCb && !emailCb.disabled && emailCb.checked;
+    sendBtn.textContent = emailOn ? 'Send 🔔 📧' : 'Send 🔔';
   }
 
   async function _onCtxSend() {
@@ -137,18 +163,44 @@ const NotificationService = (() => {
       if (selectedSchoolIds.length === 0) { toast('Select at least one school', 'error'); return; }
     }
 
+    const emailCb  = document.getElementById('notifCtxEmailCb');
+    const sendEmail = typeConfig.getRecipientUids && emailCb && emailCb.checked;
+
     const sendBtn = document.getElementById('notifCtxSendBtn');
     if (sendBtn) { sendBtn.disabled = true; sendBtn.textContent = 'Sending…'; }
 
     try {
+      // 1. Send in-app (+ auto WhatsApp via Cloud Function trigger)
       await typeConfig.sendFn(title, body, selectedSchoolIds);
+
+      // 2. Send email if channel is active
+      if (sendEmail) {
+        const recipientUids = await typeConfig.getRecipientUids(selectedSchoolIds);
+        if (recipientUids && recipientUids.length > 0) {
+          try {
+            const sendBulkEmail = firebase.functions().httpsCallable('sendBulkEmail');
+            const result = await sendBulkEmail({ recipientUids, subject: title, body });
+            const d = result.data || {};
+            console.log(`[NotificationService] Email sent: ${d.sent}/${d.total}`);
+          } catch (emailErr) {
+            console.error('[NotificationService] Email send error:', emailErr);
+            toast('In-app ✓ — email failed: ' + emailErr.message, 'error');
+            return;
+          }
+        }
+      }
+
       toast('Notification sent ✓', 'success');
       Modal.close('notifContextModal');
     } catch (err) {
       console.error('[NotificationService] context send error:', err);
       toast('Failed to send notification', 'error');
     } finally {
-      if (sendBtn) { sendBtn.disabled = false; sendBtn.textContent = 'Send 🔔'; }
+      if (sendBtn) {
+        sendBtn.disabled    = false;
+        const emailOn       = emailCb && emailCb.checked;
+        sendBtn.textContent = emailOn ? 'Send 🔔 📧' : 'Send 🔔';
+      }
     }
   }
 

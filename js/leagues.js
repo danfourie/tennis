@@ -544,6 +544,13 @@ const Leagues = (() => {
                   type: 'league_created', title, body, leagueId: l.id,
                 });
               },
+              // Return UIDs of registered users belonging to the selected schools
+              getRecipientUids: async (selectedSchoolIds) => {
+                const users = DB.getUsers();
+                return users
+                  .filter(u => selectedSchoolIds && selectedSchoolIds.includes(u.schoolId))
+                  .map(u => u.uid);
+              },
             },
             {
               value:          'fixture_changed',
@@ -556,6 +563,13 @@ const Leagues = (() => {
                   type: 'fixture_changed', title, body, leagueId: l.id,
                 });
               },
+              // Return UIDs of all registered users in the participating schools
+              getRecipientUids: async () => {
+                const users = DB.getUsers();
+                return users
+                  .filter(u => schoolIds.includes(u.schoolId))
+                  .map(u => u.uid);
+              },
             },
             {
               value:          'score_reminder',
@@ -563,6 +577,8 @@ const Leagues = (() => {
               subject:        `Please submit your scores — ${l.name}`,
               body:           `This is a reminder to submit outstanding scores for ${l.name}. Please update your results as soon as possible.`,
               recipientLabel: `📬 Recipients: ${participantNames || 'All participants'}`,
+              // No getRecipientUids — score reminders are per-fixture via WhatsApp quick-reply;
+              // email channel is not offered for this type.
               sendFn: async (title, body) => {
                 // Send one notification per unscored fixture so the WhatsApp
                 // quick-reply template gets {{1}} homeTeam, {{2}} awayTeam,

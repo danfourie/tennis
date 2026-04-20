@@ -461,7 +461,103 @@ exports.sendEmailInvite = onCall(
   }
 );
 
-// ── 4. Inbound: Twilio webhook — user replied on WhatsApp ─────────────────────
+// ── 4. Outbound: admin sends a bulk notification email to registered users ─────
+exports.sendBulkEmail = onCall(
+  { secrets: [EMAIL_USER, EMAIL_PASS] },
+  async (request) => {
+    if (!request.auth) throw new Error('Unauthenticated');
+
+    const callerDoc = await admin.firestore().doc(`users/${request.auth.uid}`).get();
+    const caller    = callerDoc.exists ? callerDoc.data() : null;
+    if (!caller || !['master', 'admin'].includes(caller.role)) {
+      throw new Error('Permission denied — admins only');
+    }
+
+    const { recipientUids, subject, body } = request.data || {};
+    if (!Array.isArray(recipientUids) || recipientUids.length === 0) throw new Error('recipientUids is required');
+    if (!subject) throw new Error('subject is required');
+    if (!body)    throw new Error('body is required');
+
+    const emailUser = EMAIL_USER.value();
+    const emailPass = EMAIL_PASS.value();
+    if (!emailUser || !emailPass) throw new Error('Email credentials not configured — set EMAIL_USER and EMAIL_PASS secrets');
+
+    // Fetch recipient emails from Firestore (Firestore 'in' operator max 10 per query)
+    const recipientEmails = [];
+    const chunks = [];
+    for (let i = 0; i < recipientUids.length; i += 10) chunks.push(recipientUids.slice(i, i + 10));
+    for (const chunk of chunks) {
+      const snap = await admin.firestore().collection('users').where('uid', 'in', chunk).get();
+      snap.forEach(doc => {
+        const data = doc.data();
+        if (data.email) recipientEmails.push({ email: data.email, name: data.displayName || '' });
+      });
+    }
+
+    if (recipientEmails.length === 0) return { sent: 0, total: recipientUids.length };
+
+    const transporter = nodemailer.createTransport({ service: 'gmail', auth: { user: emailUser, pass: emailPass } });
+
+    // Build HTML email — body newlines rendered as <br>
+    const htmlBody = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: Arial, sans-serif; background: #f4f7fb; margin: 0; padding: 0; }
+    .container { max-width: 560px; margin: 32px auto; background: #fff; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,.1); }
+    .header { background: #3b82f6; padding: 28px 32px; text-align: center; }
+    .header h1 { color: #fff; margin: 0; font-size: 22px; }
+    .header p  { color: #dbeafe; margin: 6px 0 0; font-size: 14px; }
+    .body { padding: 28px 32px; color: #1e293b; line-height: 1.6; }
+    .body p { margin: 0 0 14px; }
+    .cta { display: block; margin: 24px 0; text-align: center; }
+    .cta a { background: #3b82f6; color: #fff !important; text-decoration: none; padding: 13px 32px; border-radius: 6px; font-size: 15px; font-weight: 600; display: inline-block; }
+    .footer { text-align: center; padding: 16px 32px; font-size: 11px; color: #94a3b8; border-top: 1px solid #e2e8f0; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🎾 Court Campus</h1>
+      <p>Tennis League Management Platform</p>
+    </div>
+    <div class="body">
+      <p>${body.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>')}</p>
+      <div class="cta"><a href="${APP_URL}">Open Court Campus →</a></div>
+    </div>
+    <div class="footer">
+      Court Campus · <a href="${APP_URL}" style="color:#94a3b8">${APP_URL}</a>
+    </div>
+  </div>
+</body>
+</html>`;
+
+    let sent = 0;
+    for (const { email } of recipientEmails) {
+      try {
+        await transporter.sendMail({
+          from:    `"Court Campus" <${emailUser}>`,
+          to:      email,
+          subject,
+          text:    `${body}\n\n${APP_URL}`,
+          html:    htmlBody,
+        });
+        sent++;
+        console.log(`[BulkEmail] Sent to ${email}`);
+      } catch (err) {
+        console.error(`[BulkEmail] Failed for ${email}:`, err.message);
+      }
+    }
+
+    console.log(`[BulkEmail] Done — ${sent}/${recipientEmails.length} sent for subject: "${subject}"`);
+    return { sent, total: recipientEmails.length };
+  }
+);
+
+// ── 5. Inbound: Twilio webhook — user replied on WhatsApp ─────────────────────
 // Register the deployed URL of this function in:
 //   Twilio Console → Messaging → WhatsApp → Sender → "A message comes in" → Webhook
 //   URL: https://whatsappwebhook-y4qyzqnkpq-uc.a.run.app
