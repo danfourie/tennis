@@ -94,13 +94,6 @@ const NotificationService = (() => {
       ).join('');
     }
 
-    // Show the channels panel if ANY type in this config supports email.
-    // We do this here (not in _onCtxTypeChange) because typeSel.value may not yet
-    // reflect the first option when called synchronously right after innerHTML is set.
-    const anyEmailType = config.types.some(t => !!t.getRecipientUids);
-    const channelsEl = document.getElementById('notifCtxChannels');
-    if (channelsEl) channelsEl.classList.toggle('hidden', !anyEmailType);
-
     // Set the first type's content now that innerHTML is settled
     const firstType = config.types[0];
     if (firstType) {
@@ -138,9 +131,17 @@ const NotificationService = (() => {
       }
     }
 
-    // Show/hide just the email row based on whether this type can email
+    // Show/hide the email row depending on whether this type supports email delivery
     const emailRow = document.getElementById('notifCtxEmailRow');
-    if (emailRow) emailRow.classList.toggle('hidden', !typeConfig.getRecipientUids);
+    if (emailRow) {
+      const supportsEmail = !!typeConfig.getRecipientUids;
+      emailRow.classList.toggle('hidden', !supportsEmail);
+      // Uncheck email when not supported so _onCtxSend won't attempt a call
+      const emailCb = document.getElementById('notifCtxEmailCb');
+      if (emailCb) {
+        if (!supportsEmail) emailCb.checked = false;
+      }
+    }
   }
 
   function _onCtxTypeChange() {
