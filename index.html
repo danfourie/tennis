@@ -928,6 +928,23 @@
           <label>Notification Type</label>
           <select id="notifCtxType"></select>
         </div>
+        <!-- Delivery channels — placed here (below type, above schools) so it is
+             always in the visible viewport regardless of how tall the modal grows -->
+        <div id="notifCtxChannels" style="display:flex;flex-direction:column;gap:.3rem;padding:.6rem .75rem;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px">
+          <div style="font-size:.8rem;font-weight:600;color:#475569;margin-bottom:.15rem;letter-spacing:.02em">DELIVERY CHANNELS</div>
+          <div style="display:flex;align-items:center;gap:.5rem;font-size:.875rem;color:#94a3b8">
+            <input type="checkbox" checked disabled style="width:14px;height:14px;flex-shrink:0;accent-color:#3b82f6;opacity:.5;cursor:default">
+            🔔 In-app notification
+          </div>
+          <div style="display:flex;align-items:center;gap:.5rem;font-size:.875rem;color:#94a3b8">
+            <input type="checkbox" checked disabled style="width:14px;height:14px;flex-shrink:0;accent-color:#3b82f6;opacity:.5;cursor:default">
+            💬 WhatsApp <span style="font-size:.78rem">(auto — opted-in users only)</span>
+          </div>
+          <div id="notifCtxEmailRow" style="display:flex;align-items:center;gap:.5rem;font-size:.875rem;color:#1e293b;cursor:pointer">
+            <input type="checkbox" id="notifCtxEmailCb" checked style="width:14px;height:14px;flex-shrink:0;accent-color:#3b82f6;cursor:pointer">
+            📧 Email <span style="font-size:.78rem;color:#94a3b8">(all registered users in group)</span>
+          </div>
+        </div>
         <div class="form-group hidden" id="notifCtxSchoolSelectGroup">
           <label>Schools to notify</label>
           <div id="notifCtxSchoolCheckboxes" class="notif-ctx-school-list"></div>
@@ -938,27 +955,10 @@
         </div>
         <div class="form-group">
           <label>Message</label>
-          <textarea id="notifCtxBody" rows="4" placeholder="Message body"></textarea>
+          <textarea id="notifCtxBody" rows="3" placeholder="Message body"></textarea>
         </div>
         <div class="form-group">
           <div id="notifCtxRecipients" class="notif-ctx-recipients"></div>
-        </div>
-        <div class="form-group" id="notifCtxChannels">
-          <label>Delivery channels</label>
-          <div style="display:flex;flex-direction:column;gap:.35rem;margin-top:.3rem">
-            <label style="display:flex;align-items:center;gap:.5rem;font-size:.9rem;color:#64748b;cursor:default">
-              <input type="checkbox" checked disabled style="opacity:.5;pointer-events:none">
-              🔔 In-app notification
-            </label>
-            <label style="display:flex;align-items:center;gap:.5rem;font-size:.9rem;color:#64748b;cursor:default">
-              <input type="checkbox" checked disabled style="opacity:.5;pointer-events:none">
-              💬 WhatsApp <span style="font-size:.8rem;color:#94a3b8">(auto — opted-in users only)</span>
-            </label>
-            <label id="notifCtxEmailRow" style="display:flex;align-items:center;gap:.5rem;font-size:.9rem;cursor:pointer">
-              <input type="checkbox" id="notifCtxEmailCb" checked>
-              📧 Email <span style="font-size:.8rem;color:#94a3b8">(all registered users in group)</span>
-            </label>
-          </div>
         </div>
       </div>
       <div class="modal-footer">
