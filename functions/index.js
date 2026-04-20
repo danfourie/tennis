@@ -142,8 +142,23 @@ function _buildTemplate(notif) {
       break;
     case 'fixture_changed':
     case 'fixture_cancelled':
-      vars['1'] = notif.opponent   || '';
-      vars['2'] = notif.date       || '';
+      if (notif.opponent) {
+        // Specific fixture change — use the fixture_changed template with opponent + date
+        vars['1'] = notif.opponent;
+        vars['2'] = notif.date || '';
+      } else {
+        // League-wide "fixtures updated" — no opponent/date, use general_message template
+        // so the message is delivered with title+body instead of sending blank variables.
+        vars['1'] = notif.title || '';
+        vars['2'] = notif.body  || '';
+        return { contentSid: TEMPLATE_SIDS.general_message, contentVariables: JSON.stringify(vars) };
+      }
+      break;
+    case 'general_message':
+    case 'league_created':
+    case 'league_start_reminder':
+      vars['1'] = notif.title      || '';
+      vars['2'] = notif.body       || '';
       break;
     case 'score_reminder':
       vars['1'] = notif.homeTeam  || notif.opponent || '';

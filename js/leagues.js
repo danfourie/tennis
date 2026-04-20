@@ -559,8 +559,12 @@ const Leagues = (() => {
               body:           `The fixtures for ${l.name} have been updated. Please check your upcoming schedule.`,
               recipientLabel: `📬 Recipients: ${participantNames || 'All participants'}`,
               sendFn: async (title, body) => {
+                // Use 'general_message' type so the WhatsApp template receives
+                // {{1}}=title and {{2}}=body — both always populated.
+                // 'fixture_changed' template expects {{1}}=opponent and {{2}}=date
+                // which are empty for a league-wide update, causing Meta to reject it.
                 await NotificationService.sendToLeagueParticipants(l.id, {
-                  type: 'fixture_changed', title, body, leagueId: l.id,
+                  type: 'general_message', title, body, leagueId: l.id,
                 });
               },
               // Return UIDs of all registered users in the participating schools
