@@ -93,25 +93,33 @@ const NotificationService = (() => {
         `<option value="${esc(t.value)}">${esc(t.label)}</option>`
       ).join('');
     }
-    _onCtxTypeChange();
+
+    // Show the channels panel if ANY type in this config supports email.
+    // We do this here (not in _onCtxTypeChange) because typeSel.value may not yet
+    // reflect the first option when called synchronously right after innerHTML is set.
+    const anyEmailType = config.types.some(t => !!t.getRecipientUids);
+    const channelsEl = document.getElementById('notifCtxChannels');
+    if (channelsEl) channelsEl.classList.toggle('hidden', !anyEmailType);
+
+    // Set the first type's content now that innerHTML is settled
+    const firstType = config.types[0];
+    if (firstType) {
+      const subjectEl = document.getElementById('notifCtxSubject');
+      const bodyEl    = document.getElementById('notifCtxBody');
+      const recEl     = document.getElementById('notifCtxRecipients');
+      if (subjectEl) subjectEl.value   = firstType.subject || '';
+      if (bodyEl)    bodyEl.value      = firstType.body    || '';
+      if (recEl)     recEl.textContent = firstType.recipientLabel || '';
+
+      _applyTypeVisuals(firstType);
+    }
+
+    _updateSendBtnLabel();
     Modal.open('notifContextModal');
   }
 
-  function _onCtxTypeChange() {
-    if (!_ctxConfig) return;
-    const typeSel     = document.getElementById('notifCtxType');
-    const selectedType = typeSel ? typeSel.value : null;
-    const typeConfig  = _ctxConfig.types.find(t => t.value === selectedType);
-    if (!typeConfig) return;
-
-    const subjectEl = document.getElementById('notifCtxSubject');
-    const bodyEl    = document.getElementById('notifCtxBody');
-    const recEl     = document.getElementById('notifCtxRecipients');
-
-    if (subjectEl) subjectEl.value   = typeConfig.subject || '';
-    if (bodyEl)    bodyEl.value      = typeConfig.body    || '';
-    if (recEl)     recEl.textContent = typeConfig.recipientLabel || '';
-
+  /** Apply school-select checkboxes and email row visibility for a given type config. */
+  function _applyTypeVisuals(typeConfig) {
     const schoolGroup = document.getElementById('notifCtxSchoolSelectGroup');
     if (schoolGroup) {
       const show = !!typeConfig.schoolSelect;
@@ -130,11 +138,27 @@ const NotificationService = (() => {
       }
     }
 
-    // Show the delivery channels panel only when this type supports email
-    const channelsEl = document.getElementById('notifCtxChannels');
-    if (channelsEl) channelsEl.classList.toggle('hidden', !typeConfig.getRecipientUids);
+    // Show/hide just the email row based on whether this type can email
+    const emailRow = document.getElementById('notifCtxEmailRow');
+    if (emailRow) emailRow.classList.toggle('hidden', !typeConfig.getRecipientUids);
+  }
 
-    // Update send button label to reflect active channels
+  function _onCtxTypeChange() {
+    if (!_ctxConfig) return;
+    const typeSel     = document.getElementById('notifCtxType');
+    const selectedType = typeSel ? typeSel.value : null;
+    const typeConfig  = _ctxConfig.types.find(t => t.value === selectedType);
+    if (!typeConfig) return;
+
+    const subjectEl = document.getElementById('notifCtxSubject');
+    const bodyEl    = document.getElementById('notifCtxBody');
+    const recEl     = document.getElementById('notifCtxRecipients');
+
+    if (subjectEl) subjectEl.value   = typeConfig.subject || '';
+    if (bodyEl)    bodyEl.value      = typeConfig.body    || '';
+    if (recEl)     recEl.textContent = typeConfig.recipientLabel || '';
+
+    _applyTypeVisuals(typeConfig);
     _updateSendBtnLabel();
   }
 
