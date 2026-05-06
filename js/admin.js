@@ -629,19 +629,19 @@ const Admin = (() => {
       btn.addEventListener('click', async () => {
         const userUid = btn.dataset.userDelete;
         const user    = DB.getUsers().find(u => u.uid === userUid);
-        if (!confirm(`Remove ${user ? (user.displayName || user.email) : 'this user'}? They will lose access.`)) return;
+        if (!confirm(`Remove ${user ? (user.displayName || user.email) : 'this user'}? They will be hidden but can be restored from the deleted list.`)) return;
         btn.disabled = true;
         btn.textContent = 'Removing…';
         try {
-          // Await the Firestore delete before re-fetching, otherwise loadUsers()
+          // Await the Firestore soft-delete before re-fetching, otherwise loadUsers()
           // returns the old snapshot (race condition) and the user reappears.
           await DB.deleteUserProfile(userUid);
           DB.writeAudit(
             'user_removed', 'user',
-            `User profile removed: ${user ? esc(user.displayName || user.email) : userUid}`,
+            `User profile soft-deleted: ${user ? esc(user.displayName || user.email) : userUid}`,
             userUid, user ? (user.displayName || user.email) : userUid
           );
-          toast('User removed');
+          toast('User removed (can be restored)');
           renderUsers();
         } catch (err) {
           console.error('[Admin] delete user failed:', err);
@@ -654,6 +654,54 @@ const Admin = (() => {
 
     // Re-apply all active filters after re-render
     _applyUserFilters();
+
+    // ── Deleted users (collapsible) ────────────────────────────
+    const deletedUsersSec = document.getElementById('deletedUsersSection');
+    if (deletedUsersSec) {
+      DB.loadDeletedItems('users').then(deleted => {
+        if (!deleted.length) { deletedUsersSec.innerHTML = ''; return; }
+        deletedUsersSec.innerHTML = `
+          <details style="margin-top:1.2rem">
+            <summary style="cursor:pointer;font-size:.85rem;color:var(--text-muted);user-select:none;padding:.3rem 0">
+              🗑️ Deleted users <span style="background:#fee2e2;color:#991b1b;border-radius:10px;padding:.1rem .45rem;font-size:.75rem;margin-left:.3rem">${deleted.length}</span>
+            </summary>
+            <div class="admin-list" style="margin-top:.5rem">
+              ${deleted.map(u => {
+                const school = DB.getSchools().find(s => s.id === u.schoolId);
+                return `<div class="admin-list-item">
+                  <div>
+                    <strong>${esc(u.displayName || u.email)}</strong>
+                    <div class="text-muted">${esc(u.email)}</div>
+                    <div class="text-muted" style="font-size:.78rem">
+                      ${u.role ? `<span class="role-badge ${u.role}">${u.role}</span>` : ''}
+                      ${school ? ` · ${esc(school.name)}` : ''}
+                      ${u.deletedAt ? ` · Deleted: ${_fmtDateTime(u.deletedAt)}` : ''}
+                    </div>
+                  </div>
+                  <div class="item-actions">
+                    <button class="btn btn-xs btn-success" data-restore-user="${esc(u.uid)}">↩ Restore</button>
+                  </div>
+                </div>`;
+              }).join('')}
+            </div>
+          </details>`;
+        deletedUsersSec.querySelectorAll('[data-restore-user]').forEach(btn => {
+          btn.addEventListener('click', async () => {
+            const uid = btn.dataset.restoreUser;
+            btn.disabled = true; btn.textContent = 'Restoring…';
+            try {
+              await DB.restoreUser(uid);
+              DB.writeAudit('user_restored', 'user', `User restored: ${uid}`, uid, uid);
+              toast('User restored ✓', 'success');
+              renderUsers();
+            } catch (e) {
+              toast('Restore failed — ' + (e.message || 'permission denied'), 'error');
+              btn.disabled = false; btn.textContent = '↩ Restore';
+            }
+          });
+        });
+      }).catch(console.error);
+    }
   }
 
   // ════════════════════════════════════════════════════════════
@@ -1181,6 +1229,51 @@ function _orgRow(o) {
       });
     });
     _applySearch('schoolsSearch', '#schoolsList', '.admin-list-item');
+
+    // ── Deleted schools (collapsible) ─────────────────────────
+    const deletedSchoolsSec = document.getElementById('deletedSchoolsSection');
+    if (deletedSchoolsSec) {
+      DB.loadDeletedItems('schools').then(deleted => {
+        if (!deleted.length) { deletedSchoolsSec.innerHTML = ''; return; }
+        deletedSchoolsSec.innerHTML = `
+          <details style="margin-top:1.2rem">
+            <summary style="cursor:pointer;font-size:.85rem;color:var(--text-muted);user-select:none;padding:.3rem 0">
+              🗑️ Deleted schools <span style="background:#fee2e2;color:#991b1b;border-radius:10px;padding:.1rem .45rem;font-size:.75rem;margin-left:.3rem">${deleted.length}</span>
+            </summary>
+            <div class="admin-list" style="margin-top:.5rem">
+              ${deleted.map(s => {
+                const venue = DB.getVenues().find(v => v.id === s.venueId);
+                return `<div class="admin-list-item">
+                  <div>
+                    <span class="color-dot" style="background:${s.color || '#999'}"></span>
+                    <strong>${esc(s.name)}</strong>
+                    <div class="text-muted">${venue ? esc(venue.name) : 'No home venue'}</div>
+                    ${s.deletedAt ? `<div class="text-muted" style="font-size:.78rem">Deleted: ${_fmtDateTime(s.deletedAt)}</div>` : ''}
+                  </div>
+                  <div class="item-actions">
+                    <button class="btn btn-xs btn-success" data-restore-school="${esc(s.id)}">↩ Restore</button>
+                  </div>
+                </div>`;
+              }).join('')}
+            </div>
+          </details>`;
+        deletedSchoolsSec.querySelectorAll('[data-restore-school]').forEach(btn => {
+          btn.addEventListener('click', async () => {
+            const id = btn.dataset.restoreSchool;
+            btn.disabled = true; btn.textContent = 'Restoring…';
+            try {
+              await DB.restoreSchool(id);
+              DB.writeAudit('school_restored', 'admin', `School restored: ${id}`, id, id);
+              toast('School restored ✓', 'success');
+              render(); Leagues.refresh();
+            } catch (e) {
+              toast('Restore failed — ' + (e.message || 'permission denied'), 'error');
+              btn.disabled = false; btn.textContent = '↩ Restore';
+            }
+          });
+        });
+      }).catch(console.error);
+    }
   }
 
   function openSchoolModal(id) {
@@ -1311,13 +1404,13 @@ function _orgRow(o) {
 
   async function deleteSchool(id) {
     const school = DB.getSchools().find(s => s.id === id);
-    if (!confirm('Delete this school?')) return;
-    DB.writeAudit('school_deleted', 'admin', `School deleted: ${school ? school.name : id}`, id, school ? school.name : id);
+    if (!confirm(`Delete ${school ? school.name : 'this school'}? It will be hidden but can be restored.`)) return;
+    DB.writeAudit('school_deleted', 'admin', `School soft-deleted: ${school ? school.name : id}`, id, school ? school.name : id);
     const deletePromise = DB.deleteSchool(id);
     render(); Leagues.refresh();
     try {
       await deletePromise;
-      toast('School deleted', 'success');
+      toast('School deleted (can be restored)', 'success');
     } catch (e) {
       console.error('School delete failed:', e);
       toast('Delete failed — ' + (e.message || 'permission denied'), 'error');

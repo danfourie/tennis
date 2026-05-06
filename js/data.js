@@ -87,7 +87,10 @@ const DB = {
   },
   deleteSchool(id) {
     _cache.schools = _cache.schools.filter(s => s.id !== id);
-    return _doc('schools', id).delete();
+    return _doc('schools', id).update({ deleted: true, deletedAt: new Date().toISOString() });
+  },
+  restoreSchool(id) {
+    return _doc('schools', id).update({ deleted: false, deletedAt: null });
   },
 
   // ── Bookings ──────────────────────────────────────────────
@@ -160,7 +163,10 @@ const DB = {
   },
   deleteLeague(id) {
     _cache.leagues = _cache.leagues.filter(l => l.id !== id);
-    return _doc('leagues', id).delete();   // caller handles errors
+    return _doc('leagues', id).update({ deleted: true, deletedAt: new Date().toISOString() });
+  },
+  restoreLeague(id) {
+    return _doc('leagues', id).update({ deleted: false, deletedAt: null });
   },
 
   // ── Tournaments ───────────────────────────────────────────
@@ -229,7 +235,7 @@ const DB = {
   async loadUsers() {
     try {
       const snap = await _col('users').get();
-      _cache.users = snap.docs.map(d => d.data());
+      _cache.users = snap.docs.map(d => d.data()).filter(d => !d.deleted);
     } catch (err) {
       console.warn('Could not load users:', err);
     }
@@ -243,9 +249,21 @@ const DB = {
 
   deleteUserProfile(uid) {
     _cache.users = _cache.users.filter(u => u.uid !== uid);
-    // Return the Promise so callers can await the Firestore delete before re-fetching.
-    // Without this, renderUsers() re-fetches before the delete completes and the user reappears.
-    return _doc('users', uid).delete();
+    // Return the Promise so callers can await the Firestore write before re-fetching.
+    return _doc('users', uid).update({ deleted: true, deletedAt: new Date().toISOString() });
+  },
+  restoreUser(uid) {
+    return _doc('users', uid).update({ deleted: false, deletedAt: null });
+  },
+
+  async loadDeletedItems(collection) {
+    try {
+      const snap = await _col(collection).where('deleted', '==', true).get();
+      return snap.docs.map(d => d.data());
+    } catch (err) {
+      console.warn(`Could not load deleted ${collection}:`, err);
+      return [];
+    }
   },
 
   // ── Notifications ─────────────────────────────────────────
@@ -399,8 +417,8 @@ const DB = {
       ]);
 
     _cache.venues         = venues.docs.map(d => d.data());
-    _cache.schools        = schools.docs.map(d => d.data()).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-    _cache.leagues        = leagues.docs.map(d => d.data());
+    _cache.schools        = schools.docs.map(d => d.data()).filter(d => !d.deleted).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    _cache.leagues        = leagues.docs.map(d => d.data()).filter(d => !d.deleted);
     _cache.tournaments    = tournaments.docs.map(d => d.data());
     _cache.closures       = closures.docs.map(d => d.data());
     _cache.leagueEntries  = leagueEntries.docs.map(d => d.data());
@@ -430,11 +448,14 @@ const DB = {
   // ── Real-time subscriptions ───────────────────────────────
   subscribeAll(onUpdate) {
     const unsubs = [];
+    // Collections that use soft-delete — filter out deleted docs from the live cache
+    const SOFT_DELETE_COLS = new Set(['schools', 'leagues']);
 
     const watch = (colName, cacheKey) => {
       const unsub = _col(colName).onSnapshot(
         snap => {
-          const serverDocs = snap.docs.map(d => d.data());
+          let serverDocs = snap.docs.map(d => d.data());
+          if (SOFT_DELETE_COLS.has(colName)) serverDocs = serverDocs.filter(d => !d.deleted);
           // Preserve any optimistic local entries not yet confirmed by Firestore
           // (they have an id that doesn't appear in the server snapshot yet).
           // This prevents newly added bookings/entries from disappearing while

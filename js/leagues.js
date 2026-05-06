@@ -631,6 +631,52 @@ const Leagues = (() => {
         el.style.display = el.textContent.toLowerCase().includes(q) ? '' : 'none';
       });
     }
+
+    // ── Deleted leagues (collapsible) ─────────────────────────
+    const deletedLeaguesSec = document.getElementById('deletedLeaguesSection');
+    if (deletedLeaguesSec) {
+      DB.loadDeletedItems('leagues').then(deleted => {
+        if (!deleted.length) { deletedLeaguesSec.innerHTML = ''; return; }
+        deletedLeaguesSec.innerHTML = `
+          <details style="margin-top:1.2rem">
+            <summary style="cursor:pointer;font-size:.85rem;color:var(--text-muted);user-select:none;padding:.3rem 0">
+              🗑️ Deleted leagues <span style="background:#fee2e2;color:#991b1b;border-radius:10px;padding:.1rem .45rem;font-size:.75rem;margin-left:.3rem">${deleted.length}</span>
+            </summary>
+            <div style="margin-top:.5rem;display:flex;flex-direction:column;gap:.5rem">
+              ${deleted.map(l => `
+                <div class="admin-module-item" style="opacity:.75">
+                  <div class="module-info">
+                    <div class="module-title">${esc(l.name)}</div>
+                    <div class="module-meta">
+                      ${esc(l.division || 'No division')}
+                      · ${l.startDate ? formatDate(l.startDate) : '?'} → ${l.endDate ? formatDate(l.endDate) : '?'}
+                    </div>
+                    ${l.deletedAt ? `<div class="module-meta" style="color:#991b1b">Deleted: ${formatDate(l.deletedAt.slice(0,10))}</div>` : ''}
+                  </div>
+                  <div class="module-actions">
+                    <button class="btn btn-sm btn-success" data-restore-league="${esc(l.id)}">↩ Restore</button>
+                  </div>
+                </div>`).join('')}
+            </div>
+          </details>`;
+        deletedLeaguesSec.querySelectorAll('[data-restore-league]').forEach(btn => {
+          btn.addEventListener('click', async () => {
+            const id = btn.dataset.restoreLeague;
+            btn.disabled = true; btn.textContent = 'Restoring…';
+            try {
+              await DB.restoreLeague(id);
+              DB.writeAudit('league_restored', 'league', `League restored: ${id}`, id, id);
+              toast('League restored ✓', 'success');
+              render();
+              renderAdmin();
+            } catch (e) {
+              toast('Restore failed — ' + (e.message || 'permission denied'), 'error');
+              btn.disabled = false; btn.textContent = '↩ Restore';
+            }
+          });
+        });
+      }).catch(console.error);
+    }
   }
 
   // ════════════════════════════════════════════════════════════
@@ -2348,19 +2394,19 @@ const Leagues = (() => {
   // DELETE
   // ════════════════════════════════════════════════════════════
   async function deleteLeague(id) {
-    if (!confirm('Delete this league and all its fixtures?')) return;
     const league = DB.getLeagues().find(l => l.id === id);
-    DB.writeAudit('league_deleted', 'league', `Deleted league: ${league ? league.name : id}`, id, league ? league.name : null);
+    if (!confirm(`Delete ${league ? league.name : 'this league'}? It will be hidden but can be restored.`)) return;
+    DB.writeAudit('league_deleted', 'league', `Soft-deleted league: ${league ? league.name : id}`, id, league ? league.name : null);
     const deletePromise = DB.deleteLeague(id);  // optimistically removes from cache
     render();
     renderAdmin();
     try {
       await deletePromise;
-      toast('League deleted', 'success');
+      toast('League deleted (can be restored)', 'success');
     } catch(e) {
       console.error('League delete failed:', e);
       toast('Delete failed — ' + (e.message || 'permission denied'), 'error');
-      render();      // re-render after onSnapshot revert restores the league
+      render();
       renderAdmin();
     }
   }
