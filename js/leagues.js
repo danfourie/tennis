@@ -2115,6 +2115,10 @@ const Leagues = (() => {
       </div>`;
     }
 
+    // Pre-compute participants for bye detection (only relevant with odd team count)
+    const allParts = _getParticipants(league);
+    const hasOddTeams = allParts.length % 2 === 1;
+
     Object.keys(byRound).sort((a, b) => a - b).forEach(r => {
       html += `<div style="margin-bottom:1.25rem">
         <div class="round-label">Round ${r}</div>
@@ -2180,6 +2184,27 @@ const Leagues = (() => {
         ${changeReqRow ? `<tr class="fixture-sub-row"><td colspan="${isAdmin ? 7 : 6}">${changeReqRow}</td></tr>` : ''}
         ${postponedRow ? `<tr class="fixture-sub-row"><td colspan="${isAdmin ? 7 : 6}">${postponedRow}</td></tr>` : ''}`;
       });
+
+      // Show bye team(s) for this round (only exists when team count is odd)
+      if (hasOddTeams) {
+        const busyIds = new Set();
+        byRound[r].forEach(f => {
+          busyIds.add(f.homeParticipantId || f.homeSchoolId);
+          busyIds.add(f.awayParticipantId || f.awaySchoolId);
+        });
+        allParts.filter(p => !busyIds.has(p.participantId)).forEach(p => {
+          const s = schools.find(x => x.id === p.schoolId);
+          html += `<tr style="opacity:.6;font-style:italic">
+            <td style="color:var(--text-muted)">—</td>
+            <td style="color:var(--text-muted)">—</td>
+            <td><span style="color:${s ? s.color : '#999'}">●</span> ${esc(_participantName(p))}</td>
+            <td style="text-align:center;color:var(--text-muted)">Bye</td>
+            <td style="color:var(--text-muted)">—</td>
+            <td style="color:var(--text-muted)">—</td>
+            ${isAdmin ? '<td></td>' : ''}
+          </tr>`;
+        });
+      }
 
       html += `</tbody></table></div>`;
     });
