@@ -1994,16 +1994,20 @@ const Leagues = (() => {
     // Recalculate fixtures — admin only (buttons appear in fixtures tab AND balance tab)
     body.querySelectorAll('.recalc-fixtures-btn').forEach(btn => {
       btn.addEventListener('click', () => {
-        const leagueStarted = (league.fixtures || []).some(f => f.homeScore !== null && f.homeScore !== undefined);
+        // Always fetch the latest league state — participants added since the modal opened
+        // (e.g. via entry approval or Edit League → Save Details) would otherwise be missed
+        // because DB.updateLeague() replaces the cached object with a new reference.
+        const freshLeague = DB.getLeagues().find(l => l.id === id) || league;
+        const leagueStarted = (freshLeague.fixtures || []).some(f => f.homeScore !== null && f.homeScore !== undefined);
         if (leagueStarted) {
           toast('Cannot recalculate — scores have already been entered for this league. Edit individual fixtures manually.', 'error');
           return;
         }
         if (!confirm('Recalculate fixtures?\n\nManually-set venue, date and time edits will be preserved where possible. Only unedited fixtures will be rescheduled.')) return;
-        const parts = _getParticipants(league);
+        const parts = _getParticipants(freshLeague);
         // Snapshot manually-edited fields before regenerating
         const manualOverrides = {};
-        (league.fixtures || []).forEach(f => {
+        (freshLeague.fixtures || []).forEach(f => {
           manualOverrides[`${f.homeParticipantId}|${f.awayParticipantId}`] = {
             venueId: f.venueId, venueName: f.venueName,
             date: f.date, timeSlot: f.timeSlot, courtIndex: f.courtIndex,
@@ -2011,7 +2015,7 @@ const Leagues = (() => {
         });
         let newFixtures;
         try {
-          newFixtures = generateFixtures(parts, league.homeMatches ?? 1, league.startDate, league.neutralVenueId, league.playingDay, league.matchTime, league.id, league.endDate, league.excludedDates);
+          newFixtures = generateFixtures(parts, freshLeague.homeMatches ?? 1, freshLeague.startDate, freshLeague.neutralVenueId, freshLeague.playingDay, freshLeague.matchTime, freshLeague.id, freshLeague.endDate, freshLeague.excludedDates);
         } catch (err) {
           console.error('generateFixtures error (recalc):', err);
           toast('Error recalculating fixtures: ' + err.message, 'error');
@@ -2022,12 +2026,12 @@ const Leagues = (() => {
           const key = `${f.homeParticipantId}|${f.awayParticipantId}`;
           if (manualOverrides[key]) Object.assign(f, manualOverrides[key]);
         });
-        league.fixtures  = newFixtures;
-        league.standings = generateStandings(parts);
-        DB.updateLeague(league);
-        DB.writeAudit('fixtures_recalculated', 'league', `Fixtures recalculated (clash-aware) for ${league.name}`, league.id, league.name);
+        freshLeague.fixtures  = newFixtures;
+        freshLeague.standings = generateStandings(parts);
+        DB.updateLeague(freshLeague);
+        DB.writeAudit('fixtures_recalculated', 'league', `Fixtures recalculated (clash-aware) for ${freshLeague.name}`, freshLeague.id, freshLeague.name);
         // Check if any forced clashes remain
-        const remaining = DB.detectFixtureClashes().filter(({ a, b }) => a.leagueId === league.id || b.leagueId === league.id);
+        const remaining = DB.detectFixtureClashes().filter(({ a, b }) => a.leagueId === freshLeague.id || b.leagueId === freshLeague.id);
         if (remaining.length > 0) {
           toast(`⚠️ ${remaining.length} clash${remaining.length > 1 ? 'es' : ''} could not be resolved automatically — please okay or arrange alternate venues.`, 'error');
         } else {
