@@ -2026,6 +2026,8 @@ const Leagues = (() => {
           const key = `${f.homeParticipantId}|${f.awayParticipantId}`;
           if (manualOverrides[key]) Object.assign(f, manualOverrides[key]);
         });
+        // Fix any same-day conflicts introduced by the override merge (all rounds eligible)
+        _fixSameDayConflicts(newFixtures, false);
         freshLeague.fixtures  = newFixtures;
         freshLeague.standings = generateStandings(parts);
         DB.updateLeague(freshLeague);
@@ -2039,6 +2041,26 @@ const Leagues = (() => {
         }
         openLeagueDetail(id, isAdmin);
         Calendar.refresh();
+      });
+    });
+
+    // Fix same-day scheduling conflicts without recalculating the entire draw.
+    // Round 1 fixtures are not moved (they may be imminent).
+    body.querySelectorAll('.fix-sameday-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const currentLeague = DB.getLeagues().find(l => l.id === id) || league;
+        const count = _detectSameDayConflicts(currentLeague.fixtures || []).size;
+        if (!confirm(`Fix ${count} same-day scheduling conflict${count !== 1 ? 's' : ''}?\n\nConflicting fixtures (from Round 2 onward) will be pushed forward by 1 week at a time until resolved. Round 1 games will not be moved.`)) return;
+        const changed = _fixSameDayConflicts(currentLeague.fixtures || [], true);
+        if (changed) {
+          DB.updateLeague(currentLeague);
+          DB.writeAudit('sameday_conflicts_fixed', 'league', `Same-day scheduling conflicts auto-fixed for ${currentLeague.name}`, currentLeague.id, currentLeague.name);
+          toast('Same-day conflicts fixed ✓', 'success');
+          openLeagueDetail(id, isAdmin);
+          Calendar.refresh();
+        } else {
+          toast('No movable same-day conflicts found', 'info');
+        }
       });
     });
 
@@ -2065,6 +2087,58 @@ const Leagues = (() => {
     }
   }
 
+  function _detectSameDayConflicts(fixtures) {
+    const map = {};
+    (fixtures || []).forEach(f => {
+      if (!f.date) return;
+      [f.homeParticipantId || f.homeSchoolId, f.awayParticipantId || f.awaySchoolId].forEach(pid => {
+        if (!pid) return;
+        const key = `${pid}|${f.date}`;
+        if (!map[key]) map[key] = [];
+        if (!map[key].includes(f.id)) map[key].push(f.id);
+      });
+    });
+    const ids = new Set();
+    Object.values(map).forEach(arr => { if (arr.length > 1) arr.forEach(id => ids.add(id)); });
+    return ids;
+  }
+
+  // Fix same-day team conflicts by advancing the later-round fixture by 7 days.
+  // skipRound1: if true (default), Round 1 fixtures are never moved (e.g. they're imminent).
+  // Returns true if any fixture was changed.
+  function _fixSameDayConflicts(fixtures, skipRound1 = true) {
+    let anyChanged = false;
+    for (let pass = 0; pass < 20; pass++) {
+      const map = {};
+      fixtures.forEach(f => {
+        if (!f.date) return;
+        [f.homeParticipantId || f.homeSchoolId, f.awayParticipantId || f.awaySchoolId].forEach(pid => {
+          if (!pid) return;
+          const key = `${pid}|${f.date}`;
+          if (!map[key]) map[key] = [];
+          if (!map[key].some(x => x.id === f.id)) map[key].push(f);
+        });
+      });
+      const moved = new Set();
+      let anyMoved = false;
+      Object.values(map).forEach(group => {
+        if (group.length <= 1) return;
+        group.sort((a, b) => (a.round || 0) - (b.round || 0));
+        // Keep the earliest-round fixture on its date; advance all later ones
+        group.slice(1).forEach(f => {
+          if (moved.has(f.id)) return;
+          if (skipRound1 && (f.round || 1) <= 1) return;
+          f.date = toDateStr(addDays(parseDate(f.date), 7));
+          moved.add(f.id);
+          anyChanged = true;
+          anyMoved = true;
+        });
+      });
+      if (!anyMoved) break;
+    }
+    return anyChanged;
+  }
+
   function _fixturesTab(league, schools, isAdmin) {
     const venues     = DB.getVenues();
     const fixtures   = league.fixtures || [];
@@ -2078,6 +2152,9 @@ const Leagues = (() => {
         clashedIds.add(b.fixture.id);
       }
     }
+
+    // Pre-compute same-day team conflict IDs for this render
+    const sameDayIds = _detectSameDayConflicts(fixtures);
 
     const byRound = {};
     fixtures.forEach(f => {
@@ -2098,11 +2175,14 @@ const Leagues = (() => {
 
     // Admin toolbar — always show Recalculate button when league not yet started
     if (Auth.isAdmin()) {
-      html += `<div style="display:flex;justify-content:flex-end;margin-bottom:.75rem">`;
+      html += `<div style="display:flex;justify-content:flex-end;gap:.5rem;margin-bottom:.75rem;flex-wrap:wrap">`;
       if (leagueStarted) {
         html += `<span class="text-muted" style="font-size:.78rem">League in progress — edit individual fixtures manually.</span>`;
       } else {
         html += `<button class="btn btn-xs btn-warning recalc-fixtures-btn">🔄 Recalculate Fixtures</button>`;
+      }
+      if (sameDayIds.size > 0) {
+        html += `<button class="btn btn-xs btn-danger fix-sameday-btn">⚠️ Fix ${sameDayIds.size} same-day conflict${sameDayIds.size !== 1 ? 's' : ''}</button>`;
       }
       html += `</div>`;
     }
@@ -2112,6 +2192,12 @@ const Leagues = (() => {
       html += `<div class="fixture-clash-badge" style="margin-bottom:1rem;border-radius:var(--radius)">
         ⚠️ ${Math.ceil(clashCount)} venue clash${clashCount > 1 ? 'es' : ''} detected in this league's fixtures.
         ${Auth.isAdmin() && !leagueStarted ? '' : (!Auth.isAdmin() ? `Contact an admin to resolve the clash${clashCount > 1 ? 'es' : ''}.` : '')}
+      </div>`;
+    }
+    if (sameDayIds.size > 0) {
+      html += `<div class="fixture-clash-badge" style="margin-bottom:1rem;border-radius:var(--radius);background:#fff7ed;border-color:#f97316;color:#9a3412">
+        ⚠️ ${sameDayIds.size} fixture${sameDayIds.size !== 1 ? 's are' : ' is'} part of a same-day scheduling conflict — one or more teams appear in two matches on the same date.
+        ${Auth.isAdmin() ? 'Click <strong>⚠️ Fix same-day conflicts</strong> above to resolve automatically (Round 1 games will not be moved).' : 'Contact an admin to resolve.'}
       </div>`;
     }
 
@@ -2166,6 +2252,9 @@ const Leagues = (() => {
         const postponedRow  = f.postponed
           ? `<span class="badge" style="background:#fef9c3;color:#854d0e;font-size:.75rem">⚠️ Postponed — venue closed on original date (Rd ${f.originalRound} · ${f.originalDate ? formatDate(f.originalDate) : '—'})</span>`
           : '';
+        const sameDayRow    = sameDayIds.has(f.id)
+          ? `<span class="badge" style="background:#fff7ed;color:#9a3412;font-size:.75rem">⚠️ Same-day conflict — this team plays another match on ${f.date ? formatDate(f.date) : 'this date'}</span>`
+          : '';
 
         const editBtn = isAdmin
           ? `<td><button class="btn btn-xs btn-secondary" data-fixture-edit="${f.id}" title="Edit fixture">✏️</button></td>`
@@ -2182,7 +2271,8 @@ const Leagues = (() => {
         </tr>
         ${clashRow     ? `<tr class="fixture-sub-row"><td colspan="${isAdmin ? 7 : 6}">${clashRow}</td></tr>` : ''}
         ${changeReqRow ? `<tr class="fixture-sub-row"><td colspan="${isAdmin ? 7 : 6}">${changeReqRow}</td></tr>` : ''}
-        ${postponedRow ? `<tr class="fixture-sub-row"><td colspan="${isAdmin ? 7 : 6}">${postponedRow}</td></tr>` : ''}`;
+        ${postponedRow ? `<tr class="fixture-sub-row"><td colspan="${isAdmin ? 7 : 6}">${postponedRow}</td></tr>` : ''}
+        ${sameDayRow   ? `<tr class="fixture-sub-row"><td colspan="${isAdmin ? 7 : 6}">${sameDayRow}</td></tr>` : ''}`;
       });
 
       // Show bye team(s) for this round (only exists when team count is odd)
