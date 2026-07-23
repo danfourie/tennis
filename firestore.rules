@@ -79,7 +79,7 @@ service cloud.firestore {
     // ── Settings ─────────────────────────────────────────────────────────────
     match /settings/{docId} {
       allow read:  if true;
-      allow write: if isMaster();
+      allow write: if isAdminRole();
     }
 
     // ── Bookings ─────────────────────────────────────────────────────────────

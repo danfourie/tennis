@@ -823,22 +823,7 @@ const Admin = (() => {
           ${upcomingRows}
         </div>
 
-        <div style="margin-top:1.25rem;padding-top:1rem;border-top:1px dashed var(--border)">
-          <div style="font-size:.9rem;font-weight:600;margin-bottom:.4rem">🧪 Send test reminder</div>
-          <p class="text-muted" style="font-size:.8rem;margin:.1rem 0 .6rem">Sends a sample match reminder immediately to verify WhatsApp and email delivery.</p>
-          <div style="display:flex;flex-wrap:wrap;gap:.5rem;align-items:flex-end">
-            <div>
-              <label class="form-label" style="font-size:.78rem;margin-bottom:2px">Email</label>
-              <input id="testReminderEmail" type="email" class="form-control form-control-sm" placeholder="name@example.com" style="width:200px">
-            </div>
-            <div>
-              <label class="form-label" style="font-size:.78rem;margin-bottom:2px">WhatsApp number</label>
-              <input id="testReminderPhone" type="tel" class="form-control form-control-sm" placeholder="0821234567" style="width:140px">
-            </div>
-            <button class="btn btn-sm btn-primary" id="sendTestReminderBtn">Send test</button>
-          </div>
-          <div id="testReminderResult" style="margin-top:.5rem;font-size:.82rem"></div>
-        </div>` : ''}
+` : ''}
       </div>`;
 
     function _saveSetting(patch, auditMsg, successMsg) {
@@ -890,33 +875,6 @@ const Admin = (() => {
       });
     });
 
-    document.getElementById('sendTestReminderBtn')?.addEventListener('click', async () => {
-      const email = document.getElementById('testReminderEmail')?.value.trim();
-      const phone = document.getElementById('testReminderPhone')?.value.trim();
-      const resultEl = document.getElementById('testReminderResult');
-      if (!email && !phone) { toast('Enter at least one email or phone number', 'error'); return; }
-      const btn = document.getElementById('sendTestReminderBtn');
-      btn.disabled = true;
-      btn.textContent = 'Sending…';
-      if (resultEl) resultEl.innerHTML = '';
-      try {
-        const fn = firebase.functions().httpsCallable('sendTestMatchReminder');
-        const { data } = await fn({ email: email || null, phone: phone || null });
-        const waStatus  = data.whatsapp  ? (data.whatsapp.success  ? `✅ Sent (SID: ${data.whatsapp.sid})` : `❌ Failed: ${data.whatsapp.error}`)  : '—';
-        const emlStatus = data.email     ? (data.email.success     ? `✅ Sent`                              : `❌ Failed: ${data.email.error}`)      : '—';
-        if (resultEl) resultEl.innerHTML = `
-          <div style="margin-top:.25rem">
-            ${phone ? `<div>WhatsApp (${phone}): ${waStatus}</div>` : ''}
-            ${email ? `<div>Email (${email}): ${emlStatus}</div>`  : ''}
-          </div>`;
-      } catch (err) {
-        toast('Test failed: ' + err.message, 'error');
-        if (resultEl) resultEl.innerHTML = `<span style="color:var(--danger)">Error: ${esc(err.message)}</span>`;
-      } finally {
-        btn.disabled = false;
-        btn.textContent = 'Send test';
-      }
-    });
   }
 
   // ════════════════════════════════════════════════════════════
