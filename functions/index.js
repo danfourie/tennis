@@ -1388,7 +1388,7 @@ exports.dailyScoreReminder = onSchedule(
 // Disabled when settings.matchReminderEnabled !== true.
 exports.dailyMatchReminder = onSchedule(
   {
-    schedule: '0 17 * * *',
+    schedule: '0 11 * * *',
     timeZone: 'Africa/Johannesburg',
     secrets:  [EMAIL_USER, EMAIL_PASS],  // WhatsApp delivered via notif-doc → onNewNotification
   },

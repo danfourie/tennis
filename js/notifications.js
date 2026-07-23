@@ -781,6 +781,140 @@ const NotificationService = (() => {
     }
   }
 
+  // ── Day-before match reminder settings (Notifications tab) ──
+  function renderMatchReminders() {
+    const panel = document.getElementById('matchReminderPanel');
+    if (!panel) return;
+
+    const settings    = DB.getSettings();
+    const remEnabled  = settings.matchReminderEnabled === true;
+    const remChannels = settings.matchReminderChannels || 'both';
+
+    // Build upcoming-fixtures list (today+1 … today+7)
+    const upcoming = [];
+    for (let i = 1; i <= 7; i++) {
+      const d = new Date();
+      d.setDate(d.getDate() + i);
+      const ds = d.toISOString().slice(0, 10);
+      DB.getLeagues().forEach(lg => {
+        (lg.fixtures || []).forEach(f => {
+          if (f.date === ds && f.homeScore == null && f.homeSchoolId && f.awaySchoolId) {
+            upcoming.push({ league: lg, fixture: f });
+          }
+        });
+      });
+    }
+    upcoming.sort((a, b) => a.fixture.date.localeCompare(b.fixture.date));
+
+    const upcomingRows = upcoming.length === 0
+      ? `<p class="text-muted" style="font-size:.85rem;margin:.5rem 0 0">No matches scheduled in the next 7 days.</p>`
+      : `<table class="fixtures-table" style="font-size:.82rem;width:100%;table-layout:fixed;margin-top:.5rem">
+          <colgroup>
+            <col style="width:34px">
+            <col style="width:90px">
+            <col style="width:auto">
+            <col style="width:90px">
+          </colgroup>
+          <thead><tr>
+            <th style="text-align:center" title="Skip this match's reminder">Skip</th>
+            <th>Date</th><th>Match</th><th>League</th>
+          </tr></thead>
+          <tbody>
+            ${upcoming.map(({ league: lg, fixture: f }) => `
+            <tr class="${f.reminderSkipped ? 'text-muted' : ''}">
+              <td style="text-align:center;padding:4px 2px">
+                <label class="toggle-switch" style="transform:scale(.7);display:inline-flex;vertical-align:middle" title="${f.reminderSkipped ? 'Re-enable reminder' : 'Skip reminder'}">
+                  <input type="checkbox" class="reminder-skip-chk" data-league="${lg.id}" data-fixture="${f.id}" ${f.reminderSkipped ? 'checked' : ''}>
+                  <span class="toggle-slider"></span>
+                </label>
+              </td>
+              <td style="white-space:nowrap;font-size:.8rem">${formatDate(f.date)}</td>
+              <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+                  title="${esc(f.homeSchoolName || '')} vs ${esc(f.awaySchoolName || '')}${f.timeSlot ? ' · ' + f.timeSlot : ''}${f.venueName ? ' @ ' + f.venueName : ''}">
+                ${esc(f.homeSchoolName || '')} vs ${esc(f.awaySchoolName || '')}${f.timeSlot ? `<span class="text-muted" style="font-size:.75rem"> · ${f.timeSlot}</span>` : ''}
+              </td>
+              <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.78rem;color:var(--text-muted)">${esc(lg.name || '')}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>`;
+
+    panel.innerHTML = `
+      <h3>⏰ Day-Before Match Reminders</h3>
+      <div class="feature-toggle-row" style="margin-top:.75rem">
+        <label class="toggle-switch" title="Send reminder to both teams the morning before each match">
+          <input type="checkbox" id="matchReminderToggle" ${remEnabled ? 'checked' : ''}>
+          <span class="toggle-slider"></span>
+        </label>
+        <span>Day-Before Match Reminders
+          <span class="badge ${remEnabled ? 'badge-green' : 'badge-red'}" style="margin-left:.3rem">${remEnabled ? 'On' : 'Off'}</span>
+        </span>
+      </div>
+      <p class="text-muted" style="font-size:.85rem;margin-top:.1rem">Sends a reminder to both teams at 11:00 the morning before each scheduled match (unscored fixtures only).</p>
+
+      ${remEnabled ? `
+      <div style="margin-top:.75rem;display:flex;align-items:center;gap:1.5rem;flex-wrap:wrap">
+        <span style="font-size:.85rem;font-weight:600">Notify via:</span>
+        <label style="display:flex;align-items:center;gap:.35rem;cursor:pointer;font-size:.9rem">
+          <input type="radio" name="remChannels" value="both"      ${remChannels === 'both'      ? 'checked' : ''}> WhatsApp + Email
+        </label>
+        <label style="display:flex;align-items:center;gap:.35rem;cursor:pointer;font-size:.9rem">
+          <input type="radio" name="remChannels" value="whatsapp"  ${remChannels === 'whatsapp'  ? 'checked' : ''}> WhatsApp only
+        </label>
+        <label style="display:flex;align-items:center;gap:.35rem;cursor:pointer;font-size:.9rem">
+          <input type="radio" name="remChannels" value="email"     ${remChannels === 'email'     ? 'checked' : ''}> Email only
+        </label>
+      </div>
+
+      <div style="margin-top:1rem">
+        <div style="font-size:.9rem;font-weight:600;margin-bottom:.25rem">
+          Scheduled reminders — next 7 days
+          <span class="badge badge-gray" style="margin-left:.4rem">${upcoming.length} match${upcoming.length !== 1 ? 'es' : ''}</span>
+        </div>
+        <p class="text-muted" style="font-size:.8rem;margin:.1rem 0 .4rem">Toggle <em>Skip reminder</em> to suppress a specific match's notification without cancelling the game.</p>
+        ${upcomingRows}
+      </div>
+      ` : ''}`;
+
+    function _saveSetting(patch, auditMsg, successMsg) {
+      DB.saveSettings(patch)
+        .then(() => { toast(successMsg, 'success'); renderMatchReminders(); })
+        .catch(err => {
+          console.error('Settings save failed:', err);
+          toast('Failed to save setting — check your permissions. (' + (err.message || err) + ')', 'error');
+          renderMatchReminders();
+        });
+      DB.writeAudit('setting_changed', 'admin', auditMsg, 'settings/global', 'Settings');
+    }
+
+    document.getElementById('matchReminderToggle')?.addEventListener('change', e => {
+      const v = e.target.checked;
+      _saveSetting({ matchReminderEnabled: v }, `Day-before match reminders ${v ? 'enabled' : 'disabled'}`, `Match reminders ${v ? 'enabled ✓' : 'disabled ✓'}`);
+    });
+
+    panel.querySelectorAll('input[name="remChannels"]').forEach(radio => {
+      radio.addEventListener('change', e => {
+        const ch = e.target.value;
+        const label = ch === 'both' ? 'WhatsApp + Email' : ch === 'whatsapp' ? 'WhatsApp only' : 'Email only';
+        _saveSetting({ matchReminderChannels: ch }, `Match reminder channel → ${ch}`, `Reminders via: ${label} ✓`);
+      });
+    });
+
+    panel.querySelectorAll('.reminder-skip-chk').forEach(chk => {
+      chk.addEventListener('change', e => {
+        const leagueId  = e.target.dataset.league;
+        const fixtureId = e.target.dataset.fixture;
+        const skip      = e.target.checked;
+        const league    = DB.getLeagues().find(l => l.id === leagueId);
+        if (!league) return;
+        const fixture   = (league.fixtures || []).find(f => f.id === fixtureId);
+        if (!fixture) return;
+        fixture.reminderSkipped = skip;
+        DB.updateLeague(league);
+        toast(skip ? 'Reminder skipped for this match ✓' : 'Reminder re-enabled ✓', 'success');
+      });
+    });
+  }
+
   // ── Admin composer dropdown population ───────────────────────
   function renderComposer() {
     const sel = document.getElementById('notifRecipientGroup');
@@ -847,6 +981,7 @@ const NotificationService = (() => {
     sendGeneral,
     checkPendingReminders,
     renderComposer,
+    renderMatchReminders,
     openContextModal,
   };
 })();
