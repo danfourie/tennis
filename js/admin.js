@@ -735,30 +735,35 @@ const Admin = (() => {
 
     const upcomingRows = upcoming.length === 0
       ? `<p class="text-muted" style="font-size:.85rem;margin:.5rem 0 0">No matches scheduled in the next 7 days.</p>`
-      : `<div style="overflow-x:auto;margin-top:.5rem">
-          <table class="fixtures-table" style="font-size:.82rem;min-width:560px">
-            <thead><tr>
-              <th>Date</th><th>League</th><th>Match</th><th>Time</th><th>Venue</th>
-              <th style="text-align:center;white-space:nowrap">Skip reminder</th>
-            </tr></thead>
-            <tbody>
-              ${upcoming.map(({ league: lg, fixture: f }) => `
-              <tr>
-                <td style="white-space:nowrap">${formatDate(f.date)}</td>
-                <td>${esc(lg.name || '')}</td>
-                <td style="white-space:nowrap">${esc(f.homeSchoolName || '')} vs ${esc(f.awaySchoolName || '')}</td>
-                <td>${f.timeSlot || '—'}</td>
-                <td style="font-size:.78rem">${esc(f.venueName || '—')}</td>
-                <td style="text-align:center">
-                  <label class="toggle-switch" style="transform:scale(.75);display:inline-flex" title="${f.reminderSkipped ? 'Click to re-enable reminder' : 'Click to skip reminder'}">
-                    <input type="checkbox" class="reminder-skip-chk" data-league="${lg.id}" data-fixture="${f.id}" ${f.reminderSkipped ? 'checked' : ''}>
-                    <span class="toggle-slider"></span>
-                  </label>
-                </td>
-              </tr>`).join('')}
-            </tbody>
-          </table>
-        </div>`;
+      : `<table class="fixtures-table" style="font-size:.82rem;width:100%;table-layout:fixed;margin-top:.5rem">
+          <colgroup>
+            <col style="width:34px">
+            <col style="width:90px">
+            <col style="width:auto">
+            <col style="width:90px">
+          </colgroup>
+          <thead><tr>
+            <th style="text-align:center" title="Skip this match's reminder">Skip</th>
+            <th>Date</th><th>Match</th><th>League</th>
+          </tr></thead>
+          <tbody>
+            ${upcoming.map(({ league: lg, fixture: f }) => `
+            <tr class="${f.reminderSkipped ? 'text-muted' : ''}">
+              <td style="text-align:center;padding:4px 2px">
+                <label class="toggle-switch" style="transform:scale(.7);display:inline-flex;vertical-align:middle" title="${f.reminderSkipped ? 'Re-enable reminder' : 'Skip reminder'}">
+                  <input type="checkbox" class="reminder-skip-chk" data-league="${lg.id}" data-fixture="${f.id}" ${f.reminderSkipped ? 'checked' : ''}>
+                  <span class="toggle-slider"></span>
+                </label>
+              </td>
+              <td style="white-space:nowrap;font-size:.8rem">${formatDate(f.date)}</td>
+              <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+                  title="${esc(f.homeSchoolName || '')} vs ${esc(f.awaySchoolName || '')}${f.timeSlot ? ' · ' + f.timeSlot : ''}${f.venueName ? ' @ ' + f.venueName : ''}">
+                ${esc(f.homeSchoolName || '')} vs ${esc(f.awaySchoolName || '')}${f.timeSlot ? `<span class="text-muted" style="font-size:.75rem"> · ${f.timeSlot}</span>` : ''}
+              </td>
+              <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.78rem;color:var(--text-muted)">${esc(lg.name || '')}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>`;
 
     panel.innerHTML = `
       <div class="feature-toggle-row">
