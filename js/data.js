@@ -398,8 +398,8 @@ const DB = {
   getSettings() { return _cache.settings; },
 
   saveSettings(s) {
-    _cache.settings = s;
-    _doc('settings', 'global').set(s).catch(console.error);
+    _cache.settings = { ...(_cache.settings || {}), ...s };
+    return _doc('settings', 'global').set(_cache.settings);
   },
 
   // ── Load all public collections from Firestore ────────────

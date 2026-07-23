@@ -1381,7 +1381,118 @@ exports.dailyScoreReminder = onSchedule(
   }
 );
 
-// ── 5. Scheduled: day-before match reminder at 17:00 SAST ────────────────────
+// ── 5. Callable: admin sends a test match reminder (WhatsApp + email) ──────────
+// Sends a synthetic "match tomorrow" message so admins can verify template
+// rendering and delivery without waiting for the scheduled function.
+exports.sendTestMatchReminder = onCall(
+  { secrets: [TWILIO_SID, TWILIO_TOKEN, TWILIO_FROM, EMAIL_USER, EMAIL_PASS] },
+  async (request) => {
+    if (!request.auth) throw new Error('Unauthenticated');
+    const callerDoc = await admin.firestore().doc(`users/${request.auth.uid}`).get();
+    const caller    = callerDoc.exists ? callerDoc.data() : null;
+    if (!caller || !['master', 'admin'].includes(caller.role)) throw new Error('Admin only');
+
+    const { email, phone } = request.data || {};
+    const results = { whatsapp: null, email: null };
+
+    const title = 'Match Reminder 🎾 [TEST]';
+    const body  = 'Home School vs Away School — tomorrow (25 Jul) at 14:00 at Test Venue. Good luck! (This is a test message sent from the admin panel.)';
+
+    // ── WhatsApp ──────────────────────────────────────────────────────────────
+    if (phone) {
+      const normalised = _toE164(phone);
+      const sid   = TWILIO_SID.value();
+      const token = TWILIO_TOKEN.value();
+      const from  = TWILIO_FROM.value();
+      if (normalised && sid && token && from) {
+        const client = twilio(sid, token);
+        const vars   = { '1': title, '2': body };
+        try {
+          const msg = await client.messages.create({
+            from,
+            to:               `whatsapp:${normalised}`,
+            contentSid:       TEMPLATE_SIDS.general_message,
+            contentVariables: JSON.stringify(vars),
+          });
+          results.whatsapp = { success: true, sid: msg.sid, status: msg.status };
+        } catch (tplErr) {
+          // Template failed — fall back to plain text
+          try {
+            const msg2 = await client.messages.create({
+              from,
+              to:   `whatsapp:${normalised}`,
+              body: `🎾 *Court Campus*\n${title}\n${body}\n\n🔗 ${APP_URL}`,
+            });
+            results.whatsapp = { success: true, sid: msg2.sid, status: msg2.status, usedText: true };
+          } catch (txtErr) {
+            results.whatsapp = { success: false, error: txtErr.message };
+          }
+        }
+      } else {
+        results.whatsapp = { success: false, error: 'Twilio credentials not configured or invalid phone' };
+      }
+    }
+
+    // ── Email ─────────────────────────────────────────────────────────────────
+    if (email) {
+      const emailUser = EMAIL_USER.value();
+      const emailPass = EMAIL_PASS.value();
+      if (emailUser && emailPass) {
+        const transporter = nodemailer.createTransport({ service: 'gmail', auth: { user: emailUser, pass: emailPass } });
+        const htmlBody = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+body{font-family:Arial,sans-serif;background:#f4f7fb;margin:0;padding:0}
+.container{max-width:560px;margin:32px auto;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.1)}
+.header{background:#3b82f6;padding:28px 32px;text-align:center}
+.header h1{color:#fff;margin:0;font-size:22px}
+.header p{color:#dbeafe;margin:6px 0 0;font-size:14px}
+.body{padding:28px 32px;color:#1e293b;line-height:1.6}
+.card{background:#f0f9ff;border-left:4px solid #3b82f6;border-radius:4px;padding:16px 20px;margin:16px 0}
+.card .teams{font-size:18px;font-weight:700;color:#1e293b;margin-bottom:8px}
+.card .detail{color:#475569;font-size:13px;margin:3px 0}
+.note{background:#fef9c3;border-left:4px solid #eab308;padding:10px 14px;border-radius:4px;font-size:12px;color:#854d0e;margin-top:12px}
+.cta{display:block;margin:24px 0;text-align:center}
+.cta a{background:#3b82f6;color:#fff!important;text-decoration:none;padding:13px 32px;border-radius:6px;font-size:15px;font-weight:600;display:inline-block}
+.footer{text-align:center;padding:16px 32px;font-size:11px;color:#94a3b8;border-top:1px solid #e2e8f0}
+</style></head><body>
+<div class="container">
+<div class="header"><h1>🎾 Court Campus</h1><p>Match Reminder [TEST]</p></div>
+<div class="body">
+  <p>This is a reminder that your team has a match <strong>tomorrow</strong>.</p>
+  <div class="card">
+    <div class="teams">Home School vs Away School</div>
+    <div class="detail">📅 Date: 25 Jul (tomorrow)</div>
+    <div class="detail">⏰ Time: 14:00</div>
+    <div class="detail">📍 Venue: Test Venue</div>
+    <div class="detail">🏆 League: Test League</div>
+  </div>
+  <div class="note">🧪 This is a test message sent from the Court Campus admin panel. Real reminders are sent automatically at 17:00 the evening before each scheduled match.</div>
+  <div class="cta"><a href="${APP_URL}">View Fixtures on Court Campus →</a></div>
+</div>
+<div class="footer">Court Campus · <a href="${APP_URL}" style="color:#94a3b8">${APP_URL}</a></div>
+</div></body></html>`;
+        try {
+          const info = await transporter.sendMail({
+            from:    `"Court Campus" <${emailUser}>`,
+            to:      email,
+            subject: '[TEST] Match Reminder: Home School vs Away School — Tomorrow (25 Jul)',
+            text:    `${body}\n\nView your fixtures: ${APP_URL}\n\n[TEST MESSAGE — sent from Court Campus admin panel]`,
+            html:    htmlBody,
+          });
+          results.email = { success: true, messageId: info.messageId };
+        } catch (err) {
+          results.email = { success: false, error: err.message };
+        }
+      } else {
+        results.email = { success: false, error: 'Email credentials not configured' };
+      }
+    }
+
+    console.log('[TestReminder] Results:', JSON.stringify(results));
+    return results;
+  }
+);
+
+// ── 6. Scheduled: day-before match reminder at 17:00 SAST ────────────────────
 // Fires at 17:00 Africa/Johannesburg every day.  Finds every unscored, non-skipped
 // fixture scheduled for TOMORROW and sends a reminder to both teams via the
 // channels configured in settings.matchReminderChannels ('both'|'whatsapp'|'email').

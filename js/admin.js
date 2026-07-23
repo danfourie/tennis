@@ -821,40 +821,57 @@ const Admin = (() => {
           </div>
           <p class="text-muted" style="font-size:.8rem;margin:.1rem 0 .4rem">Toggle <em>Skip reminder</em> to suppress a specific match's notification without cancelling the game.</p>
           ${upcomingRows}
+        </div>
+
+        <div style="margin-top:1.25rem;padding-top:1rem;border-top:1px dashed var(--border)">
+          <div style="font-size:.9rem;font-weight:600;margin-bottom:.4rem">🧪 Send test reminder</div>
+          <p class="text-muted" style="font-size:.8rem;margin:.1rem 0 .6rem">Sends a sample match reminder immediately to verify WhatsApp and email delivery.</p>
+          <div style="display:flex;flex-wrap:wrap;gap:.5rem;align-items:flex-end">
+            <div>
+              <label class="form-label" style="font-size:.78rem;margin-bottom:2px">Email</label>
+              <input id="testReminderEmail" type="email" class="form-control form-control-sm" placeholder="name@example.com" style="width:200px">
+            </div>
+            <div>
+              <label class="form-label" style="font-size:.78rem;margin-bottom:2px">WhatsApp number</label>
+              <input id="testReminderPhone" type="tel" class="form-control form-control-sm" placeholder="0821234567" style="width:140px">
+            </div>
+            <button class="btn btn-sm btn-primary" id="sendTestReminderBtn">Send test</button>
+          </div>
+          <div id="testReminderResult" style="margin-top:.5rem;font-size:.82rem"></div>
         </div>` : ''}
       </div>`;
 
+    function _saveSetting(patch, auditMsg, successMsg) {
+      DB.saveSettings(patch)
+        .then(() => { toast(successMsg, 'success'); renderGlobalSettings(); })
+        .catch(err => {
+          console.error('Settings save failed:', err);
+          toast('Failed to save setting — check your permissions. (' + (err.message || err) + ')', 'error');
+          renderGlobalSettings(); // revert UI to reflect actual stored state
+        });
+      DB.writeAudit('setting_changed', 'admin', auditMsg, 'settings/global', 'Settings');
+    }
+
     document.getElementById('tournamentPageToggle')?.addEventListener('change', e => {
-      const newEnabled = e.target.checked;
-      DB.saveSettings({ ...DB.getSettings(), tournamentPageEnabled: newEnabled });
-      DB.writeAudit('setting_changed', 'admin', `Tournament page ${newEnabled ? 'enabled' : 'disabled'}`, 'settings/global', 'Tournament Page');
-      toast(`Tournament page ${newEnabled ? 'enabled ✓' : 'disabled ✓'}`, 'success');
-      renderGlobalSettings();
+      const v = e.target.checked;
+      _saveSetting({ tournamentPageEnabled: v }, `Tournament page ${v ? 'enabled' : 'disabled'}`, `Tournament page ${v ? 'enabled ✓' : 'disabled ✓'}`);
     });
 
     document.getElementById('whatsappToggle')?.addEventListener('change', e => {
-      const newEnabled = e.target.checked;
-      DB.saveSettings({ ...DB.getSettings(), whatsappEnabled: newEnabled });
-      DB.writeAudit('setting_changed', 'admin', `WhatsApp notifications ${newEnabled ? 'enabled' : 'disabled'}`, 'settings/global', 'WhatsApp');
-      toast(`WhatsApp ${newEnabled ? 'enabled ✓' : 'disabled ✓'}`, 'success');
-      renderGlobalSettings();
+      const v = e.target.checked;
+      _saveSetting({ whatsappEnabled: v }, `WhatsApp notifications ${v ? 'enabled' : 'disabled'}`, `WhatsApp ${v ? 'enabled ✓' : 'disabled ✓'}`);
     });
 
     document.getElementById('matchReminderToggle')?.addEventListener('change', e => {
-      const newEnabled = e.target.checked;
-      DB.saveSettings({ ...DB.getSettings(), matchReminderEnabled: newEnabled });
-      DB.writeAudit('setting_changed', 'admin', `Day-before match reminders ${newEnabled ? 'enabled' : 'disabled'}`, 'settings/global', 'Match Reminder');
-      toast(`Match reminders ${newEnabled ? 'enabled ✓' : 'disabled ✓'}`, 'success');
-      renderGlobalSettings();
+      const v = e.target.checked;
+      _saveSetting({ matchReminderEnabled: v }, `Day-before match reminders ${v ? 'enabled' : 'disabled'}`, `Match reminders ${v ? 'enabled ✓' : 'disabled ✓'}`);
     });
 
     panel.querySelectorAll('input[name="remChannels"]').forEach(radio => {
       radio.addEventListener('change', e => {
         const ch = e.target.value;
-        DB.saveSettings({ ...DB.getSettings(), matchReminderChannels: ch });
-        DB.writeAudit('setting_changed', 'admin', `Match reminder channel → ${ch}`, 'settings/global', 'Match Reminder Channel');
         const label = ch === 'both' ? 'WhatsApp + Email' : ch === 'whatsapp' ? 'WhatsApp only' : 'Email only';
-        toast(`Reminders via: ${label} ✓`, 'success');
+        _saveSetting({ matchReminderChannels: ch }, `Match reminder channel → ${ch}`, `Reminders via: ${label} ✓`);
       });
     });
 
@@ -871,6 +888,34 @@ const Admin = (() => {
         DB.updateLeague(league);
         toast(skip ? 'Reminder skipped for this match ✓' : 'Reminder re-enabled ✓', 'success');
       });
+    });
+
+    document.getElementById('sendTestReminderBtn')?.addEventListener('click', async () => {
+      const email = document.getElementById('testReminderEmail')?.value.trim();
+      const phone = document.getElementById('testReminderPhone')?.value.trim();
+      const resultEl = document.getElementById('testReminderResult');
+      if (!email && !phone) { toast('Enter at least one email or phone number', 'error'); return; }
+      const btn = document.getElementById('sendTestReminderBtn');
+      btn.disabled = true;
+      btn.textContent = 'Sending…';
+      if (resultEl) resultEl.innerHTML = '';
+      try {
+        const fn = firebase.functions().httpsCallable('sendTestMatchReminder');
+        const { data } = await fn({ email: email || null, phone: phone || null });
+        const waStatus  = data.whatsapp  ? (data.whatsapp.success  ? `✅ Sent (SID: ${data.whatsapp.sid})` : `❌ Failed: ${data.whatsapp.error}`)  : '—';
+        const emlStatus = data.email     ? (data.email.success     ? `✅ Sent`                              : `❌ Failed: ${data.email.error}`)      : '—';
+        if (resultEl) resultEl.innerHTML = `
+          <div style="margin-top:.25rem">
+            ${phone ? `<div>WhatsApp (${phone}): ${waStatus}</div>` : ''}
+            ${email ? `<div>Email (${email}): ${emlStatus}</div>`  : ''}
+          </div>`;
+      } catch (err) {
+        toast('Test failed: ' + err.message, 'error');
+        if (resultEl) resultEl.innerHTML = `<span style="color:var(--danger)">Error: ${esc(err.message)}</span>`;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Send test';
+      }
     });
   }
 
