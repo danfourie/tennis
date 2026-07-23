@@ -710,9 +710,56 @@ const Admin = (() => {
   function renderGlobalSettings() {
     const panel = document.getElementById('globalSettingsPanel');
     if (!panel) return;
-    const settings = DB.getSettings();
-    const tourEnabled = settings.tournamentPageEnabled === true; // default OFF
-    const waEnabled   = settings.whatsappEnabled !== false;      // default ON
+    const settings    = DB.getSettings();
+    const tourEnabled = settings.tournamentPageEnabled === true;
+    const waEnabled   = settings.whatsappEnabled !== false;       // default ON
+    const remEnabled  = settings.matchReminderEnabled === true;   // default OFF
+    const remChannels = settings.matchReminderChannels || 'both';
+
+    // Build upcoming-fixtures list (today+1 … today+7)
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const upcoming  = [];
+    for (let i = 1; i <= 7; i++) {
+      const d  = new Date();
+      d.setDate(d.getDate() + i);
+      const ds = d.toISOString().slice(0, 10);
+      DB.getLeagues().forEach(lg => {
+        (lg.fixtures || []).forEach(f => {
+          if (f.date === ds && f.homeScore == null && f.homeSchoolId && f.awaySchoolId) {
+            upcoming.push({ league: lg, fixture: f });
+          }
+        });
+      });
+    }
+    upcoming.sort((a, b) => a.fixture.date.localeCompare(b.fixture.date));
+
+    const upcomingRows = upcoming.length === 0
+      ? `<p class="text-muted" style="font-size:.85rem;margin:.5rem 0 0">No matches scheduled in the next 7 days.</p>`
+      : `<div style="overflow-x:auto;margin-top:.5rem">
+          <table class="fixtures-table" style="font-size:.82rem;min-width:560px">
+            <thead><tr>
+              <th>Date</th><th>League</th><th>Match</th><th>Time</th><th>Venue</th>
+              <th style="text-align:center;white-space:nowrap">Skip reminder</th>
+            </tr></thead>
+            <tbody>
+              ${upcoming.map(({ league: lg, fixture: f }) => `
+              <tr>
+                <td style="white-space:nowrap">${formatDate(f.date)}</td>
+                <td>${esc(lg.name || '')}</td>
+                <td style="white-space:nowrap">${esc(f.homeSchoolName || '')} vs ${esc(f.awaySchoolName || '')}</td>
+                <td>${f.timeSlot || '—'}</td>
+                <td style="font-size:.78rem">${esc(f.venueName || '—')}</td>
+                <td style="text-align:center">
+                  <label class="toggle-switch" style="transform:scale(.75);display:inline-flex" title="${f.reminderSkipped ? 'Click to re-enable reminder' : 'Click to skip reminder'}">
+                    <input type="checkbox" class="reminder-skip-chk" data-league="${lg.id}" data-fixture="${f.id}" ${f.reminderSkipped ? 'checked' : ''}>
+                    <span class="toggle-slider"></span>
+                  </label>
+                </td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>`;
+
     panel.innerHTML = `
       <div class="feature-toggle-row">
         <label class="toggle-switch" title="Toggle Tournament page visibility for all users">
@@ -734,16 +781,48 @@ const Admin = (() => {
           <span class="badge ${waEnabled ? 'badge-green' : 'badge-red'}" style="margin-left:.3rem">${waEnabled ? 'On' : 'Off'}</span>
         </span>
       </div>
-      <p class="text-muted" style="font-size:.85rem;margin-top:.1rem">When disabled, no WhatsApp messages are sent via Twilio regardless of user opt-in.</p>`;
+      <p class="text-muted" style="font-size:.85rem;margin-top:.1rem">When disabled, no WhatsApp messages are sent via Twilio regardless of user opt-in.</p>
+
+      <div style="border-top:1px solid var(--border);margin-top:1.25rem;padding-top:1.25rem">
+        <div class="feature-toggle-row">
+          <label class="toggle-switch" title="Send reminder to both teams the evening before each match">
+            <input type="checkbox" id="matchReminderToggle" ${remEnabled ? 'checked' : ''}>
+            <span class="toggle-slider"></span>
+          </label>
+          <span>Day-Before Match Reminders
+            <span class="badge ${remEnabled ? 'badge-green' : 'badge-red'}" style="margin-left:.3rem">${remEnabled ? 'On' : 'Off'}</span>
+          </span>
+        </div>
+        <p class="text-muted" style="font-size:.85rem;margin-top:.1rem">Sends a reminder to both teams at 17:00 the evening before each scheduled match (unscored fixtures only).</p>
+
+        ${remEnabled ? `
+        <div style="margin-top:.75rem;display:flex;align-items:center;gap:1.5rem;flex-wrap:wrap">
+          <span style="font-size:.85rem;font-weight:600">Notify via:</span>
+          <label style="display:flex;align-items:center;gap:.35rem;cursor:pointer;font-size:.9rem">
+            <input type="radio" name="remChannels" value="both"      ${remChannels === 'both'      ? 'checked' : ''}> WhatsApp + Email
+          </label>
+          <label style="display:flex;align-items:center;gap:.35rem;cursor:pointer;font-size:.9rem">
+            <input type="radio" name="remChannels" value="whatsapp"  ${remChannels === 'whatsapp'  ? 'checked' : ''}> WhatsApp only
+          </label>
+          <label style="display:flex;align-items:center;gap:.35rem;cursor:pointer;font-size:.9rem">
+            <input type="radio" name="remChannels" value="email"     ${remChannels === 'email'     ? 'checked' : ''}> Email only
+          </label>
+        </div>
+
+        <div style="margin-top:1rem">
+          <div style="font-size:.9rem;font-weight:600;margin-bottom:.25rem">
+            Scheduled reminders — next 7 days
+            <span class="badge badge-gray" style="margin-left:.4rem">${upcoming.length} match${upcoming.length !== 1 ? 'es' : ''}</span>
+          </div>
+          <p class="text-muted" style="font-size:.8rem;margin:.1rem 0 .4rem">Toggle <em>Skip reminder</em> to suppress a specific match's notification without cancelling the game.</p>
+          ${upcomingRows}
+        </div>` : ''}
+      </div>`;
 
     document.getElementById('tournamentPageToggle')?.addEventListener('change', e => {
       const newEnabled = e.target.checked;
       DB.saveSettings({ ...DB.getSettings(), tournamentPageEnabled: newEnabled });
-      DB.writeAudit(
-        'setting_changed', 'admin',
-        `Tournament page ${newEnabled ? 'enabled' : 'disabled'}`,
-        'settings/global', 'Tournament Page'
-      );
+      DB.writeAudit('setting_changed', 'admin', `Tournament page ${newEnabled ? 'enabled' : 'disabled'}`, 'settings/global', 'Tournament Page');
       toast(`Tournament page ${newEnabled ? 'enabled ✓' : 'disabled ✓'}`, 'success');
       renderGlobalSettings();
     });
@@ -751,13 +830,42 @@ const Admin = (() => {
     document.getElementById('whatsappToggle')?.addEventListener('change', e => {
       const newEnabled = e.target.checked;
       DB.saveSettings({ ...DB.getSettings(), whatsappEnabled: newEnabled });
-      DB.writeAudit(
-        'setting_changed', 'admin',
-        `WhatsApp notifications ${newEnabled ? 'enabled' : 'disabled'}`,
-        'settings/global', 'WhatsApp'
-      );
+      DB.writeAudit('setting_changed', 'admin', `WhatsApp notifications ${newEnabled ? 'enabled' : 'disabled'}`, 'settings/global', 'WhatsApp');
       toast(`WhatsApp ${newEnabled ? 'enabled ✓' : 'disabled ✓'}`, 'success');
       renderGlobalSettings();
+    });
+
+    document.getElementById('matchReminderToggle')?.addEventListener('change', e => {
+      const newEnabled = e.target.checked;
+      DB.saveSettings({ ...DB.getSettings(), matchReminderEnabled: newEnabled });
+      DB.writeAudit('setting_changed', 'admin', `Day-before match reminders ${newEnabled ? 'enabled' : 'disabled'}`, 'settings/global', 'Match Reminder');
+      toast(`Match reminders ${newEnabled ? 'enabled ✓' : 'disabled ✓'}`, 'success');
+      renderGlobalSettings();
+    });
+
+    panel.querySelectorAll('input[name="remChannels"]').forEach(radio => {
+      radio.addEventListener('change', e => {
+        const ch = e.target.value;
+        DB.saveSettings({ ...DB.getSettings(), matchReminderChannels: ch });
+        DB.writeAudit('setting_changed', 'admin', `Match reminder channel → ${ch}`, 'settings/global', 'Match Reminder Channel');
+        const label = ch === 'both' ? 'WhatsApp + Email' : ch === 'whatsapp' ? 'WhatsApp only' : 'Email only';
+        toast(`Reminders via: ${label} ✓`, 'success');
+      });
+    });
+
+    panel.querySelectorAll('.reminder-skip-chk').forEach(chk => {
+      chk.addEventListener('change', e => {
+        const leagueId  = e.target.dataset.league;
+        const fixtureId = e.target.dataset.fixture;
+        const skip      = e.target.checked;
+        const league    = DB.getLeagues().find(l => l.id === leagueId);
+        if (!league) return;
+        const fixture   = (league.fixtures || []).find(f => f.id === fixtureId);
+        if (!fixture) return;
+        fixture.reminderSkipped = skip;
+        DB.updateLeague(league);
+        toast(skip ? 'Reminder skipped for this match ✓' : 'Reminder re-enabled ✓', 'success');
+      });
     });
   }
 

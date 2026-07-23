@@ -101,6 +101,7 @@ function _buildTextMessage(notif) {
     fixture_changed:             '📅',
     fixture_cancelled:           '🚫',
     score_reminder:              '⏰',
+    match_reminder:              '🎾',
     league_entry:                '🎾',
     league_created:              '🏆',
     league_start_reminder:       '📅',
@@ -185,6 +186,11 @@ function _buildTemplate(notif) {
       vars['1'] = notif.title      || '';
       vars['2'] = notif.body       || '';
       break;
+    case 'match_reminder':
+      // Reuse the general_message template ({{1}} title, {{2}} body)
+      vars['1'] = notif.title || 'Match Reminder 🎾';
+      vars['2'] = notif.body  || '';
+      return { contentSid: TEMPLATE_SIDS.general_message, contentVariables: JSON.stringify(vars) };
     case 'registration_invite':
       vars['1'] = notif.fromName   || '';
       vars['2'] = notif.venueName  || '';  // schoolName in invite context
@@ -1372,5 +1378,191 @@ exports.dailyScoreReminder = onSchedule(
     }
 
     console.log(`[ScoreReminder] Done — ${sent} notifications written for ${notifications.length} fixtures`);
+  }
+);
+
+// ── 5. Scheduled: day-before match reminder at 17:00 SAST ────────────────────
+// Fires at 17:00 Africa/Johannesburg every day.  Finds every unscored, non-skipped
+// fixture scheduled for TOMORROW and sends a reminder to both teams via the
+// channels configured in settings.matchReminderChannels ('both'|'whatsapp'|'email').
+// Disabled when settings.matchReminderEnabled !== true.
+exports.dailyMatchReminder = onSchedule(
+  {
+    schedule: '0 17 * * *',
+    timeZone: 'Africa/Johannesburg',
+    secrets:  [EMAIL_USER, EMAIL_PASS],  // WhatsApp delivered via notif-doc → onNewNotification
+  },
+  async () => {
+    const db = admin.firestore();
+
+    // Check global enable flag (default OFF — admin must opt in)
+    const settingsDoc = await db.doc('settings/global').get();
+    const settings = settingsDoc.exists ? settingsDoc.data() : {};
+    if (!settings.matchReminderEnabled) {
+      console.log('[MatchReminder] Disabled by global setting — skipping');
+      return;
+    }
+
+    const channels    = settings.matchReminderChannels || 'both';
+    const sendWA      = channels !== 'email';
+    const sendEmail   = channels !== 'whatsapp';
+
+    // Compute tomorrow's date in SAST
+    const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' });
+    const [ty, tm, td] = todayStr.split('-').map(Number);
+    const tomorrowObj  = new Date(ty, tm - 1, td + 1);
+    const tomorrow     = `${tomorrowObj.getFullYear()}-${String(tomorrowObj.getMonth()+1).padStart(2,'0')}-${String(tomorrowObj.getDate()).padStart(2,'0')}`;
+    console.log(`[MatchReminder] Running for tomorrow: ${tomorrow} | channels: ${channels}`);
+
+    // Fetch all non-deleted leagues
+    const leaguesSnap = await db.collection('leagues').get();
+    const upcoming = [];
+    leaguesSnap.forEach(doc => {
+      const league = { id: doc.id, ...doc.data() };
+      if (league.deleted) return;
+      (league.fixtures || []).forEach(f => {
+        if (!f.date || f.date !== tomorrow)         return;
+        if (f.reminderSkipped)                      return;
+        if (f.homeScore != null || f.awayScore != null) return; // already scored
+        if (!f.homeSchoolId || !f.awaySchoolId)     return;
+        upcoming.push({ league, fixture: f });
+      });
+    });
+
+    if (upcoming.length === 0) {
+      console.log('[MatchReminder] No fixtures tomorrow — nothing to send.');
+      return;
+    }
+
+    // Fetch users and schools once
+    const [usersSnap, schoolsSnap] = await Promise.all([
+      db.collection('users').get(),
+      db.collection('schools').get(),
+    ]);
+    const users   = usersSnap.docs.map(d => ({ uid: d.id, ...d.data() }));
+    const schools = {};
+    schoolsSnap.forEach(d => { schools[d.id] = d.data(); });
+
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    function friendlyDate(iso) {
+      if (!iso) return 'tomorrow';
+      const [, m, d] = iso.split('-');
+      return `${parseInt(d)} ${months[parseInt(m)-1]}`;
+    }
+
+    const nowISO  = new Date().toISOString();
+    let waCount   = 0;
+    let mailCount = 0;
+
+    for (const { league, fixture: f } of upcoming) {
+      const schoolIds = [f.homeSchoolId, f.awaySchoolId];
+      const fd        = friendlyDate(f.date);
+      const title     = 'Match Reminder 🎾';
+      const body      = `${f.homeSchoolName || 'Home'} vs ${f.awaySchoolName || 'Away'} — tomorrow (${fd})${f.timeSlot ? ' at ' + f.timeSlot : ''}${f.venueName ? ' at ' + f.venueName : ''}. Good luck!`;
+
+      // ── WhatsApp: write notification docs → onNewNotification fires ──
+      if (sendWA) {
+        const recipientUids = [...new Set(
+          users.filter(u => schoolIds.includes(u.schoolId)).map(u => u.uid)
+        )];
+        if (recipientUids.length > 0) {
+          const batch = db.batch();
+          for (const uid of recipientUids) {
+            batch.set(db.collection('notifications').doc(), {
+              uid,
+              type:           'match_reminder',
+              title,
+              body,
+              leagueId:       league.id,
+              leagueName:     league.name || '',
+              fixtureId:      f.id,
+              homeSchoolName: f.homeSchoolName || '',
+              awaySchoolName: f.awaySchoolName || '',
+              date:           f.date,
+              timeSlot:       f.timeSlot || '',
+              venueName:      f.venueName || '',
+              read:           false,
+              createdAt:      nowISO,
+              createdBy:      null,
+              fromName:       'Court Campus',
+            });
+          }
+          await batch.commit();
+          waCount += recipientUids.length;
+          console.log(`[MatchReminder] WA queued for ${f.homeSchoolName} vs ${f.awaySchoolName} — ${recipientUids.length} users`);
+        }
+      }
+
+      // ── Email: send to registered users + school organizer contacts ──
+      if (sendEmail) {
+        const emailUser = EMAIL_USER.value();
+        const emailPass = EMAIL_PASS.value();
+        if (!emailUser || !emailPass) {
+          console.warn('[MatchReminder] Email credentials not set — skipping email');
+        } else {
+          const emailSet = new Set();
+          users.filter(u => schoolIds.includes(u.schoolId) && u.email).forEach(u => emailSet.add(u.email));
+          for (const sid of schoolIds) {
+            const sc = schools[sid];
+            if (!sc) continue;
+            (sc.organizers || []).forEach(o => { if (o.email) emailSet.add(o.email); });
+            if (sc.email) emailSet.add(sc.email);
+          }
+
+          if (emailSet.size > 0) {
+            const transporter = nodemailer.createTransport({ service: 'gmail', auth: { user: emailUser, pass: emailPass } });
+            const subject = `Match Reminder: ${f.homeSchoolName} vs ${f.awaySchoolName} — Tomorrow (${fd})`;
+            const textBody = `${body}\n\nView your fixtures: ${APP_URL}`;
+            const htmlBody = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+body{font-family:Arial,sans-serif;background:#f4f7fb;margin:0;padding:0}
+.container{max-width:560px;margin:32px auto;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.1)}
+.header{background:#3b82f6;padding:28px 32px;text-align:center}
+.header h1{color:#fff;margin:0;font-size:22px}
+.header p{color:#dbeafe;margin:6px 0 0;font-size:14px}
+.body{padding:28px 32px;color:#1e293b;line-height:1.6}
+.card{background:#f0f9ff;border-left:4px solid #3b82f6;border-radius:4px;padding:16px 20px;margin:16px 0}
+.card .teams{font-size:18px;font-weight:700;color:#1e293b;margin-bottom:8px}
+.card .detail{color:#475569;font-size:13px;margin:3px 0}
+.cta{display:block;margin:24px 0;text-align:center}
+.cta a{background:#3b82f6;color:#fff!important;text-decoration:none;padding:13px 32px;border-radius:6px;font-size:15px;font-weight:600;display:inline-block}
+.footer{text-align:center;padding:16px 32px;font-size:11px;color:#94a3b8;border-top:1px solid #e2e8f0}
+</style></head><body>
+<div class="container">
+<div class="header"><h1>🎾 Court Campus</h1><p>Match Reminder</p></div>
+<div class="body">
+  <p>This is a reminder that your team has a match <strong>tomorrow</strong>.</p>
+  <div class="card">
+    <div class="teams">${f.homeSchoolName || 'Home'} vs ${f.awaySchoolName || 'Away'}</div>
+    ${f.date    ? `<div class="detail">📅 Date: ${fd} (tomorrow)</div>` : ''}
+    ${f.timeSlot ? `<div class="detail">⏰ Time: ${f.timeSlot}</div>` : ''}
+    ${f.venueName ? `<div class="detail">📍 Venue: ${f.venueName}</div>` : ''}
+    ${league.name ? `<div class="detail">🏆 League: ${league.name}</div>` : ''}
+  </div>
+  <div class="cta"><a href="${APP_URL}">View Fixtures on Court Campus →</a></div>
+</div>
+<div class="footer">Court Campus · <a href="${APP_URL}" style="color:#94a3b8">${APP_URL}</a></div>
+</div></body></html>`;
+
+            for (const email of emailSet) {
+              try {
+                await transporter.sendMail({
+                  from:    `"Court Campus" <${emailUser}>`,
+                  to:      email,
+                  subject,
+                  text:    textBody,
+                  html:    htmlBody,
+                });
+                mailCount++;
+              } catch (err) {
+                console.error(`[MatchReminder] Email failed → ${email}:`, err.message);
+              }
+            }
+            console.log(`[MatchReminder] Email sent for ${f.homeSchoolName} vs ${f.awaySchoolName} — ${emailSet.size} addresses`);
+          }
+        }
+      }
+    }
+
+    console.log(`[MatchReminder] Done — ${waCount} WA notifications, ${mailCount} emails for ${upcoming.length} fixtures`);
   }
 );
