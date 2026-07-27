@@ -1420,12 +1420,23 @@ exports.dailyMatchReminder = onSchedule(
     leaguesSnap.forEach(doc => {
       const league = { id: doc.id, ...doc.data() };
       if (league.deleted) return;
+
+      // Build participantId → schoolId map as fallback for older fixtures
+      const partSchoolMap = {};
+      if (league.participants && league.participants.length > 0) {
+        league.participants.forEach(p => { if (p.participantId && p.schoolId) partSchoolMap[p.participantId] = p.schoolId; });
+      } else {
+        (league.schoolIds || []).forEach(id => { partSchoolMap[id] = id; });
+      }
+
       (league.fixtures || []).forEach(f => {
-        if (!f.date || f.date !== tomorrow)         return;
-        if (f.reminderSkipped)                      return;
-        if (f.homeScore != null || f.awayScore != null) return; // already scored
-        if (!f.homeSchoolId || !f.awaySchoolId)     return;
-        upcoming.push({ league, fixture: f });
+        if (!f.date || f.date !== tomorrow)              return;
+        if (f.reminderSkipped)                           return;
+        if (f.homeScore != null || f.awayScore != null)  return;
+        const hId = f.homeSchoolId || partSchoolMap[f.homeParticipantId];
+        const aId = f.awaySchoolId || partSchoolMap[f.awayParticipantId];
+        if (!hId || !aId)                                return;
+        upcoming.push({ league, fixture: { ...f, homeSchoolId: hId, awaySchoolId: aId } });
       });
     });
 
@@ -1455,10 +1466,12 @@ exports.dailyMatchReminder = onSchedule(
     let mailCount = 0;
 
     for (const { league, fixture: f } of upcoming) {
-      const schoolIds = [f.homeSchoolId, f.awaySchoolId];
+      const schoolIds     = [f.homeSchoolId, f.awaySchoolId];
+      const homeSchoolName = f.homeSchoolName || (schools[f.homeSchoolId] && schools[f.homeSchoolId].name) || 'Home';
+      const awaySchoolName = f.awaySchoolName || (schools[f.awaySchoolId] && schools[f.awaySchoolId].name) || 'Away';
       const fd        = friendlyDate(f.date);
       const title     = 'Match Reminder 🎾';
-      const body      = `${f.homeSchoolName || 'Home'} vs ${f.awaySchoolName || 'Away'} — tomorrow (${fd})${f.timeSlot ? ' at ' + f.timeSlot : ''}${f.venueName ? ' at ' + f.venueName : ''}. Good luck!`;
+      const body      = `${homeSchoolName} vs ${awaySchoolName} — tomorrow (${fd})${f.timeSlot ? ' at ' + f.timeSlot : ''}${f.venueName ? ' at ' + f.venueName : ''}. Good luck!`;
 
       // ── WhatsApp: write notification docs → onNewNotification fires ──
       if (sendWA) {
@@ -1476,8 +1489,8 @@ exports.dailyMatchReminder = onSchedule(
               leagueId:       league.id,
               leagueName:     league.name || '',
               fixtureId:      f.id,
-              homeSchoolName: f.homeSchoolName || '',
-              awaySchoolName: f.awaySchoolName || '',
+              homeSchoolName: homeSchoolName,
+              awaySchoolName: awaySchoolName,
               date:           f.date,
               timeSlot:       f.timeSlot || '',
               venueName:      f.venueName || '',
@@ -1489,7 +1502,7 @@ exports.dailyMatchReminder = onSchedule(
           }
           await batch.commit();
           waCount += recipientUids.length;
-          console.log(`[MatchReminder] WA queued for ${f.homeSchoolName} vs ${f.awaySchoolName} — ${recipientUids.length} users`);
+          console.log(`[MatchReminder] WA queued for ${homeSchoolName} vs ${awaySchoolName} — ${recipientUids.length} users`);
         }
       }
 
@@ -1511,7 +1524,7 @@ exports.dailyMatchReminder = onSchedule(
 
           if (emailSet.size > 0) {
             const transporter = nodemailer.createTransport({ service: 'gmail', auth: { user: emailUser, pass: emailPass } });
-            const subject = `Match Reminder: ${f.homeSchoolName} vs ${f.awaySchoolName} — Tomorrow (${fd})`;
+            const subject = `Match Reminder: ${homeSchoolName} vs ${awaySchoolName} — Tomorrow (${fd})`;
             const textBody = `${body}\n\nView your fixtures: ${APP_URL}`;
             const htmlBody = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
 body{font-family:Arial,sans-serif;background:#f4f7fb;margin:0;padding:0}
@@ -1532,7 +1545,7 @@ body{font-family:Arial,sans-serif;background:#f4f7fb;margin:0;padding:0}
 <div class="body">
   <p>This is a reminder that your team has a match <strong>tomorrow</strong>.</p>
   <div class="card">
-    <div class="teams">${f.homeSchoolName || 'Home'} vs ${f.awaySchoolName || 'Away'}</div>
+    <div class="teams">${homeSchoolName} vs ${awaySchoolName}</div>
     ${f.date    ? `<div class="detail">📅 Date: ${fd} (tomorrow)</div>` : ''}
     ${f.timeSlot ? `<div class="detail">⏰ Time: ${f.timeSlot}</div>` : ''}
     ${f.venueName ? `<div class="detail">📍 Venue: ${f.venueName}</div>` : ''}
@@ -1557,7 +1570,7 @@ body{font-family:Arial,sans-serif;background:#f4f7fb;margin:0;padding:0}
                 console.error(`[MatchReminder] Email failed → ${email}:`, err.message);
               }
             }
-            console.log(`[MatchReminder] Email sent for ${f.homeSchoolName} vs ${f.awaySchoolName} — ${emailSet.size} addresses`);
+            console.log(`[MatchReminder] Email sent for ${homeSchoolName} vs ${awaySchoolName} — ${emailSet.size} addresses`);
           }
         }
       }
