@@ -22,7 +22,7 @@
  */
 
 const { onDocumentCreated } = require('firebase-functions/v2/firestore');
-const { onCall, onRequest }  = require('firebase-functions/v2/https');
+const { onCall, onRequest, HttpsError } = require('firebase-functions/v2/https');
 const { onSchedule }         = require('firebase-functions/v2/scheduler');
 const { defineSecret }       = require('firebase-functions/params');
 const admin      = require('firebase-admin');
@@ -213,6 +213,9 @@ exports.onNewNotification = onDocumentCreated(
 
     // Skip WhatsApp reply notifications to avoid infinite loops
     if (notif.type === 'whatsapp_reply') return null;
+
+    // General admin notifications are email-only — not WhatsApp
+    if (notif.type === 'general_message') return null;
 
     // Skip if no recipient uid
     if (!notif.uid) return null;
@@ -1577,5 +1580,125 @@ body{font-family:Arial,sans-serif;background:#f4f7fb;margin:0;padding:0}
     }
 
     console.log(`[MatchReminder] Done — ${waCount} WA notifications, ${mailCount} emails for ${upcoming.length} fixtures`);
+  }
+);
+
+// ── 6. onCall: send admin general-message as email blast ─────────────────────
+// Called from the admin "Send Notifications" panel.  Resolves target emails
+// using the same school/organizer logic as the client-side notification helpers.
+exports.sendGeneralEmail = onCall(
+  { secrets: [EMAIL_USER, EMAIL_PASS] },
+  async (request) => {
+    const { title, body, groupType, groupId } = request.data || {};
+    if (!title || !body) throw new HttpsError('invalid-argument', 'title and body are required');
+
+    const db = admin.firestore();
+    const [usersSnap, schoolsSnap, leaguesSnap] = await Promise.all([
+      db.collection('users').get(),
+      db.collection('schools').get(),
+      db.collection('leagues').get(),
+    ]);
+
+    const users = usersSnap.docs.map(d => ({ uid: d.id, ...d.data() }));
+    const schools = {};
+    schoolsSnap.forEach(d => { schools[d.id] = d.data(); });
+    const leagues = {};
+    leaguesSnap.forEach(d => { leagues[d.id] = d.data(); });
+
+    // Resolve which school IDs are targeted
+    let targetSchoolIds = null; // null = all users
+    if (groupType === 'school' && groupId) {
+      targetSchoolIds = new Set([groupId]);
+    } else if (groupType === 'league' && groupId) {
+      const league = leagues[groupId];
+      targetSchoolIds = new Set();
+      if (league) {
+        (league.participants || []).forEach(p => { if (p.schoolId) targetSchoolIds.add(p.schoolId); });
+        // fallback: schoolIds array on older leagues
+        (league.schoolIds || []).forEach(id => targetSchoolIds.add(id));
+      }
+    }
+
+    // Build normalised phone helper (mirrors client _normPhone)
+    const normPhone = (p = '') => p.replace(/\D/g, '').replace(/^0/, '27');
+
+    const emailSet = new Set();
+    users.forEach(u => {
+      if (!u.email) return;
+      if (targetSchoolIds === null) {
+        emailSet.add(u.email);
+        return;
+      }
+      // Primary: user's schoolId
+      if (u.schoolId && targetSchoolIds.has(u.schoolId)) {
+        emailSet.add(u.email);
+        return;
+      }
+      // Secondary: user is an organizer of a targeted school
+      for (const sid of targetSchoolIds) {
+        const school = schools[sid];
+        if (!school) continue;
+        for (const org of (school.organizers || [])) {
+          if ((org.email && org.email.toLowerCase() === u.email.toLowerCase()) ||
+              (org.phone && u.phone && normPhone(org.phone) === normPhone(u.phone))) {
+            emailSet.add(u.email);
+            return;
+          }
+        }
+      }
+    });
+
+    if (emailSet.size === 0) {
+      console.log('[GeneralEmail] No recipient emails found — nothing sent');
+      return { sent: 0 };
+    }
+
+    const emailUser = process.env[EMAIL_USER.name];
+    const emailPass = process.env[EMAIL_PASS.name];
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: { user: emailUser, pass: emailPass },
+    });
+
+    const APP_URL = 'https://courtcampus.co.za';
+    const escapedBody = body.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+    const htmlBody = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+body{margin:0;padding:0;background:#f1f5f9;font-family:Arial,sans-serif}
+.container{max-width:600px;margin:32px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.08)}
+.header{background:#1e3a5f;padding:24px 32px;text-align:center}
+.header h1{color:#fff;margin:0;font-size:22px}
+.header p{color:#93c5fd;margin:4px 0 0;font-size:13px}
+.body{padding:28px 32px;color:#334155;line-height:1.6}
+.message{background:#f8fafc;border-left:4px solid #3b82f6;border-radius:6px;padding:16px 20px;margin:16px 0;white-space:pre-wrap;font-size:15px}
+.footer{text-align:center;padding:16px 32px;font-size:11px;color:#94a3b8;border-top:1px solid #e2e8f0}
+</style></head><body>
+<div class="container">
+<div class="header"><h1>🎾 Court Campus</h1><p>Notification from your administrator</p></div>
+<div class="body">
+  <p><strong>${escapedBody.split('<br>')[0] === title ? '' : title}</strong></p>
+  <div class="message">${escapedBody}</div>
+  <p style="margin-top:20px;font-size:13px;color:#64748b">Log in to Court Campus to view all notifications.</p>
+</div>
+<div class="footer">Court Campus · <a href="${APP_URL}" style="color:#94a3b8">${APP_URL}</a></div>
+</div></body></html>`;
+
+    let sent = 0;
+    for (const email of emailSet) {
+      try {
+        await transporter.sendMail({
+          from:    `"Court Campus" <${emailUser}>`,
+          to:      email,
+          subject: title,
+          text:    `${title}\n\n${body}\n\n${APP_URL}`,
+          html:    htmlBody,
+        });
+        sent++;
+      } catch (err) {
+        console.error(`[GeneralEmail] Failed → ${email}:`, err.message);
+      }
+    }
+
+    console.log(`[GeneralEmail] Done — ${sent}/${emailSet.size} emails sent for "${title}"`);
+    return { sent };
   }
 );

@@ -662,6 +662,11 @@ const NotificationService = (() => {
     const bodyEl  = document.getElementById('notifBody');
     if (titleEl) titleEl.value = '';
     if (bodyEl)  bodyEl.value  = '';
+
+    // Fire-and-forget email blast via Cloud Function
+    firebase.functions().httpsCallable('sendGeneralEmail')({ title, body, groupType, groupId })
+      .then(r => console.log(`[GeneralEmail] ${r.data.sent} emails sent`))
+      .catch(err => console.error('[GeneralEmail] Email blast failed:', err));
   }
 
   // ── Pending reminder checks (on login) ───────────────────────
