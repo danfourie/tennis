@@ -821,15 +821,15 @@ const NotificationService = (() => {
             <col style="width:90px">
           </colgroup>
           <thead><tr>
-            <th style="text-align:center" title="Skip this match's reminder">Skip</th>
+            <th style="text-align:center" title="Send reminder for this match">Send</th>
             <th>Date</th><th>Match</th><th>League</th>
           </tr></thead>
           <tbody>
             ${upcoming.map(({ league: lg, fixture: f }) => `
             <tr class="${f.reminderSkipped ? 'text-muted' : ''}">
               <td style="text-align:center;padding:4px 2px">
-                <label class="toggle-switch" style="transform:scale(.7);display:inline-flex;vertical-align:middle" title="${f.reminderSkipped ? 'Re-enable reminder' : 'Skip reminder'}">
-                  <input type="checkbox" class="reminder-skip-chk" data-league="${lg.id}" data-fixture="${f.id}" ${f.reminderSkipped ? 'checked' : ''}>
+                <label class="toggle-switch" style="transform:scale(.7);display:inline-flex;vertical-align:middle" title="${f.reminderSkipped ? 'Reminder skipped — click to re-enable' : 'Reminder enabled — click to skip'}">
+                  <input type="checkbox" class="reminder-skip-chk" data-league="${lg.id}" data-fixture="${f.id}" ${f.reminderSkipped ? '' : 'checked'}>
                   <span class="toggle-slider"></span>
                 </label>
               </td>
@@ -875,7 +875,7 @@ const NotificationService = (() => {
           Scheduled reminders — next 7 days
           <span class="badge badge-gray" style="margin-left:.4rem">${upcoming.length} match${upcoming.length !== 1 ? 'es' : ''}</span>
         </div>
-        <p class="text-muted" style="font-size:.8rem;margin:.1rem 0 .4rem">Toggle <em>Skip reminder</em> to suppress a specific match's notification without cancelling the game.</p>
+        <p class="text-muted" style="font-size:.8rem;margin:.1rem 0 .4rem">All reminders are <strong>on</strong> by default. Toggle <em>Send</em> off to suppress a specific match's notification.</p>
         ${upcomingRows}
       </div>
       ` : ''}`;
@@ -908,14 +908,23 @@ const NotificationService = (() => {
       chk.addEventListener('change', e => {
         const leagueId  = e.target.dataset.league;
         const fixtureId = e.target.dataset.fixture;
-        const skip      = e.target.checked;
+        const send      = e.target.checked;   // ON = send reminder (not skipped)
         const league    = DB.getLeagues().find(l => l.id === leagueId);
         if (!league) return;
         const fixture   = (league.fixtures || []).find(f => f.id === fixtureId);
         if (!fixture) return;
-        fixture.reminderSkipped = skip;
-        DB.updateLeague(league);
-        toast(skip ? 'Reminder skipped for this match ✓' : 'Reminder re-enabled ✓', 'success');
+        fixture.reminderSkipped = !send;
+        DB.updateLeague(league)
+          .then(() => {
+            toast(send ? 'Reminder enabled ✓' : 'Reminder skipped ✓', 'success');
+            renderMatchReminders();
+          })
+          .catch(err => {
+            console.error('Failed to save skip flag:', err);
+            toast('Failed to save — ' + (err.message || err), 'error');
+            fixture.reminderSkipped = send; // revert in-memory
+            renderMatchReminders();
+          });
       });
     });
   }
