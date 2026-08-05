@@ -436,8 +436,8 @@ const Calendar = (() => {
         footer.innerHTML = `<button class="btn btn-secondary" data-modal="bookingModal">Close</button>`;
       }
 
-    } else if (canManage) {
-      // ── Admin / Venue Organiser: confirmed booking ─────────
+    } else if (isOrganizer) {
+      // ── Venue Organiser (own school's venue): confirmed booking ──
       const schools = DB.getSchools();
       body.innerHTML = `
         <div class="form-stack">
