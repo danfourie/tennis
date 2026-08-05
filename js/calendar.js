@@ -542,123 +542,16 @@ const Calendar = (() => {
       };
 
     } else if (Auth.isLoggedIn()) {
-      // ── Regular user: request booking ──────────────────────
-      const schools  = DB.getSchools();
-      const profile  = Auth.getProfile();
-      const mySchool = profile && profile.schoolId
-        ? schools.find(s => s.id === profile.schoolId) : null;
-
+      // ── External venue bookings are disabled ────────────────
+      // Only admins and users whose school owns this venue may book here.
+      // (Those users reach the branch above via _canManageVenue.)
       body.innerHTML = `
-        <div class="form-stack">
-          <div class="booking-info-row">
-            <div class="booking-info-item"><span class="label">Date</span><span class="value">${formatDate(dateStr)}</span></div>
-            <div class="booking-info-item"><span class="label">Court</span><span class="value">Court ${courtIndex + 1}</span></div>
-          </div>
-          <div class="form-group">
-            <label>Select Time Slot(s)</label>
-            <div class="timeslot-picker" id="slotPicker"></div>
-          </div>
-          <div class="form-group">
-            <label>Booking Type</label>
-            <select id="newBookingType">
-              <option value="booking">General Booking</option>
-              <option value="league">League Match</option>
-              <option value="practice">Practice</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>School (optional)</label>
-            <select id="newBookingSchool">
-              <option value="">-- No school --</option>
-              ${schools.map(s => `<option value="${s.id}"${mySchool && s.id === mySchool.id ? ' selected' : ''}>${esc(s.name)}</option>`).join('')}
-            </select>
-          </div>
-          <div class="form-group">
-            <label>Label / Name</label>
-            <input type="text" id="newBookingLabel" placeholder="e.g. Practice session">
-          </div>
-          <div class="form-group">
-            <label>Notes (optional)</label>
-            <input type="text" id="newBookingNotes" placeholder="Any extra details for the organiser">
-          </div>
-          <p class="form-hint">⏳ Your request will be reviewed by the venue organiser or admin before it is confirmed.</p>
+        <div style="text-align:center;padding:1.25rem .5rem">
+          <p style="font-size:1.5rem;margin-bottom:.5rem">🔒</p>
+          <p style="font-weight:600;margin-bottom:.4rem">Bookings not available</p>
+          <p class="text-muted" style="font-size:.9rem">Court bookings at external venues are not available.<br>You can only book courts at your own school's venue.</p>
         </div>`;
-
-      const slots         = getTimeSlots();
-      const picker        = document.getElementById('slotPicker');
-      const selectedSlots = new Set([timeStr]);
-
-      slots.forEach(s => {
-        const btn      = document.createElement('button');
-        btn.type       = 'button';
-        btn.className  = 'timeslot-btn' + (s === timeStr ? ' selected' : '');
-        btn.textContent = s;
-        const existing       = getSlotBooking(venueId, courtIndex, dateStr, s);
-        const closed         = isCourtClosed(venueId, courtIndex, dateStr, s);
-        const leagueOccupied = _getLeagueFixtureForSlot(venueId, courtIndex, dateStr, s);
-        if (existing || closed || leagueOccupied) {
-          btn.disabled = true;
-          btn.title    = leagueOccupied ? 'League match in progress' : existing ? 'Already booked / pending' : 'Court closed';
-        } else {
-          btn.onclick = () => {
-            if (selectedSlots.has(s)) { selectedSlots.delete(s); btn.classList.remove('selected'); }
-            else                       { selectedSlots.add(s);    btn.classList.add('selected'); }
-          };
-        }
-        picker.appendChild(btn);
-      });
-
-      footer.innerHTML = `
-        <button class="btn btn-secondary" data-modal="bookingModal">Cancel</button>
-        <button class="btn btn-warning"   id="saveRequestBtn">Submit Request ⏳</button>`;
-
-      document.getElementById('saveRequestBtn').onclick = () => {
-        const label    = document.getElementById('newBookingLabel').value.trim();
-        const type     = document.getElementById('newBookingType').value;
-        const schoolId = document.getElementById('newBookingSchool').value;
-        const notes    = document.getElementById('newBookingNotes').value.trim();
-        const school   = schoolId ? DB.getSchools().find(s => s.id === schoolId) : null;
-        const user     = Auth.getUser();
-        const prof     = Auth.getProfile();
-        if (selectedSlots.size === 0) { toast('Select at least one time slot', 'error'); return; }
-
-        let requestedCount = 0;
-        selectedSlots.forEach(sl => {
-          const result = DB.addBooking({
-            venueId, courtIndex, date: dateStr, timeSlot: sl,
-            type, schoolId: schoolId || null,
-            label:           label || (school ? school.name : type),
-            schoolName:      school ? school.name : null,
-            notes,
-            status:          'pending',
-            requestedBy:     user ? user.uid : null,
-            requestedByName: prof ? (prof.displayName || prof.email) : (user ? user.email : 'Unknown'),
-            requestedAt:     new Date().toISOString(),
-          });
-          if (!result) toast(`${sl} already has a booking — skipped`, 'error');
-          else requestedCount++;
-        });
-        DB.writeAudit('booking_requested', 'booking',
-          `Request submitted by ${prof ? (prof.displayName || prof.email) : 'user'}: ${label || type} on ${dateStr} at ${venue.name} Court ${courtIndex + 1}`,
-          null, label || type);
-        if (requestedCount === 0) { render(); return; }
-
-        // Notify all users of the venue-owning school
-        const ownerSchool = DB.getSchools().find(s => s.venueId === venueId);
-        if (ownerSchool && typeof NotificationService !== 'undefined') {
-          const requesterName = prof ? (prof.displayName || prof.email) : 'A user';
-          const slotList = [...selectedSlots].join(', ');
-          NotificationService.sendToSchool(ownerSchool.id, {
-            type:  'booking_request',
-            title: `New booking request at ${venue.name}`,
-            body:  `${requesterName} has requested to book Court ${courtIndex + 1} on ${formatDate(dateStr)} (${slotList}). Please approve or reject in My Venue.`,
-          });
-        }
-
-        Modal.close('bookingModal');
-        render();
-        toast(`${requestedCount} slot request(s) submitted for approval`, 'success');
-      };
+      footer.innerHTML = `<button class="btn btn-secondary" data-modal="bookingModal">Close</button>`;
 
     } else {
       // ── Visitor ────────────────────────────────────────────
