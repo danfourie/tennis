@@ -161,8 +161,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   applyTournamentVisibility();
 
   // ── Password-reset email link handler ───────────────────────
-  // Firebase emails a link to ?mode=resetPassword&oobCode=... when
-  // handleCodeInApp:true is set in sendPasswordResetEmail().
+  // Firebase emails a link to ?mode=resetPassword&oobCode=... (sent with
+  // handleCodeInApp:true so the link goes directly to courtcampus.co.za).
   // We detect these params on arrival and show the set-new-password form.
   (function _checkResetLink() {
     const params  = new URLSearchParams(location.search);
@@ -173,12 +173,53 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Clean the URL immediately so a refresh doesn't re-open the modal
     history.replaceState(null, '', location.pathname);
 
-    const errEl  = document.getElementById('resetPasswordError');
+    const errEl    = document.getElementById('resetPasswordError');
     const submitBtn = document.getElementById('resetPasswordSubmitBtn');
+    const modalBody = document.querySelector('#resetPasswordModal .modal-body');
 
     errEl.textContent = '';
     Modal.open('resetPasswordModal');
     setTimeout(() => document.getElementById('resetNewPassword').focus(), 50);
+
+    // Show an expired-link recovery UI — hides the form, shows a resend option.
+    function _showExpiredState() {
+      if (modalBody) {
+        modalBody.innerHTML = `
+          <div style="text-align:center;padding:.5rem 0">
+            <p style="font-size:1.4rem;margin-bottom:.5rem">⏳</p>
+            <p style="font-weight:600;margin-bottom:.4rem">Reset link expired</p>
+            <p class="text-muted" style="font-size:.9rem;margin-bottom:1rem">
+              This link has already been used or has expired.<br>Enter your email below to receive a new one.
+            </p>
+            <div class="form-group" style="text-align:left">
+              <label>Email address</label>
+              <input type="email" id="resendResetEmail" placeholder="your@email.com"
+                     style="width:100%;box-sizing:border-box">
+            </div>
+            <p id="resendResetMsg" class="form-error" style="margin-top:.4rem"></p>
+          </div>`;
+      }
+      submitBtn.textContent = 'Send New Link';
+      submitBtn.disabled    = false;
+
+      // Replace click handler with a resend handler
+      const newBtn = submitBtn.cloneNode(true); // remove old listeners
+      submitBtn.replaceWith(newBtn);
+      newBtn.addEventListener('click', async () => {
+        const email = (document.getElementById('resendResetEmail')?.value || '').trim();
+        const msgEl = document.getElementById('resendResetMsg');
+        if (!email) { if (msgEl) msgEl.textContent = 'Please enter your email address'; return; }
+        newBtn.disabled = true; newBtn.textContent = 'Sending…';
+        const r = await Auth.resetPassword(email);
+        newBtn.disabled = false; newBtn.textContent = 'Send New Link';
+        if (r.ok) {
+          Modal.close('resetPasswordModal');
+          toast(`Reset email sent to ${email} — check your inbox`, 'success');
+        } else {
+          if (msgEl) msgEl.textContent = r.error || 'Could not send reset email';
+        }
+      });
+    }
 
     async function doReset() {
       const pw1 = document.getElementById('resetNewPassword').value;
@@ -201,8 +242,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         document.getElementById('resetConfirmPassword').value = '';
         toast('Password updated — please log in with your new password', 'success');
         setTimeout(() => Modal.open('loginModal'), 600);
+      } else if (result.error === 'EXPIRED_LINK') {
+        _showExpiredState();
       } else {
-        errEl.textContent = result.error || 'Could not update password. The link may have expired — request a new one.';
+        errEl.textContent = result.error || 'Could not update password — please request a new link.';
       }
     }
 

@@ -392,18 +392,23 @@ const Auth = (() => {
       case 'auth/email-already-in-use':return 'Email already registered';
       case 'auth/weak-password':       return 'Password must be at least 6 characters';
       case 'auth/too-many-requests':   return 'Too many attempts — try again later';
+      case 'auth/expired-action-code': return 'EXPIRED_LINK';
+      case 'auth/invalid-action-code': return 'EXPIRED_LINK';
       default: return err.message;
     }
   }
 
   // ── Password reset ─────────────────────────────────────────
-  // The email link domain is controlled by Firebase Auth's callbackUri setting
-  // (set via Identity Toolkit API to https://www.courtcampus.co.za).
-  // Firebase will send a link to ?mode=resetPassword&oobCode=... on our domain,
-  // which app.js detects on arrival and shows the Set New Password modal.
+  // actionCodeSettings forces the reset link to the canonical app URL
+  // (https://courtcampus.co.za) and bypasses any Firebase intermediate page.
+  // app.js detects ?mode=resetPassword&oobCode=... on arrival and opens the
+  // Set New Password modal.
   async function resetPassword(email) {
     try {
-      await firebase.auth().sendPasswordResetEmail(email);
+      await firebase.auth().sendPasswordResetEmail(email, {
+        url:            'https://courtcampus.co.za',
+        handleCodeInApp: true,
+      });
       return { ok: true };
     } catch (err) {
       return { ok: false, error: _authMsg(err) };
