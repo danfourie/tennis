@@ -1702,3 +1702,88 @@ body{margin:0;padding:0;background:#f1f5f9;font-family:Arial,sans-serif}
     return { sent };
   }
 );
+
+// ── 7. onCall: send branded password-reset email ──────────────────────────────
+// Replaces Firebase's built-in reset email (which uses the project ID as the
+// app name) with a fully branded "Court Campus" email.
+// Returns { ok: true } for both valid and unknown emails (don't reveal existence).
+exports.sendPasswordReset = onCall(
+  { secrets: [EMAIL_USER, EMAIL_PASS] },
+  async (request) => {
+    const { email } = request.data || {};
+    if (!email || typeof email !== 'string') throw new HttpsError('invalid-argument', 'email is required');
+
+    const APP_URL = 'https://courtcampus.co.za';
+
+    // Generate the Firebase-signed reset link (oobCode handled by our app)
+    let resetLink;
+    try {
+      resetLink = await admin.auth().generatePasswordResetLink(email.trim(), {
+        url:            APP_URL,
+        handleCodeInApp: true,
+      });
+    } catch (err) {
+      // auth/user-not-found — don't reveal; just return ok silently
+      if (err.code === 'auth/user-not-found') {
+        console.log(`[PasswordReset] Unknown email (not revealed to caller): ${email}`);
+        return { ok: true };
+      }
+      console.error('[PasswordReset] generatePasswordResetLink failed:', err.message);
+      throw new HttpsError('internal', 'Could not generate reset link');
+    }
+
+    const emailUser = process.env[EMAIL_USER.name];
+    const emailPass = process.env[EMAIL_PASS.name];
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: { user: emailUser, pass: emailPass },
+    });
+
+    const htmlBody = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+body{margin:0;padding:0;background:#f1f5f9;font-family:Arial,sans-serif}
+.container{max-width:560px;margin:32px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.08)}
+.header{background:#1e3a5f;padding:24px 32px;text-align:center}
+.header h1{color:#fff;margin:0;font-size:22px}
+.header p{color:#93c5fd;margin:4px 0 0;font-size:13px}
+.body{padding:28px 32px;color:#334155;line-height:1.6;font-size:15px}
+.cta{display:block;margin:24px 0;text-align:center}
+.cta a{background:#3b82f6;color:#fff!important;text-decoration:none;padding:13px 32px;border-radius:6px;font-size:15px;font-weight:600;display:inline-block}
+.hint{font-size:12px;color:#94a3b8;margin-top:4px}
+.footer{text-align:center;padding:16px 32px;font-size:11px;color:#94a3b8;border-top:1px solid #e2e8f0}
+</style></head><body>
+<div class="container">
+<div class="header"><h1>🎾 Court Campus</h1><p>Password Reset</p></div>
+<div class="body">
+  <p>Hello,</p>
+  <p>We received a request to reset your Court Campus password for <strong>${email}</strong>.</p>
+  <p>Click the button below to choose a new password:</p>
+  <div class="cta">
+    <a href="${resetLink}">Reset my password</a>
+    <p class="hint">This link expires in 1 hour.</p>
+  </div>
+  <p>If the button doesn't work, copy and paste this link into your browser:</p>
+  <p style="word-break:break-all;font-size:12px;color:#64748b">${resetLink}</p>
+  <p style="margin-top:1.5rem;font-size:13px;color:#64748b">If you didn't request a password reset, you can safely ignore this email — your password will not change.</p>
+</div>
+<div class="footer">Court Campus · <a href="${APP_URL}" style="color:#94a3b8">${APP_URL}</a></div>
+</div></body></html>`;
+
+    const textBody = `Reset your Court Campus password\n\nHello,\n\nWe received a request to reset your Court Campus password for ${email}.\n\nClick the link below to choose a new password (expires in 1 hour):\n${resetLink}\n\nIf you didn't request a password reset, you can safely ignore this email.\n\nCourt Campus\n${APP_URL}`;
+
+    try {
+      await transporter.sendMail({
+        from:    `"Court Campus" <${emailUser}>`,
+        to:      email.trim(),
+        subject: 'Reset your password for Court Campus',
+        text:    textBody,
+        html:    htmlBody,
+      });
+      console.log(`[PasswordReset] Email sent to ${email}`);
+    } catch (err) {
+      console.error('[PasswordReset] sendMail failed:', err.message);
+      throw new HttpsError('internal', 'Could not send reset email');
+    }
+
+    return { ok: true };
+  }
+);

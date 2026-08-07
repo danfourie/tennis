@@ -399,19 +399,19 @@ const Auth = (() => {
   }
 
   // ── Password reset ─────────────────────────────────────────
-  // actionCodeSettings forces the reset link to the canonical app URL
-  // (https://courtcampus.co.za) and bypasses any Firebase intermediate page.
-  // app.js detects ?mode=resetPassword&oobCode=... on arrival and opens the
-  // Set New Password modal.
+  // Calls a Cloud Function that generates the Firebase-signed oobCode and
+  // sends a fully branded "Court Campus" email via Gmail/Nodemailer.
+  // This replaces Firebase's built-in reset email (which uses the project ID
+  // as the app name).  app.js detects ?mode=resetPassword&oobCode=... on
+  // arrival and opens the Set New Password modal as before.
   async function resetPassword(email) {
     try {
-      await firebase.auth().sendPasswordResetEmail(email, {
-        url:            'https://courtcampus.co.za',
-        handleCodeInApp: true,
-      });
+      await firebase.functions().httpsCallable('sendPasswordReset')({ email });
       return { ok: true };
     } catch (err) {
-      return { ok: false, error: _authMsg(err) };
+      // HttpsError from the Cloud Function
+      const msg = err.message || 'Could not send reset email — please try again';
+      return { ok: false, error: msg };
     }
   }
 
