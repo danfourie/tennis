@@ -1128,27 +1128,66 @@ function _orgRow(o) {
         const venue   = DB.getVenues().find(v => v.id === s.venueId);
         const leagues = _schoolLeagues(s.id);
 
-        // For each league, note which team(s) — single vs A/B
+        // For each league, note which team(s) — single vs A/B, plus scored games
         let totalTeams = 0;
+        let totalWithdrew = 0;
         const teamsBadges = leagues.length > 0
           ? leagues.map(l => {
-              const myParts = (l.participants && l.participants.length > 0
+              const allParts = l.participants && l.participants.length > 0
                 ? l.participants
-                : (l.schoolIds || []).map(id => ({ participantId: id, schoolId: id, teamSuffix: '' }))
-              ).filter(p => p.schoolId === s.id);
+                : (l.schoolIds || []).map(id => ({ participantId: id, schoolId: id, teamSuffix: '' }));
+              const myParts = allParts.filter(p => p.schoolId === s.id);
               totalTeams += myParts.length;
+
+              // Count scored fixtures per participant
+              const fixtures = l.fixtures || [];
+              const partStats = myParts.map(p => {
+                const played = fixtures.filter(f => {
+                  if (f.homeScore == null || f.awayScore == null) return false;
+                  // Match by participantId when available, fall back to schoolId
+                  if (f.homeParticipantId || f.awayParticipantId) {
+                    return f.homeParticipantId === p.participantId ||
+                           f.awayParticipantId === p.participantId;
+                  }
+                  return f.homeSchoolId === s.id || f.awaySchoolId === s.id;
+                }).length;
+                if (played === 0) totalWithdrew++;
+                return { suffix: p.teamSuffix, played };
+              });
+
+              const allWithdrew  = partStats.every(ps => ps.played === 0);
+              const someWithdrew = partStats.some(ps => ps.played === 0);
+              const badgeClass   = allWithdrew ? 'badge-red' : someWithdrew ? 'badge-amber' : 'badge-blue';
+
+              // Build game-count portion of label
+              let gamesLabel;
+              if (partStats.length === 1) {
+                gamesLabel = partStats[0].played === 0
+                  ? ' · withdrew'
+                  : ` · ${partStats[0].played} played`;
+              } else {
+                // Multiple teams — show per-team counts
+                gamesLabel = ' [' + partStats.map(ps =>
+                  `${ps.suffix || '?'}: ${ps.played === 0 ? 'withdrew' : ps.played}`
+                ).join(' · ') + ']';
+              }
+
               const suffixes = myParts.map(p => p.teamSuffix).filter(Boolean);
               const label = esc(l.name)
                 + (l.division ? ` · ${esc(l.division)}` : '')
-                + (suffixes.length ? ` [${suffixes.join('+')}]` : '');
-              return `<span class="badge badge-gray school-league-badge">${label}</span>`;
+                + (suffixes.length && partStats.length === 1 ? ` [${suffixes[0]}]` : '')
+                + gamesLabel;
+
+              return `<span class="badge ${badgeClass} school-league-badge">${label}</span>`;
             }).join('')
           : `<span class="text-muted" style="font-size:.78rem">Not linked to any leagues</span>`;
 
+        const activeTeams = totalTeams - totalWithdrew;
         const teamsSummary = leagues.length > 0
           ? `<span style="font-size:.78rem;color:var(--text-muted);margin-right:.5rem">
-               <strong style="color:var(--text)">${totalTeams}</strong> team${totalTeams !== 1 ? 's' : ''}
+               <strong style="color:var(--text)">${activeTeams}</strong> active team${activeTeams !== 1 ? 's' : ''}
                in <strong style="color:var(--text)">${leagues.length}</strong> league${leagues.length !== 1 ? 's' : ''}
+               ${totalWithdrew > 0 ? `· <span style="color:var(--danger,#ef4444)">${totalWithdrew} withdrew</span>` : ''}
              </span>`
           : '';
 
