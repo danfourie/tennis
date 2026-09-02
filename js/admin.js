@@ -1129,12 +1129,14 @@ function _orgRow(o) {
         const leagues = _schoolLeagues(s.id);
 
         // For each league, note which team(s) — single vs A/B
+        let totalTeams = 0;
         const teamsBadges = leagues.length > 0
           ? leagues.map(l => {
               const myParts = (l.participants && l.participants.length > 0
                 ? l.participants
                 : (l.schoolIds || []).map(id => ({ participantId: id, schoolId: id, teamSuffix: '' }))
               ).filter(p => p.schoolId === s.id);
+              totalTeams += myParts.length;
               const suffixes = myParts.map(p => p.teamSuffix).filter(Boolean);
               const label = esc(l.name)
                 + (l.division ? ` · ${esc(l.division)}` : '')
@@ -1142,6 +1144,13 @@ function _orgRow(o) {
               return `<span class="badge badge-gray school-league-badge">${label}</span>`;
             }).join('')
           : `<span class="text-muted" style="font-size:.78rem">Not linked to any leagues</span>`;
+
+        const teamsSummary = leagues.length > 0
+          ? `<span style="font-size:.78rem;color:var(--text-muted);margin-right:.5rem">
+               <strong style="color:var(--text)">${totalTeams}</strong> team${totalTeams !== 1 ? 's' : ''}
+               in <strong style="color:var(--text)">${leagues.length}</strong> league${leagues.length !== 1 ? 's' : ''}
+             </span>`
+          : '';
 
         return `<div class="admin-list-item">
           <div style="flex:1;min-width:0">
@@ -1161,7 +1170,7 @@ function _orgRow(o) {
                          ${o.email ? `<button class="btn btn-xs btn-info email-invite-btn" data-email="${esc(o.email)}" data-name="${esc(o.name)}" data-school="${esc(s.name)}" title="Send email invitation">✉️ Email</button>` : ''}`}
                   </div>`).join('')
                 : s.contact ? `<div class="text-muted">👤 ${esc(s.contact)}${s.email ? ' · ' + esc(s.email) : ''}${s.phone ? ' · ' + esc(s.phone) : ''}</div>` : '')}
-            <div class="school-teams" style="margin-top:.35rem">${teamsBadges}</div>
+            <div class="school-teams" style="margin-top:.35rem">${teamsSummary}${teamsBadges}</div>
           </div>
           <div class="item-actions">
             <button class="btn btn-xs btn-info"      data-school-view="${s.id}">👁 View</button>
