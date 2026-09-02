@@ -64,6 +64,7 @@ const Admin = (() => {
     // School buttons
     document.getElementById('addSchoolBtn').addEventListener('click', () => openSchoolModal());
     document.getElementById('schoolSubmitBtn').addEventListener('click', saveSchool);
+    document.getElementById('exportSchoolsBtn').addEventListener('click', _exportSchoolsExcel);
 
     // Closure buttons
     document.getElementById('addClosureBtn').addEventListener('click', () => openClosureModal());
@@ -1099,6 +1100,103 @@ function _orgRow(o) {
     if (count > 0) {
       toast(`🔗 ${count} school${count > 1 ? 's' : ''} linked to matching home venue${count > 1 ? 's' : ''}`, 'success');
       render();
+    }
+  }
+
+  // ── Export schools league summary to Excel ──────────────────────────────
+  async function _exportSchoolsExcel() {
+    const btn = document.getElementById('exportSchoolsBtn');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Exporting…'; }
+
+    try {
+      // Lazy-load SheetJS from CDN
+      if (typeof XLSX === 'undefined') {
+        await new Promise((resolve, reject) => {
+          const s = document.createElement('script');
+          s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+          s.onload = resolve; s.onerror = reject;
+          document.head.appendChild(s);
+        });
+      }
+
+      const schools = DB.getSchools();
+      const venues  = DB.getVenues();
+
+      const summaryRows = [];   // one row per school
+      const detailRows  = [];   // one row per school × team × league
+
+      schools.forEach(s => {
+        const venue   = venues.find(v => v.id === s.venueId);
+        const leagues = _schoolLeagues(s.id);
+        let totalTeams = 0, totalWithdrew = 0;
+
+        leagues.forEach(l => {
+          const allParts = l.participants && l.participants.length > 0
+            ? l.participants
+            : (l.schoolIds || []).map(id => ({ participantId: id, schoolId: id, teamSuffix: '' }));
+          const myParts = allParts.filter(p => p.schoolId === s.id);
+          totalTeams += myParts.length;
+          const fixtures = l.fixtures || [];
+
+          myParts.forEach(p => {
+            const played = fixtures.filter(f => {
+              if (f.homeScore == null || f.awayScore == null) return false;
+              if (f.homeParticipantId || f.awayParticipantId)
+                return f.homeParticipantId === p.participantId ||
+                       f.awayParticipantId === p.participantId;
+              return f.homeSchoolId === s.id || f.awaySchoolId === s.id;
+            }).length;
+
+            if (played === 0) totalWithdrew++;
+
+            detailRows.push({
+              'School':       s.name,
+              'Venue':        venue ? venue.name : '',
+              'League':       l.name || '',
+              'Division':     l.division || '',
+              'Team':         p.teamSuffix ? `Team ${p.teamSuffix}` : 'Team',
+              'Games Played': played,
+              'Status':       played === 0 ? 'Withdrew' : 'Active',
+            });
+          });
+        });
+
+        summaryRows.push({
+          'School':        s.name,
+          'Venue':         venue ? venue.name : '',
+          'Leagues':       leagues.length,
+          'Total Teams':   totalTeams,
+          'Active Teams':  totalTeams - totalWithdrew,
+          'Withdrew':      totalWithdrew,
+        });
+      });
+
+      const wb = XLSX.utils.book_new();
+
+      // Sheet 1 — Summary (one row per school)
+      const ws1 = XLSX.utils.json_to_sheet(summaryRows);
+      ws1['!cols'] = [
+        { wch: 32 }, { wch: 26 }, { wch: 9 },
+        { wch: 13 }, { wch: 13 }, { wch: 10 },
+      ];
+      XLSX.utils.book_append_sheet(wb, ws1, 'Summary');
+
+      // Sheet 2 — Details (one row per school × team × league)
+      const ws2 = XLSX.utils.json_to_sheet(detailRows.length ? detailRows : [{}]);
+      ws2['!cols'] = [
+        { wch: 32 }, { wch: 26 }, { wch: 26 },
+        { wch: 16 }, { wch: 10 }, { wch: 13 }, { wch: 10 },
+      ];
+      XLSX.utils.book_append_sheet(wb, ws2, 'League Details');
+
+      const dateStr = new Date().toISOString().slice(0, 10);
+      XLSX.writeFile(wb, `Court Campus - Schools League Summary ${dateStr}.xlsx`);
+      toast('Export downloaded ✓', 'success');
+    } catch (err) {
+      console.error('Export failed:', err);
+      toast('Export failed — ' + (err.message || err), 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = '📥 Export'; }
     }
   }
 
