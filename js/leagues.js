@@ -1,5 +1,5 @@
-// BUILD: 20260322-excluded-dates
-console.log('[leagues.js] BUILD 20260322-excluded-dates loaded');
+// BUILD: 20260908-league-save-fixes
+console.log('[leagues.js] BUILD 20260908-league-save-fixes loaded');
 /**
  * leagues.js — School league management.
  *   Public view  : render()       → #leaguesList        (read-only / score entry)
@@ -1148,7 +1148,32 @@ const Leagues = (() => {
 
     // ── Details-only save (updates settings + participants, no fixture regen) ──
     if (detailsOnly) {
-      if (!id) { toast('Save the league first before using Save Details', 'error'); return; }
+      if (!id) {
+        // New league — create it now with empty participants/fixtures
+        const newLeague = {
+          id: uid(),
+          name, division, startDate, endDate, entryDeadline,
+          homeMatches, neutralVenueId, playingDay, matchTime, scoreTotal,
+          excludedDates: [..._excludedDates],
+          participants: [],
+          schoolIds:    [],
+          standings:    [],
+          fixtures:     [],
+        };
+        DB.addLeague(newLeague)
+          .then(() => {
+            DB.writeAudit('league_created', 'league', `Created league (no fixtures): ${name}`, newLeague.id, name);
+            toast('League created ✓', 'success');
+            Modal.close('leagueModal');
+            render();
+            renderAdmin();
+          })
+          .catch(err => {
+            console.error('[Leagues] addLeague (details) failed:', err);
+            toast('Failed to save league — ' + (err.message || err), 'error');
+          });
+        return;
+      }
       const existing = DB.getLeagues().find(l => l.id === id);
       if (!existing) { toast('League not found', 'error'); return; }
 
@@ -1202,8 +1227,6 @@ const Leagues = (() => {
     }
 
     // ── Full save with fixture generation ────────────────────────
-    if (!startDate) { toast('Start date is required to generate fixtures', 'error'); return; }
-
     const box = document.getElementById('leagueSchoolsCheckboxes');
     if (!box) { toast('Could not find school list — please close and reopen the modal', 'error'); return; }
     const participants = [];
@@ -1219,7 +1242,44 @@ const Leagues = (() => {
       }
     });
 
-    if (participants.length < 2) { toast('At least 2 teams required to generate fixtures', 'error'); return; }
+    // Fewer than 2 teams — save the league without generating fixtures
+    if (participants.length < 2) {
+      if (!startDate) { toast('Start date is required', 'error'); return; }
+      const schoolIds = [...new Set(participants.map(p => p.schoolId))];
+      const league = {
+        id: id || uid(),
+        name, division, startDate, endDate, entryDeadline,
+        excludedDates,
+        schoolIds,
+        participants,
+        homeMatches, neutralVenueId, playingDay, matchTime, scoreTotal,
+        fixtures:  [],
+        standings: generateStandings(participants),
+      };
+      const isNew = !id;
+      const save  = isNew ? DB.addLeague(league) : DB.updateLeague(league);
+      save
+        .then(() => {
+          DB.writeAudit(
+            isNew ? 'league_created' : 'league_updated',
+            'league',
+            `${isNew ? 'Created' : 'Updated'} league (no fixtures): ${name}`,
+            league.id, name,
+          );
+          if (!isNew) _autoApproveEntriesForParticipants(league);
+          toast(`League ${isNew ? 'created' : 'updated'} ✓`, 'success');
+          Modal.close('leagueModal');
+          render();
+          renderAdmin();
+        })
+        .catch(err => {
+          console.error('[Leagues] save (no fixtures) failed:', err);
+          toast('Failed to save league — ' + (err.message || err), 'error');
+        });
+      return;
+    }
+
+    if (!startDate) { toast('Start date is required to generate fixtures', 'error'); return; }
 
     const schoolIds = [...new Set(participants.map(p => p.schoolId))];
 
