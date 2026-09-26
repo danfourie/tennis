@@ -257,6 +257,10 @@ const Calendar = (() => {
             </label>
             <input type="password" id="gklPassword" placeholder="Your account password" autocomplete="new-password">
           </div>
+          <div class="form-group">
+            <label>Contact Number <span class="text-muted" style="font-weight:400">(optional)</span></label>
+            <input type="tel" id="gklPhone" placeholder="e.g. 082 000 0000" autocomplete="tel">
+          </div>
           <hr style="margin:.5rem 0 .9rem;border:none;border-top:1px solid var(--border)">
           <div class="form-group">
             <label>Date <span style="color:var(--danger,#dc2626)">*</span></label>
@@ -269,12 +273,14 @@ const Calendar = (() => {
           </div>` : `<input type="hidden" id="gklCourt" value="0">`}
           <div class="form-group">
             <label>Slot</label>
-            <div style="display:flex;gap:.5rem">
-              <button type="button" class="btn btn-primary gkl-slot-btn" data-slot="morning" style="flex:1;line-height:1.3">
-                Morning<br><small style="opacity:.8">07:00 – 14:00</small>
+            <div style="display:flex;gap:.5rem;width:100%">
+              <button type="button" class="gkl-slot-btn" data-slot="morning"
+                style="flex:1;padding:.55rem .4rem;line-height:1.35;border-radius:6px;cursor:pointer;font-size:.85rem;font-weight:600;border:2px solid #2563eb;background:#2563eb;color:#fff">
+                Morning<br><small style="font-weight:400;opacity:.85">07:00 – 14:00</small>
               </button>
-              <button type="button" class="btn btn-outline gkl-slot-btn" data-slot="afternoon" style="flex:1;line-height:1.3">
-                Afternoon<br><small style="opacity:.8">14:00 – 18:00</small>
+              <button type="button" class="gkl-slot-btn" data-slot="afternoon"
+                style="flex:1;padding:.55rem .4rem;line-height:1.35;border-radius:6px;cursor:pointer;font-size:.85rem;font-weight:600;border:2px solid #2563eb;background:#fff;color:#2563eb">
+                Afternoon<br><small style="font-weight:400;opacity:.85">14:00 – 18:00</small>
               </button>
             </div>
           </div>
@@ -359,20 +365,22 @@ const Calendar = (() => {
     document.getElementById('guestGroenkloofBtn').onclick = () => _showForm('guestGroenkloofForm', 'guestContactForm');
     document.getElementById('gklCancelBtn').onclick       = () => document.getElementById('guestGroenkloofForm').classList.add('hidden');
 
+    function _updateGklSlotUI() {
+      container.querySelectorAll('.gkl-slot-btn').forEach(x => {
+        const active = x.dataset.slot === _gklSlot;
+        x.style.background = active ? '#2563eb' : '#fff';
+        x.style.color      = active ? '#fff'    : '#2563eb';
+      });
+    }
     container.querySelectorAll('.gkl-slot-btn').forEach(b => {
-      b.onclick = () => {
-        _gklSlot = b.dataset.slot;
-        container.querySelectorAll('.gkl-slot-btn').forEach(x => {
-          x.classList.toggle('btn-primary', x.dataset.slot === _gklSlot);
-          x.classList.toggle('btn-outline',  x.dataset.slot !== _gklSlot);
-        });
-      };
+      b.onclick = () => { _gklSlot = b.dataset.slot; _updateGklSlotUI(); };
     });
 
     document.getElementById('gklSubmitBtn').onclick = async () => {
       const name        = (document.getElementById('gklName').value     || '').trim();
       const email       = (document.getElementById('gklEmail').value    || '').trim();
       const password    = (document.getElementById('gklPassword').value || '');
+      const phone       = (document.getElementById('gklPhone').value    || '').trim();
       const date        = document.getElementById('gklDate').value;
       const courtIndex  = parseInt(document.getElementById('gklCourt').value, 10) || 0;
       const bookingType = document.getElementById('gklType').value;
@@ -398,7 +406,7 @@ const Calendar = (() => {
           uid = cred.user.uid; userName = name;
           await cred.user.updateProfile({ displayName: name });
           await firebase.firestore().collection('users').doc(uid).set(
-            { displayName: name, email, role: 'user', createdAt: new Date().toISOString() },
+            { displayName: name, email, role: 'user', createdAt: new Date().toISOString(), ...(phone ? { phone } : {}) },
             { merge: true }
           );
         } catch (authErr) {
@@ -426,6 +434,7 @@ const Calendar = (() => {
           reason,
           label:           reason,
           bookerName:      userName,
+          onBehalfContact: phone || null,
           status:          'pending',
           requestedBy:     uid,
           requestedByName: userName,
