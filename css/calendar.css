@@ -226,6 +226,18 @@
   box-shadow: var(--shadow);
 }
 
+.guest-contact-form {
+  margin-top: 1.5rem;
+  text-align: left;
+  max-width: 420px;
+  margin-left: auto;
+  margin-right: auto;
+  background: var(--bg, #f9fafb);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 1.25rem;
+}
+
 /* ===== COURT BOOKING VIEW ===== */
 .cb-layout {
   display: grid;

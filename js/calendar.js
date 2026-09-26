@@ -191,7 +191,26 @@ const Calendar = (() => {
         <div style="display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap">
           <button class="btn btn-primary" id="guestLoginBtn">Login</button>
           <button class="btn btn-outline" id="guestRegisterBtn">Register</button>
-          <a href="mailto:courtcampuspta@gmail.com" class="btn btn-secondary">Contact Admin</a>
+          <button class="btn btn-secondary" id="guestContactBtn">Contact Admin</button>
+        </div>
+        <div id="guestContactForm" class="guest-contact-form hidden">
+          <div class="form-group">
+            <label>Your name <span style="color:var(--danger,#dc2626)">*</span></label>
+            <input type="text" id="guestContactName" placeholder="Full name" autocomplete="name">
+          </div>
+          <div class="form-group">
+            <label>Email address <span class="text-muted" style="font-weight:400">(optional)</span></label>
+            <input type="email" id="guestContactEmail" placeholder="so we can reply to you" autocomplete="email">
+          </div>
+          <div class="form-group">
+            <label>Message <span style="color:var(--danger,#dc2626)">*</span></label>
+            <textarea id="guestContactMessage" rows="4" placeholder="How can we help?"></textarea>
+          </div>
+          <p id="guestContactError" class="form-error" style="display:none"></p>
+          <div style="display:flex;gap:.75rem;justify-content:flex-end;margin-top:.5rem">
+            <button class="btn btn-outline btn-sm" id="guestContactCancelBtn">Cancel</button>
+            <button class="btn btn-primary" id="guestContactSubmitBtn">Send Message</button>
+          </div>
         </div>
       </div>`;
     document.getElementById('guestLoginBtn').onclick = () => {
@@ -204,6 +223,37 @@ const Calendar = (() => {
       if (sel) sel.innerHTML = '<option value="">-- No school --</option>' +
         DB.getSchools().map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
       Modal.open('registerModal');
+    };
+    document.getElementById('guestContactBtn').onclick = () => {
+      const form = document.getElementById('guestContactForm');
+      form.classList.toggle('hidden');
+      if (!form.classList.contains('hidden')) document.getElementById('guestContactName').focus();
+    };
+    document.getElementById('guestContactCancelBtn').onclick = () => {
+      document.getElementById('guestContactForm').classList.add('hidden');
+    };
+    document.getElementById('guestContactSubmitBtn').onclick = async () => {
+      const name    = (document.getElementById('guestContactName').value    || '').trim();
+      const email   = (document.getElementById('guestContactEmail').value   || '').trim();
+      const message = (document.getElementById('guestContactMessage').value || '').trim();
+      const errEl   = document.getElementById('guestContactError');
+      const btn     = document.getElementById('guestContactSubmitBtn');
+      errEl.style.display = 'none';
+      if (!name)    { errEl.textContent = 'Please enter your name';    errEl.style.display = 'block'; return; }
+      if (!message) { errEl.textContent = 'Please enter a message';    errEl.style.display = 'block'; return; }
+      btn.disabled = true; btn.textContent = 'Sending…';
+      try {
+        const fn = firebase.functions().httpsCallable('contactAdmin');
+        await fn({ name, email, message });
+        document.getElementById('guestContactForm').innerHTML = `
+          <p style="text-align:center;color:var(--success,#16a34a);font-weight:600;padding:.75rem 0">
+            ✓ Message sent — an admin will be in touch.
+          </p>`;
+      } catch (err) {
+        errEl.textContent = 'Could not send message. Please try again later.';
+        errEl.style.display = 'block';
+        btn.disabled = false; btn.textContent = 'Send Message';
+      }
     };
   }
 
@@ -511,6 +561,7 @@ const Calendar = (() => {
             <select id="newBookingType">
               <option value="booking">General Booking</option>
               <option value="practice">Practice</option>
+              <option value="coaching">Coaching</option>
               <option value="league">League Match</option>
               <option value="tournament">Tournament</option>
             </select>

@@ -1947,3 +1947,67 @@ exports.cleanExpiredClosures = onSchedule(
     console.log(`[cleanExpiredClosures] Deleted ${snap.size} expired closures`);
   }
 );
+
+// ── 10. Public: Contact Admin form (callable by unauthenticated guests) ────────
+// Writes an in-app notification for every admin/master user and sends them an email.
+exports.contactAdmin = onCall(
+  { invoker: 'public', secrets: [EMAIL_USER, EMAIL_PASS] },
+  async (request) => {
+    const { name, email, message } = request.data || {};
+    if (!name    || typeof name    !== 'string' || !name.trim())    throw new HttpsError('invalid-argument', 'name is required');
+    if (!message || typeof message !== 'string' || !message.trim()) throw new HttpsError('invalid-argument', 'message is required');
+
+    const safeName    = name.trim();
+    const safeEmail   = (email || '').trim();
+    const safeMessage = message.trim();
+
+    const db   = admin.firestore();
+    const snap = await db.collection('users').where('role', 'in', ['admin', 'master']).get();
+    if (snap.empty) return { ok: true };
+
+    const now         = admin.firestore.FieldValue.serverTimestamp();
+    const batch       = db.batch();
+    const adminEmails = [];
+
+    snap.docs.forEach(doc => {
+      const u = doc.data();
+      const notifRef = db.collection('notifications').doc();
+      batch.set(notifRef, {
+        uid:       doc.id,
+        type:      'contact_request',
+        title:     `Guest message from ${safeName}`,
+        body:      safeMessage,
+        fromName:  safeName,
+        fromEmail: safeEmail,
+        read:      false,
+        createdAt: now,
+      });
+      if (u.email) adminEmails.push(u.email);
+    });
+    await batch.commit();
+    console.log(`[contactAdmin] Notified ${snap.size} admin(s) of guest message from ${safeName}`);
+
+    if (adminEmails.length > 0) {
+      const emailUser = EMAIL_USER.value();
+      const emailPass = EMAIL_PASS.value();
+      if (emailUser && emailPass) {
+        const transporter = nodemailer.createTransport({ service: 'gmail', auth: { user: emailUser, pass: emailPass } });
+        const subject = `[Court Campus] Guest contact from ${safeName}`;
+        const text = [
+          `A visitor to courtcampus.co.za has sent a contact request.`,
+          ``,
+          `From:    ${safeName}${safeEmail ? ` <${safeEmail}>` : ''}`,
+          ``,
+          `Message:`,
+          safeMessage,
+          ``,
+          `Log in to view your in-app notifications: ${APP_URL}`,
+        ].join('\n');
+        try {
+          await transporter.sendMail({ from: `"Court Campus" <${emailUser}>`, to: adminEmails.join(', '), subject, text });
+        } catch (e) { console.error('[contactAdmin] sendMail failed:', e.message); }
+      }
+    }
+    return { ok: true };
+  }
+);

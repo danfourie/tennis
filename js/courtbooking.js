@@ -168,8 +168,19 @@ const CourtBooking = (() => {
           </div>
 
           <div class="form-group">
-            <label>Reason for Booking <span style="color:var(--danger)">*</span></label>
-            <input type="text" id="cbReason" placeholder="e.g. Practice session, friendly match…">
+            <label>Booking Type <span style="color:var(--danger)">*</span></label>
+            <select id="cbType">
+              <option value="">-- Select type --</option>
+              <option value="Practice">Practice</option>
+              <option value="Match">Match</option>
+              <option value="Coaching">Coaching</option>
+              <option value="Tournament">Tournament</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Additional Details <span class="text-muted" style="font-weight:400">(optional)</span></label>
+            <input type="text" id="cbReason" placeholder="Any extra info about this booking…">
           </div>
 
           <div style="border:1px solid var(--border);border-radius:var(--radius);padding:.75rem;margin-bottom:.75rem">
@@ -277,13 +288,15 @@ const CourtBooking = (() => {
     const btn    = document.getElementById('cbSubmitBtn');
     const errEl  = document.getElementById('cbError');
     const booker = document.getElementById('cbBooker').value.trim();
-    const reason = document.getElementById('cbReason').value.trim();
+    const bookingType     = document.getElementById('cbType').value;
+    const details         = document.getElementById('cbReason').value.trim();
     const onBehalfName    = document.getElementById('cbOnBehalfName').value.trim();
     const onBehalfContact = document.getElementById('cbOnBehalfContact').value.trim();
     const notes  = document.getElementById('cbNotes').value.trim();
+    const reason = bookingType + (details ? ': ' + details : '');
 
     errEl.textContent = '';
-    if (!reason) { errEl.textContent = 'Reason for booking is required.'; return; }
+    if (!bookingType) { errEl.textContent = 'Please select a booking type.'; return; }
     if (!_slotAvailable(_selectedVenueId, _selectedCourt, _selectedDate, _selectedSlot)) {
       errEl.textContent = 'This slot is no longer available. Please choose a different slot.';
       return;
@@ -303,7 +316,7 @@ const CourtBooking = (() => {
         courtIndex:      _selectedCourt,
         date:            _selectedDate,
         timeSlot:        _selectedSlot,
-        type:            'booking',
+        type:            bookingType.toLowerCase() || 'booking',
         reason,
         label:           reason,
         bookerName:      booker || (profile ? (profile.displayName || profile.email) : ''),
@@ -341,6 +354,7 @@ const CourtBooking = (() => {
 
       // Reset form after success
       _selectedSlot = 'morning';
+      document.getElementById('cbType').value  = '';
       document.getElementById('cbReason').value = '';
       document.getElementById('cbOnBehalfName').value = '';
       document.getElementById('cbOnBehalfContact').value = '';
