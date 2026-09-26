@@ -1787,3 +1787,163 @@ body{margin:0;padding:0;background:#f1f5f9;font-family:Arial,sans-serif}
     return { ok: true };
   }
 );
+
+// ── 8. Booking notification emails ────────────────────────────────────────────
+// Notifies venue organizers when a new pending booking arrives,
+// and notifies the requester when their booking is approved or rejected.
+
+/**
+ * Called from CourtBooking.js after a pending request is submitted.
+ * Looks up venue organizers and emails them about the new request.
+ */
+exports.notifyBookingRequest = onCall(
+  { secrets: [EMAIL_USER, EMAIL_PASS] },
+  async (request) => {
+    if (!request.auth) return { ok: false };
+    const { bookingId } = request.data || {};
+    if (!bookingId) return { ok: false };
+
+    const db     = admin.firestore();
+    const bSnap  = await db.collection('bookings').doc(bookingId).get();
+    if (!bSnap.exists) return { ok: false };
+    const booking = bSnap.data();
+
+    // Find venue
+    const vSnap  = await db.collection('venues').doc(booking.venueId || '').get();
+    const vName  = vSnap.exists ? vSnap.data().name : 'Unknown venue';
+
+    // Find organizer emails: users whose school's venueId matches
+    const schoolsSnap = await db.collection('schools').where('venueId', '==', booking.venueId).get();
+    const orgEmails   = [];
+    for (const sDoc of schoolsSnap.docs) {
+      const usersSnap = await db.collection('users').where('schoolId', '==', sDoc.id).get();
+      for (const uDoc of usersSnap.docs) {
+        const role = uDoc.data().role;
+        if (['master', 'admin', 'organizer'].includes(role) && uDoc.data().email) {
+          orgEmails.push(uDoc.data().email);
+        }
+      }
+    }
+    // Also include all admins/masters
+    const adminsSnap = await db.collection('users').where('role', 'in', ['master', 'admin']).get();
+    adminsSnap.docs.forEach(d => { if (d.data().email) orgEmails.push(d.data().email); });
+
+    const recipients = [...new Set(orgEmails)];
+    if (recipients.length === 0) return { ok: true, sent: 0 };
+
+    const emailUser = EMAIL_USER.value();
+    const emailPass = EMAIL_PASS.value();
+    if (!emailUser || !emailPass) return { ok: false };
+
+    const transporter = nodemailer.createTransport({ service: 'gmail', auth: { user: emailUser, pass: emailPass } });
+
+    const slot      = booking.timeSlot === 'morning' ? 'Morning (07:00–14:00)' : booking.timeSlot === 'afternoon' ? 'Afternoon (14:00–18:00)' : (booking.timeSlot || '');
+    const subject   = `New Court Booking Request — ${vName}`;
+    const text      = [
+      `A new court booking request has been submitted.`,
+      ``,
+      `Venue: ${vName}`,
+      `Date:  ${booking.date}`,
+      `Court: Court ${(booking.courtIndex || 0) + 1}`,
+      `Slot:  ${slot}`,
+      `Reason: ${booking.reason || booking.label || '—'}`,
+      `Booker: ${booking.bookerName || booking.requestedByName || '—'}`,
+      booking.onBehalfName ? `On behalf of: ${booking.onBehalfName} (${booking.onBehalfContact || 'no contact'})` : '',
+      ``,
+      `Log in to Court Campus to approve or decline: ${APP_URL}`,
+    ].filter(Boolean).join('\n');
+
+    let sent = 0;
+    for (const email of recipients) {
+      try { await transporter.sendMail({ from: `"Court Campus" <${emailUser}>`, to: email, subject, text }); sent++; }
+      catch (e) { console.error('[notifyBookingRequest] sendMail failed:', e.message); }
+    }
+    return { ok: true, sent };
+  }
+);
+
+/**
+ * Called when an admin/organizer approves or rejects a booking.
+ * Emails the original requester.
+ */
+exports.notifyBookingStatus = onCall(
+  { secrets: [EMAIL_USER, EMAIL_PASS] },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Login required');
+    const { bookingId, action } = request.data || {};
+    if (!bookingId || !['approved', 'rejected'].includes(action)) throw new HttpsError('invalid-argument', 'bookingId and action required');
+
+    const callerSnap = await admin.firestore().doc(`users/${request.auth.uid}`).get();
+    const caller     = callerSnap.exists ? callerSnap.data() : null;
+    if (!caller || !['master', 'admin'].includes(caller.role)) throw new HttpsError('permission-denied', 'Admins only');
+
+    const db    = admin.firestore();
+    const bSnap = await db.collection('bookings').doc(bookingId).get();
+    if (!bSnap.exists) throw new HttpsError('not-found', 'Booking not found');
+    const booking = bSnap.data();
+
+    // Get requester email from users collection
+    if (!booking.requestedBy) return { ok: true, sent: 0 };
+    const uSnap = await db.collection('users').doc(booking.requestedBy).get();
+    const reqEmail = uSnap.exists ? uSnap.data().email : null;
+    if (!reqEmail) return { ok: true, sent: 0 };
+
+    const vSnap = await db.collection('venues').doc(booking.venueId || '').get();
+    const vName = vSnap.exists ? vSnap.data().name : 'Unknown venue';
+    const slot  = booking.timeSlot === 'morning' ? 'Morning (07:00–14:00)' : booking.timeSlot === 'afternoon' ? 'Afternoon (14:00–18:00)' : (booking.timeSlot || '');
+
+    const emailUser = EMAIL_USER.value();
+    const emailPass = EMAIL_PASS.value();
+    const transporter = nodemailer.createTransport({ service: 'gmail', auth: { user: emailUser, pass: emailPass } });
+
+    const subject = action === 'approved'
+      ? `Court Booking Approved — ${vName} ${booking.date}`
+      : `Court Booking Declined — ${vName} ${booking.date}`;
+    const text = action === 'approved'
+      ? [
+          `Your court booking request has been approved! ✓`,
+          ``,
+          `Venue: ${vName}`,
+          `Date:  ${booking.date}`,
+          `Court: Court ${(booking.courtIndex || 0) + 1}`,
+          `Slot:  ${slot}`,
+          `Reason: ${booking.reason || booking.label || '—'}`,
+          ``,
+          `View your booking at: ${APP_URL}`,
+        ].join('\n')
+      : [
+          `Unfortunately, your court booking request has been declined.`,
+          ``,
+          `Venue: ${vName}`,
+          `Date:  ${booking.date}`,
+          `Court: Court ${(booking.courtIndex || 0) + 1}`,
+          `Slot:  ${slot}`,
+          `Reason: ${booking.reason || booking.label || '—'}`,
+          ``,
+          `Please contact your venue organizer for more information, or submit a new request at: ${APP_URL}`,
+        ].join('\n');
+
+    try {
+      await transporter.sendMail({ from: `"Court Campus" <${emailUser}>`, to: reqEmail, subject, text });
+    } catch (e) { console.error('[notifyBookingStatus] sendMail failed:', e.message); }
+    return { ok: true };
+  }
+);
+
+// ── 9. Scheduled: clean up expired court closures ─────────────────────────────
+// Removes closures whose endDate is more than 7 days in the past.
+exports.cleanExpiredClosures = onSchedule(
+  { schedule: '0 3 * * *', timeZone: 'Africa/Johannesburg' },
+  async () => {
+    const db      = admin.firestore();
+    const cutoff  = new Date();
+    cutoff.setDate(cutoff.getDate() - 7);
+    const cutStr  = cutoff.toISOString().slice(0, 10);
+    const snap    = await db.collection('closures').where('endDate', '<', cutStr).get();
+    if (snap.empty) { console.log('[cleanExpiredClosures] Nothing to delete'); return; }
+    const batch = db.batch();
+    snap.docs.forEach(d => batch.delete(d.ref));
+    await batch.commit();
+    console.log(`[cleanExpiredClosures] Deleted ${snap.size} expired closures`);
+  }
+);

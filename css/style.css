@@ -1343,3 +1343,23 @@ body {
   color: #9ca3af;
   font-weight: 400;
 }
+
+/* ===== DATA TABLE (booking log, etc.) ===== */
+.data-table {
+  border-collapse: collapse;
+  font-size: .82rem;
+}
+.data-table th, .data-table td {
+  padding: .4rem .65rem;
+  border: 1px solid var(--border);
+  text-align: left;
+  white-space: nowrap;
+}
+.data-table th {
+  background: var(--neutral-light);
+  font-weight: 600;
+  font-size: .75rem;
+  text-transform: uppercase;
+  letter-spacing: .3px;
+}
+.data-table tr:hover td { background: #fafafa; }

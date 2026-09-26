@@ -209,6 +209,87 @@
 .timeslot-btn.selected { background: var(--primary); color: white; border-color: var(--primary); }
 .timeslot-btn:disabled { opacity: .4; cursor: not-allowed; background: var(--neutral-light); }
 
+/* Pending chip */
+.slot-chip.pending-request {
+  background: #fff7ed;
+  border: 1.5px dashed #f97316;
+  color: #9a3412;
+}
+
+/* ===== GUEST SCREEN ===== */
+.guest-screen {
+  padding: 3rem 2rem;
+  text-align: center;
+  background: white;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+}
+
+/* ===== COURT BOOKING VIEW ===== */
+.cb-layout {
+  display: grid;
+  grid-template-columns: 380px 1fr;
+  gap: 1.5rem;
+  align-items: start;
+  padding: 1rem 0;
+}
+@media (max-width: 900px) {
+  .cb-layout { grid-template-columns: 1fr; }
+}
+
+.cb-form-panel {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 1.25rem;
+  box-shadow: var(--shadow);
+}
+
+.cb-avail-panel {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 1.25rem;
+  box-shadow: var(--shadow);
+}
+
+.cb-avail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: .5rem;
+}
+
+.cb-avail-cell {
+  border-radius: var(--radius);
+  border: 1.5px solid var(--border);
+  padding: .5rem .6rem;
+  font-size: .8rem;
+  display: flex;
+  flex-direction: column;
+  gap: .15rem;
+  cursor: default;
+  text-align: left;
+  background: #f3f4f6;
+}
+.cb-avail-cell.available {
+  background: var(--primary-light);
+  border-color: var(--primary);
+  cursor: pointer;
+  transition: filter .1s;
+}
+.cb-avail-cell.available:hover { filter: brightness(.93); }
+.cb-avail-cell.available.selected { background: var(--primary); color: white; }
+.cb-avail-cell.available.selected .cb-slot-info { color: rgba(255,255,255,.8) !important; }
+.cb-avail-cell.booked { background: #fef3c7; border-color: #fcd34d; }
+.cb-avail-cell.pending-request { background: #fff7ed; border: 1.5px dashed #f97316; }
+.cb-avail-cell.closed { background: #f3f4f6; }
+.cb-court-lbl { font-weight: 700; font-size: .75rem; }
+.cb-slot-name { font-size: .78rem; font-weight: 600; }
+.cb-slot-info { font-size: .72rem; }
+
+.text-danger { color: var(--danger, #dc2626); }
+
 @media (max-width: 640px) {
   /* Contain the 700px-wide grid within the scroll container.
      The existing overflow:auto on .calendar-container handles internal scroll. */

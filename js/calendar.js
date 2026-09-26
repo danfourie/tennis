@@ -1,18 +1,13 @@
 /**
- * calendar.js — Weekly court availability calendar
+ * calendar.js — Weekly court availability calendar (view only for non-organizers)
  *
  * Role-aware behaviour:
- *   Master / Admin      → direct booking (confirmed) at any venue
- *   Venue Organiser     → direct booking at their own venue; can also
- *                         approve/reject pending requests there
- *   Logged-in user      → request booking at any venue (pending approval)
- *                         owner can cancel their own pending request
- *   Visitor             → view-only
+ *   Visitor             → guest screen (login/register prompt)
+ *   Logged-in user      → read-only view; books via Court Booking view
+ *   Venue Organiser     → direct booking at their own venue; approve/reject
+ *   Master / Admin      → same as organiser at any venue
  *
- * League blocking:
- *   Fixtures stored in leagues collection automatically block their court
- *   for 3 hours from the fixture matchTime.  These slots appear as league
- *   chips and cannot be booked/requested.
+ * Slots: morning (07:00–14:00) and afternoon (14:00–18:00).
  */
 
 const Calendar = (() => {
@@ -40,6 +35,14 @@ const Calendar = (() => {
   /** True when the user may book directly / approve-reject at this venue. */
   function _canManageVenue(venueId) {
     return Auth.isAdmin() || _isVenueOrganizer(venueId);
+  }
+
+  /** True when any logged-in user may request a booking at this venue (Groenkloof / open venues). */
+  function _isOpenVenue(venueId) {
+    const v = DB.getVenues().find(v => v.id === venueId);
+    if (!v) return false;
+    if (v.openBookings) return true; // explicit flag
+    return (v.name || '').toLowerCase().includes('groenkloof');
   }
 
   /**
@@ -95,23 +98,28 @@ const Calendar = (() => {
   // Cache rebuilt once per render() call
   let _fixtureCourtMap = new Map();
 
-  function _getLeagueFixtureForSlot(venueId, courtIndex, dateStr, timeStr) {
-    const slotMins = _timeToMins(timeStr);
+  function _getLeagueFixtureForSlot(venueId, courtIndex, dateStr, slot) {
+    // Map slot to time range in minutes
+    const slotStartMins = slot === 'morning' ? 7 * 60 : slot === 'afternoon' ? 14 * 60 : _timeToMins(slot);
+    const slotEndMins   = slot === 'morning' ? 14 * 60 : slot === 'afternoon' ? 18 * 60 : slotStartMins + 60;
 
     for (const league of DB.getLeagues()) {
       for (const f of (league.fixtures || [])) {
         if (!f.venueId || f.venueId !== venueId) continue;
         if (f.date !== dateStr) continue;
 
-        // Use dynamically-computed values (correct for old + new fixtures)
-        const cached      = _fixtureCourtMap.get(f.id);
+        const cached       = _fixtureCourtMap.get(f.id);
         const courtsBooked = cached ? cached.courtsBooked : (f.courtsBooked || 3);
         const baseCourt    = cached ? cached.courtIndex   : (f.courtIndex != null ? parseInt(f.courtIndex) : 0);
         const matchMins    = courtsBooked >= 3 ? 180 : 240;
 
         if (courtIndex < baseCourt || courtIndex >= baseCourt + courtsBooked) continue;
+
         const fixtureMins = _timeToMins(f.timeSlot || '14:00');
-        if (slotMins >= fixtureMins && slotMins < fixtureMins + matchMins) {
+        const fixtureEnd  = fixtureMins + matchMins;
+
+        // Overlap: fixture starts before slot ends AND fixture ends after slot starts
+        if (fixtureMins < slotEndMins && fixtureEnd > slotStartMins) {
           return { fixture: f, league };
         }
       }
@@ -137,6 +145,14 @@ const Calendar = (() => {
       currentVenueFilter = e.target.value;
       render();
     });
+    const datePicker = document.getElementById('calDatePicker');
+    if (datePicker) {
+      datePicker.addEventListener('change', e => {
+        if (!e.target.value) return;
+        currentWeekStart = weekStart(new Date(e.target.value + 'T00:00:00'));
+        render();
+      });
+    }
     populateVenueFilter();
     render();
   }
@@ -162,8 +178,39 @@ const Calendar = (() => {
     render();
   }
 
+  // ── Guest screen ─────────────────────────────────────────────
+  function _renderGuestScreen() {
+    const container = document.getElementById('calendarContainer');
+    container.innerHTML = `
+      <div class="guest-screen">
+        <div style="font-size:3rem;margin-bottom:.75rem">🎾</div>
+        <h3 style="margin:0 0 .5rem;color:var(--primary-dark)">Court Campus</h3>
+        <p class="text-muted" style="margin:0 0 1.5rem;max-width:380px">
+          Log in to view court availability and league fixtures.
+        </p>
+        <div style="display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap">
+          <button class="btn btn-primary" id="guestLoginBtn">Login</button>
+          <button class="btn btn-outline" id="guestRegisterBtn">Register</button>
+          <a href="mailto:courtcampuspta@gmail.com" class="btn btn-secondary">Contact Admin</a>
+        </div>
+      </div>`;
+    document.getElementById('guestLoginBtn').onclick = () => {
+      ['loginEmail','loginPassword'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+      document.getElementById('loginError').textContent = '';
+      Modal.open('loginModal');
+    };
+    document.getElementById('guestRegisterBtn').onclick = () => {
+      const sel = document.getElementById('regSchool');
+      if (sel) sel.innerHTML = '<option value="">-- No school --</option>' +
+        DB.getSchools().map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+      Modal.open('registerModal');
+    };
+  }
+
   // ── Main render ─────────────────────────────────────────────
   function render() {
+    if (!Auth.isLoggedIn()) { _renderGuestScreen(); return; }
+
     // Rebuild fixture→court mapping so allocations always reflect actual
     // sharing at each venue+date (fixes stale stored courtIndex values too).
     _fixtureCourtMap = _buildFixtureCourtMap();
@@ -185,8 +232,7 @@ const Calendar = (() => {
       return;
     }
 
-    const slots    = getTimeSlots();
-    const settings = DB.getSettings();
+    const slots = getTimeSlots(); // ['morning', 'afternoon']
 
     let html = `<div class="calendar-grid">`;
 
@@ -222,7 +268,7 @@ const Calendar = (() => {
             html += `<span class="slot-chip closed" title="Court unavailable">Closed</span>`;
           } else {
             slots.forEach(slot => {
-              html += _renderSlot(venue, ci, dStr, slot, courtClosed, settings.slotDuration);
+              html += _renderSlot(venue, ci, dStr, slot, courtClosed);
             });
           }
           html += `</div>`;
@@ -264,47 +310,44 @@ const Calendar = (() => {
     });
   }
 
-  function _renderSlot(venue, ci, dStr, slot, courtFullyClosed, durationMins) {
+  function _renderSlot(venue, ci, dStr, slot, courtFullyClosed) {
     if (courtFullyClosed && !_hasTimeSpecificClosure(venue.id, ci, dStr)) return '';
+
+    const slotName  = getSlotDisplayName(slot); // 'Morning' or 'Afternoon'
+    const slotLabel = getSlotLabel(slot);        // '07:00 – 14:00'
 
     const slotClosed = isCourtClosed(venue.id, ci, dStr, slot);
     if (slotClosed) {
-      return `<span class="slot-chip closed" title="Closed">${slot}</span>`;
+      return `<span class="slot-chip closed" title="Closed — ${slotLabel}">${slotName}</span>`;
     }
 
-    // ── Existing booking (from bookings collection) ──────────
+    // ── Existing booking ──────────────────────────────────────
     const booking = getSlotBooking(venue.id, ci, dStr, slot);
     if (booking) {
       const isPending = booking.status === 'pending';
       const type      = booking.type || 'booking';
-      const cls       = isPending        ? 'pending-request'
-        : type === 'league'     ? 'league'
-        : type === 'tournament' ? 'tournament'
-        : 'booked';
-      const rawLabel  = booking.label || booking.schoolName || (isPending ? 'Pending' : 'Booked');
-      const label     = esc(rawLabel);
+      const cls       = isPending ? 'pending-request' : type === 'league' ? 'league' : type === 'tournament' ? 'tournament' : 'booked';
+      const rawLabel  = booking.reason || booking.label || booking.schoolName || (isPending ? 'Pending' : 'Booked');
       const badge     = isPending ? ' ⏳' : '';
-      return `<button class="slot-chip ${cls}" data-slot="1" data-venue="${venue.id}" data-court="${ci}" data-date="${dStr}" data-slot-time="${slot}" title="${label}${badge} @ ${slot}">${label}${badge}<span class="slot-time">${slot}</span></button>`;
+      return `<button class="slot-chip ${cls}" data-slot="1" data-venue="${venue.id}" data-court="${ci}" data-date="${dStr}" data-slot-time="${slot}" title="${esc(rawLabel)}${badge} — ${slotName}">${esc(rawLabel.substring(0,22))}${badge}<span class="slot-time">${slotName}</span></button>`;
     }
 
-    // ── League fixture blocking (3-hour window, 3 courts) ────
+    // ── League fixture ────────────────────────────────────────
     const leagueSlot = _getLeagueFixtureForSlot(venue.id, ci, dStr, slot);
     if (leagueSlot) {
       const { fixture: f, league } = leagueSlot;
       const tooltip = `${f.homeSchoolName} vs ${f.awaySchoolName} @ ${f.timeSlot || '14:00'} — ${league.name}`;
-      // Show only the time (same width/height as any other chip) — details in tooltip
-      return `<span class="slot-chip league" title="${esc(tooltip)}">${slot}</span>`;
+      return `<span class="slot-chip league" title="${esc(tooltip)}">${slotName}<span class="slot-time">${f.timeSlot || '14:00'}</span></span>`;
     }
 
-    // ── Available ────────────────────────────────────────────
-    const canBookDirect = _canManageVenue(venue.id);
-    if (canBookDirect) {
-      return `<button class="slot-chip available admin-can-book" data-slot="1" data-venue="${venue.id}" data-court="${ci}" data-date="${dStr}" data-slot-time="${slot}" title="Book this slot">${slot}</button>`;
+    // ── Available ─────────────────────────────────────────────
+    const isOrganizer = _isVenueOrganizer(venue.id);
+    if (Auth.isAdmin() || isOrganizer) {
+      // Organizers/admins: click to book directly from calendar
+      return `<button class="slot-chip available admin-can-book" data-slot="1" data-venue="${venue.id}" data-court="${ci}" data-date="${dStr}" data-slot-time="${slot}" title="Book ${slotName}">${slotName}<span class="slot-time">${slotLabel}</span></button>`;
     }
-    if (Auth.isLoggedIn()) {
-      return `<button class="slot-chip available user-can-request" data-slot="1" data-venue="${venue.id}" data-court="${ci}" data-date="${dStr}" data-slot-time="${slot}" title="Request this slot">${slot}</button>`;
-    }
-    return `<span class="slot-chip available" title="Available">${slot}</span>`;
+    // Regular users: slot is informational; they book via Court Booking view
+    return `<span class="slot-chip available" title="Available — use Court Booking">${slotName}<span class="slot-time">${slotLabel}</span></span>`;
   }
 
   // ── Slot modal ─────────────────────────────────────────────
@@ -337,18 +380,19 @@ const Calendar = (() => {
           ${isPending ? `<div class="pending-notice">${pendingNote}</div>` : ''}
           <div class="booking-info-row">
             <div class="booking-info-item"><span class="label">Date</span><span class="value">${formatDate(dateStr)}</span></div>
-            <div class="booking-info-item"><span class="label">Time</span><span class="value">${timeStr}</span></div>
+            <div class="booking-info-item"><span class="label">Slot</span><span class="value">${getSlotDisplayName(timeStr)} (${getSlotLabel(timeStr)})</span></div>
             <div class="booking-info-item"><span class="label">Court</span><span class="value">Court ${courtIndex + 1}</span></div>
-            <div class="booking-info-item"><span class="label">Type</span><span class="value">
+            <div class="booking-info-item"><span class="label">Status</span><span class="value">
               <span class="badge badge-${isPending ? 'amber' : booking.type === 'league' ? 'blue' : booking.type === 'tournament' ? 'amber' : 'green'}">
                 ${isPending ? 'Pending' : (booking.type || 'booking')}
               </span>
             </span></div>
           </div>
           <div class="booking-info-row">
-            <div class="booking-info-item"><span class="label">Booked by</span><span class="value">${esc(booking.label || booking.schoolName || '—')}</span></div>
+            ${booking.reason ? `<div class="booking-info-item"><span class="label">Reason</span><span class="value">${esc(booking.reason)}</span></div>` : ''}
+            <div class="booking-info-item"><span class="label">Booker</span><span class="value">${esc(booking.bookerName || booking.requestedByName || booking.label || '—')}</span></div>
+            ${booking.onBehalfName ? `<div class="booking-info-item"><span class="label">On behalf of</span><span class="value">${esc(booking.onBehalfName)}${booking.onBehalfContact ? ` · ${esc(booking.onBehalfContact)}` : ''}</span></div>` : ''}
             ${school ? `<div class="booking-info-item"><span class="label">School</span><span class="value">${esc(school.name)}</span></div>` : ''}
-            ${isPending ? `<div class="booking-info-item"><span class="label">Requested by</span><span class="value">${esc(booking.requestedByName || '?')}</span></div>` : ''}
             ${booking.notes ? `<div class="booking-info-item"><span class="label">Notes</span><span class="value">${esc(booking.notes)}</span></div>` : ''}
           </div>
         </div>`;
@@ -359,23 +403,29 @@ const Calendar = (() => {
           <button class="btn btn-secondary" data-modal="bookingModal">Close</button>
           <button class="btn btn-danger"    id="rejectBookingBtn">Reject</button>
           <button class="btn btn-primary"   id="approveBookingBtn">Approve ✓</button>`;
-        document.getElementById('approveBookingBtn').onclick = () => {
+        document.getElementById('approveBookingBtn').onclick = async () => {
+          const aBtn = document.getElementById('approveBookingBtn');
+          if (aBtn) { aBtn.disabled = true; aBtn.textContent = 'Approving…'; }
           DB.approveBooking(booking.id);
           DB.writeAudit('booking_approved', 'booking',
-            `Approved request by ${esc(booking.requestedByName || 'user')}: ${esc(booking.label || '')} on ${dateStr}`,
-            booking.id, booking.label || '');
+            `Approved request by ${esc(booking.requestedByName || 'user')}: ${esc(booking.reason || booking.label || '')} on ${dateStr}`,
+            booking.id, booking.reason || booking.label || '');
           Modal.close('bookingModal');
           render();
           toast('Booking approved ✓', 'success');
+          // Send email notification (fire-and-forget)
+          firebase.functions().httpsCallable('notifyBookingStatus')({ bookingId: booking.id, action: 'approved' }).catch(() => {});
         };
         document.getElementById('rejectBookingBtn').onclick = async () => {
           const btn = document.getElementById('rejectBookingBtn');
           if (btn) { btn.disabled = true; btn.textContent = 'Rejecting…'; }
           try {
+            // Send rejection email before deleting the booking doc
+            await firebase.functions().httpsCallable('notifyBookingStatus')({ bookingId: booking.id, action: 'rejected' }).catch(() => {});
             await DB.rejectBooking(booking.id);
             DB.writeAudit('booking_rejected', 'booking',
-              `Rejected request by ${esc(booking.requestedByName || 'user')}: ${esc(booking.label || '')} on ${dateStr}`,
-              booking.id, booking.label || '');
+              `Rejected request by ${esc(booking.requestedByName || 'user')}: ${esc(booking.reason || booking.label || '')} on ${dateStr}`,
+              booking.id, booking.reason || booking.label || '');
             Modal.close('bookingModal');
             render();
             toast('Request rejected');
@@ -383,7 +433,7 @@ const Calendar = (() => {
             console.error('Reject booking failed:', err);
             if (btn) { btn.disabled = false; btn.textContent = 'Reject'; }
             toast('Failed to reject booking — please try again', 'error');
-            render(); // revert optimistic UI
+            render();
           }
         };
       } else if (canManage) {
@@ -436,39 +486,46 @@ const Calendar = (() => {
         footer.innerHTML = `<button class="btn btn-secondary" data-modal="bookingModal">Close</button>`;
       }
 
-    } else if (isOrganizer) {
-      // ── Venue Organiser (own school's venue): confirmed booking ──
-      const schools = DB.getSchools();
+    } else if (Auth.isAdmin() || isOrganizer) {
+      // ── Admin / Venue Organiser: confirmed direct booking ────
+      const _prof = Auth.getProfile();
+      const _defaultBooker = _prof ? (_prof.displayName || _prof.email || '') : '';
       body.innerHTML = `
         <div class="form-stack">
           ${isOrganizer && !Auth.isAdmin() ? `<div class="form-hint organiser-hint">🏟 Booking as organiser of <strong>${esc(venue.name)}</strong></div>` : ''}
           <div class="booking-info-row">
             <div class="booking-info-item"><span class="label">Date</span><span class="value">${formatDate(dateStr)}</span></div>
             <div class="booking-info-item"><span class="label">Court</span><span class="value">Court ${courtIndex + 1}</span></div>
+            <div class="booking-info-item"><span class="label">Slot</span><span class="value">${getSlotDisplayName(timeStr)} (${getSlotLabel(timeStr)})</span></div>
           </div>
           <div class="form-group">
-            <label>Select Time Slot(s)</label>
-            <div class="timeslot-picker" id="slotPicker"></div>
+            <label>Your Name <span class="text-muted">(booker)</span></label>
+            <input type="text" id="newBookingBooker" value="${esc(_defaultBooker)}" placeholder="Your full name">
+          </div>
+          <div class="form-group">
+            <label>Reason for Booking <span style="color:var(--danger)">*</span></label>
+            <input type="text" id="newBookingReason" placeholder="e.g. Practice session, friendly match…">
           </div>
           <div class="form-group">
             <label>Booking Type</label>
             <select id="newBookingType">
               <option value="booking">General Booking</option>
+              <option value="practice">Practice</option>
               <option value="league">League Match</option>
               <option value="tournament">Tournament</option>
-              <option value="practice">Practice</option>
             </select>
           </div>
-          <div class="form-group">
-            <label>School (optional)</label>
-            <select id="newBookingSchool">
-              <option value="">-- No school --</option>
-              ${schools.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}
-            </select>
-          </div>
-          <div class="form-group">
-            <label>Label / Name</label>
-            <input type="text" id="newBookingLabel" placeholder="e.g. Greenview vs Sunridge">
+          <hr style="margin:.25rem 0;border:none;border-top:1px solid var(--border)">
+          <p style="font-size:.8rem;color:var(--neutral);margin:0">Booking on behalf of someone else? (optional)</p>
+          <div class="booking-info-row">
+            <div class="form-group" style="margin:0">
+              <label>Name</label>
+              <input type="text" id="newBookingOnBehalfName" placeholder="Player / coach name">
+            </div>
+            <div class="form-group" style="margin:0">
+              <label>Contact Number</label>
+              <input type="tel" id="newBookingOnBehalfContact" placeholder="e.g. 082 000 0000">
+            </div>
           </div>
           <div class="form-group">
             <label>Notes (optional)</label>
@@ -476,82 +533,62 @@ const Calendar = (() => {
           </div>
         </div>`;
 
-      const slots         = getTimeSlots();
-      const picker        = document.getElementById('slotPicker');
-      const selectedSlots = new Set([timeStr]);
-
-      slots.forEach(s => {
-        const btn      = document.createElement('button');
-        btn.type       = 'button';
-        btn.className  = 'timeslot-btn' + (s === timeStr ? ' selected' : '');
-        btn.textContent = s;
-        const existing       = getSlotBooking(venueId, courtIndex, dateStr, s);
-        const closed         = isCourtClosed(venueId, courtIndex, dateStr, s);
-        const leagueOccupied = _getLeagueFixtureForSlot(venueId, courtIndex, dateStr, s);
-        if (existing || closed || leagueOccupied) {
-          btn.disabled = true;
-          btn.title    = leagueOccupied ? 'League match in progress' : existing ? 'Already booked' : 'Court closed';
-        } else {
-          btn.onclick = () => {
-            if (selectedSlots.has(s)) { selectedSlots.delete(s); btn.classList.remove('selected'); }
-            else                       { selectedSlots.add(s);    btn.classList.add('selected'); }
-          };
-        }
-        picker.appendChild(btn);
-      });
-
       footer.innerHTML = `
         <button class="btn btn-secondary" data-modal="bookingModal">Cancel</button>
         <button class="btn btn-primary"   id="saveBookingBtn">Save Booking</button>`;
 
       document.getElementById('saveBookingBtn').onclick = () => {
-        const label    = document.getElementById('newBookingLabel').value.trim();
-        const type     = document.getElementById('newBookingType').value;
-        const schoolId = document.getElementById('newBookingSchool').value;
-        const notes    = document.getElementById('newBookingNotes').value.trim();
-        const school   = schoolId ? DB.getSchools().find(s => s.id === schoolId) : null;
-        if (selectedSlots.size === 0) { toast('Select at least one time slot', 'error'); return; }
-
+        const booker        = document.getElementById('newBookingBooker').value.trim();
+        const reason        = document.getElementById('newBookingReason').value.trim();
+        const type          = document.getElementById('newBookingType').value;
+        const onBehalfName  = document.getElementById('newBookingOnBehalfName').value.trim();
+        const onBehalfContact = document.getElementById('newBookingOnBehalfContact').value.trim();
+        const notes         = document.getElementById('newBookingNotes').value.trim();
+        if (!reason) { toast('Reason for booking is required', 'error'); return; }
         const _adminUser = Auth.getUser();
         const _adminProf = Auth.getProfile();
-        let bookedCount = 0;
-        selectedSlots.forEach(sl => {
-          const result = DB.addBooking({
-            venueId, courtIndex, date: dateStr, timeSlot: sl,
-            type, schoolId: schoolId || null,
-            label:           label || (school ? school.name : type),
-            schoolName:      school ? school.name : null,
-            notes,
-            status:          'confirmed',
-            // Always record who created the booking so cancellation notifications
-            // can reach the creator even when they used the admin path.
-            requestedBy:     _adminUser ? _adminUser.uid : null,
-            requestedByName: _adminProf ? (_adminProf.displayName || _adminProf.email) : (_adminUser ? _adminUser.email : null),
-            requestedAt:     new Date().toISOString(),
-          });
-          if (!result) toast(`${sl} is already booked — skipped`, 'error');
-          else bookedCount++;
+        const result = DB.addBooking({
+          venueId, courtIndex, date: dateStr, timeSlot: timeStr,
+          type,
+          reason,
+          label:              reason,
+          bookerName:         booker,
+          onBehalfName:       onBehalfName  || null,
+          onBehalfContact:    onBehalfContact || null,
+          notes:              notes || null,
+          status:             'confirmed',
+          requestedBy:        _adminUser ? _adminUser.uid : null,
+          requestedByName:    _adminProf ? (_adminProf.displayName || _adminProf.email) : null,
+          requestedAt:        new Date().toISOString(),
         });
-        if (bookedCount === 0) { render(); return; }
+        if (!result) { toast('This slot is already booked', 'error'); return; }
         DB.writeAudit('booking_created', 'booking',
-          `Booked: ${label || type} on ${dateStr} (${[...selectedSlots].join(', ')}) at ${venue.name} Court ${courtIndex + 1}`,
-          null, label || type);
+          `Booked: ${reason} on ${dateStr} (${getSlotDisplayName(timeStr)}) at ${venue.name} Court ${courtIndex + 1}`,
+          null, reason);
         Modal.close('bookingModal');
         render();
-        toast(`${bookedCount} slot(s) booked`, 'success');
+        toast('Booking confirmed ✓', 'success');
       };
 
     } else if (Auth.isLoggedIn()) {
-      // ── External venue bookings are disabled ────────────────
-      // Only admins and users whose school owns this venue may book here.
-      // (Those users reach the branch above via _canManageVenue.)
+      // ── Logged-in user viewing an available/booked slot ──────
+      // They book via the Court Booking view
       body.innerHTML = `
         <div style="text-align:center;padding:1.25rem .5rem">
-          <p style="font-size:1.5rem;margin-bottom:.5rem">🔒</p>
-          <p style="font-weight:600;margin-bottom:.4rem">Bookings not available</p>
-          <p class="text-muted" style="font-size:.9rem">Court bookings at external venues are not available.<br>You can only book courts at your own school's venue.</p>
+          <p style="font-size:.95rem;margin-bottom:.75rem">
+            <strong>${getSlotDisplayName(timeStr)}</strong> — ${getSlotLabel(timeStr)}<br>
+            ${formatDate(dateStr)} · Court ${courtIndex + 1}
+          </p>
+          <p class="text-muted" style="font-size:.9rem">To request a booking, use the <strong>Court Booking</strong> option in the menu.</p>
         </div>`;
-      footer.innerHTML = `<button class="btn btn-secondary" data-modal="bookingModal">Close</button>`;
+      footer.innerHTML = `
+        <button class="btn btn-secondary" data-modal="bookingModal">Close</button>
+        <button class="btn btn-primary" id="goToBookingBtn">Court Booking →</button>`;
+      document.getElementById('goToBookingBtn').onclick = () => {
+        Modal.close('bookingModal');
+        if (typeof CourtBooking !== 'undefined') CourtBooking.openWith(venueId, courtIndex, dateStr, timeStr);
+        else navigate('courtbooking');
+      };
 
     } else {
       // ── Visitor ────────────────────────────────────────────

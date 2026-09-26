@@ -65,6 +65,9 @@ const Admin = (() => {
     document.getElementById('addSchoolBtn').addEventListener('click', () => openSchoolModal());
     document.getElementById('schoolSubmitBtn').addEventListener('click', saveSchool);
     document.getElementById('exportSchoolsBtn').addEventListener('click', _exportSchoolsExcel);
+    // Bookings tab export (filters are wired lazily in renderBookingsLog)
+    const expBookBtn = document.getElementById('exportBookingsBtn');
+    if (expBookBtn) expBookBtn.addEventListener('click', _exportBookingsExcel);
 
     // Closure buttons
     document.getElementById('addClosureBtn').addEventListener('click', () => openClosureModal());
@@ -113,6 +116,7 @@ const Admin = (() => {
     if (tab === 'leagues')       Leagues.renderAdmin();
     if (tab === 'tournaments')   Tournaments.renderAdmin();
     if (tab === 'users')         renderUsers();
+    if (tab === 'bookings')      renderBookingsLog();
     if (tab === 'settings')      { renderGlobalSettings(); renderAuditLog(); }
     if (tab === 'notifications') { NotificationService.renderMatchReminders(); NotificationService.renderComposer(); }
   }
@@ -130,6 +134,7 @@ const Admin = (() => {
     if (_activeTab === 'leagues')       Leagues.renderAdmin();
     if (_activeTab === 'tournaments')   Tournaments.renderAdmin();
     if (_activeTab === 'users')         renderUsers();
+    if (_activeTab === 'bookings')      renderBookingsLog();
     if (_activeTab === 'settings')      { renderGlobalSettings(); renderAuditLog(); }
     if (_activeTab === 'notifications') { NotificationService.renderMatchReminders(); NotificationService.renderComposer(); }
   }
@@ -1197,6 +1202,162 @@ function _orgRow(o) {
       toast('Export failed — ' + (err.message || err), 'error');
     } finally {
       if (btn) { btn.disabled = false; btn.textContent = '📥 Export'; }
+    }
+  }
+
+  // ── Bookings log ─────────────────────────────────────────────────────────
+  function renderBookingsLog() {
+    // Populate venue filter
+    const vSel = document.getElementById('bookingsVenueFilter');
+    if (vSel) {
+      vSel.innerHTML = '<option value="">All Venues</option>' +
+        DB.getVenues().map(v => `<option value="${v.id}">${esc(v.name)}</option>`).join('');
+      vSel.removeEventListener('change', renderBookingsLog);
+      vSel.addEventListener('change', renderBookingsLog);
+    }
+    const pSel = document.getElementById('bookingsPeriodFilter');
+    if (pSel) {
+      pSel.removeEventListener('change', renderBookingsLog);
+      pSel.addEventListener('change', renderBookingsLog);
+    }
+    const exportBtn = document.getElementById('exportBookingsBtn');
+    if (exportBtn) {
+      exportBtn.onclick = _exportBookingsExcel;
+    }
+
+    const venueId = vSel ? vSel.value : '';
+    const period  = pSel ? pSel.value : 'all';
+    const el      = document.getElementById('bookingsLogList');
+    if (!el) return;
+
+    let bookings = DB.getBookings().slice();
+    if (venueId) bookings = bookings.filter(b => b.venueId === venueId);
+
+    // Period filter
+    const now      = new Date();
+    const today    = toDateStr(now);
+    if (period === 'week') {
+      const ws = toDateStr(weekStart(now));
+      const we = toDateStr(addDays(weekStart(now), 6));
+      bookings = bookings.filter(b => b.date >= ws && b.date <= we);
+    } else if (period === 'month') {
+      const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2,'0')}`;
+      bookings = bookings.filter(b => b.date.startsWith(ym));
+    } else if (period === 'quarter') {
+      const q = Math.floor(now.getMonth() / 3);
+      const qStart = `${now.getFullYear()}-${String(q * 3 + 1).padStart(2,'0')}`;
+      const qEnd   = `${now.getFullYear()}-${String((q + 1) * 3).padStart(2,'0')}-31`;
+      bookings = bookings.filter(b => b.date >= qStart && b.date <= qEnd);
+    } else if (period === 'year') {
+      bookings = bookings.filter(b => b.date.startsWith(String(now.getFullYear())));
+    }
+
+    bookings.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+
+    if (bookings.length === 0) {
+      el.innerHTML = `<p class="text-muted">No bookings for the selected filters.</p>`;
+      return;
+    }
+
+    const venues  = DB.getVenues();
+    const schools = DB.getSchools();
+    el.innerHTML = `
+      <div style="overflow-x:auto">
+        <table class="data-table" style="width:100%;font-size:.82rem">
+          <thead><tr>
+            <th>Date</th><th>Venue</th><th>Court</th><th>Slot</th>
+            <th>Reason</th><th>Booker</th><th>On Behalf Of</th><th>Contact</th><th>Status</th>
+          </tr></thead>
+          <tbody>
+            ${bookings.map(b => {
+              const venue  = venues.find(v => v.id === b.venueId);
+              const slot   = b.timeSlot === 'morning' || b.timeSlot === 'afternoon' ? getSlotDisplayName(b.timeSlot) : b.timeSlot;
+              const status = b.status === 'confirmed' ? '<span class="badge badge-green">Confirmed</span>'
+                           : b.status === 'pending'   ? '<span class="badge badge-amber">Pending</span>'
+                           : `<span class="badge badge-red">${esc(b.status)}</span>`;
+              return `<tr>
+                <td>${esc(formatDate(b.date))}</td>
+                <td>${esc(venue ? venue.name : b.venueId)}</td>
+                <td>Court ${(b.courtIndex || 0) + 1}</td>
+                <td>${esc(slot)}</td>
+                <td>${esc(b.reason || b.label || '—')}</td>
+                <td>${esc(b.bookerName || b.requestedByName || '—')}</td>
+                <td>${esc(b.onBehalfName || '—')}</td>
+                <td>${esc(b.onBehalfContact || '—')}</td>
+                <td>${status}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  }
+
+  async function _exportBookingsExcel() {
+    const btn = document.getElementById('exportBookingsBtn');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Exporting…'; }
+    try {
+      // Lazy-load SheetJS
+      if (!window.XLSX) {
+        await new Promise((res, rej) => {
+          const s = document.createElement('script');
+          s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+          s.onload = res; s.onerror = rej;
+          document.head.appendChild(s);
+        });
+      }
+      const venues  = DB.getVenues();
+      const periods = [
+        { key: 'week',    label: 'This Week' },
+        { key: 'month',   label: 'This Month' },
+        { key: 'quarter', label: 'This Quarter' },
+        { key: 'year',    label: 'This Year' },
+        { key: 'all',     label: 'All Time' },
+      ];
+      const now = new Date();
+      const wb  = window.XLSX.utils.book_new();
+
+      periods.forEach(({ key, label }) => {
+        let rows = DB.getBookings().slice();
+        if (key === 'week') {
+          const ws = toDateStr(weekStart(now));
+          const we = toDateStr(addDays(weekStart(now), 6));
+          rows = rows.filter(b => b.date >= ws && b.date <= we);
+        } else if (key === 'month') {
+          const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2,'0')}`;
+          rows = rows.filter(b => b.date.startsWith(ym));
+        } else if (key === 'quarter') {
+          const q      = Math.floor(now.getMonth() / 3);
+          const qStart = `${now.getFullYear()}-${String(q * 3 + 1).padStart(2,'0')}`;
+          const qEnd   = `${now.getFullYear()}-${String((q + 1) * 3).padStart(2,'0')}-31`;
+          rows = rows.filter(b => b.date >= qStart && b.date <= qEnd);
+        } else if (key === 'year') {
+          rows = rows.filter(b => b.date.startsWith(String(now.getFullYear())));
+        }
+        rows.sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.venueId || '').localeCompare(b.venueId || ''));
+        const data = [['Date', 'Venue', 'Court', 'Slot', 'Reason', 'Booker', 'On Behalf Of', 'Contact', 'Status', 'Requested At']];
+        rows.forEach(b => {
+          const venue = venues.find(v => v.id === b.venueId);
+          const slot  = b.timeSlot === 'morning' || b.timeSlot === 'afternoon' ? getSlotDisplayName(b.timeSlot) : b.timeSlot;
+          data.push([
+            b.date || '', venue ? venue.name : (b.venueId || ''),
+            `Court ${(b.courtIndex || 0) + 1}`, slot || '',
+            b.reason || b.label || '', b.bookerName || b.requestedByName || '',
+            b.onBehalfName || '', b.onBehalfContact || '', b.status || '',
+            b.requestedAt ? new Date(b.requestedAt).toLocaleString('en-ZA') : '',
+          ]);
+        });
+        const ws = window.XLSX.utils.aoa_to_sheet(data);
+        ws['!cols'] = [{ wch: 12 }, { wch: 22 }, { wch: 8 }, { wch: 12 }, { wch: 30 }, { wch: 22 }, { wch: 22 }, { wch: 16 }, { wch: 12 }, { wch: 20 }];
+        window.XLSX.utils.book_append_sheet(wb, ws, label);
+      });
+
+      const dateStr = new Date().toISOString().slice(0, 10);
+      window.XLSX.writeFile(wb, `Court Campus - Booking Log ${dateStr}.xlsx`);
+    } catch (err) {
+      console.error('[exportBookings]', err);
+      toast('Export failed — ' + (err.message || err), 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = '📥 Export Excel'; }
     }
   }
 

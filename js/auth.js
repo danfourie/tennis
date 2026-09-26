@@ -324,12 +324,13 @@ const Auth = (() => {
   function _refreshViews() {
     // Defer so modules are guaranteed to exist
     setTimeout(() => {
-      if (typeof Calendar    !== 'undefined') Calendar.refresh();
-      if (typeof Leagues     !== 'undefined') Leagues.refresh();
-      if (typeof Tournaments !== 'undefined') Tournaments.refresh();
-      if (typeof MySchool    !== 'undefined') MySchool.refresh();
-      if (typeof MyVenue     !== 'undefined') MyVenue.refresh();
-      if (typeof Admin       !== 'undefined') Admin.refresh();
+      if (typeof Calendar     !== 'undefined') Calendar.refresh();
+      if (typeof CourtBooking !== 'undefined') CourtBooking.refresh();
+      if (typeof Leagues      !== 'undefined') Leagues.refresh();
+      if (typeof Tournaments  !== 'undefined') Tournaments.refresh();
+      if (typeof MySchool     !== 'undefined') MySchool.refresh();
+      if (typeof MyVenue      !== 'undefined') MyVenue.refresh();
+      if (typeof Admin        !== 'undefined') Admin.refresh();
     }, 0);
   }
 

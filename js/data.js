@@ -216,7 +216,13 @@ const DB = {
   },
 
   // ── Closures ──────────────────────────────────────────────
-  getClosures() { return _cache.closures; },
+  getClosures() {
+    // Auto-filter closures whose end date is more than 1 week in the past
+    const ago = new Date();
+    ago.setDate(ago.getDate() - 7);
+    const cutoff = toDateStr(ago);
+    return _cache.closures.filter(c => !c.endDate || c.endDate >= cutoff);
+  },
 
   addClosure(c) {
     c.id = c.id || uid();
@@ -506,6 +512,26 @@ const DB = {
 // HELPER FUNCTIONS
 // ============================================================
 
+// Map a slot name to a [start, end) time string range for overlap checks.
+function _slotRange(slot) {
+  if (slot === 'morning')   return { start: '07:00', end: '14:00' };
+  if (slot === 'afternoon') return { start: '14:00', end: '18:00' };
+  // Legacy hourly slot — treat as 1-hour window
+  if (slot) {
+    const [h, m] = slot.split(':').map(Number);
+    const end = `${String(h + 1).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+    return { start: slot, end };
+  }
+  return null;
+}
+
+function _slotOverlapsClosure(slot, timeStart, timeEnd) {
+  if (!timeStart || !timeEnd || !slot) return true; // no time restriction → always overlaps
+  const r = _slotRange(slot);
+  if (!r) return true;
+  return r.start < timeEnd && r.end > timeStart;
+}
+
 function isCourtClosed(venueId, courtIndex, dateStr, timeStr) {
   const venue    = (DB.getVenues()   || []).find(v => v.id === venueId);
   const closures = (DB.getClosures() || []).filter(c => c.venueId === venueId);
@@ -515,37 +541,38 @@ function isCourtClosed(venueId, courtIndex, dateStr, timeStr) {
     const openWindows  = closures.filter(c => c.type === 'open');
     const inOpenWindow = openWindows.some(c => {
       if (dateStr < c.startDate || dateStr > c.endDate) return false;
-      if (c.timeStart && c.timeEnd && timeStr) return timeStr >= c.timeStart && timeStr < c.timeEnd;
+      if (c.timeStart && c.timeEnd && timeStr) return _slotOverlapsClosure(timeStr, c.timeStart, c.timeEnd);
       return true; // window covers all day
     });
-    if (!inOpenWindow) return true; // not in any open window → blocked
+    if (!inOpenWindow) return true;
 
-    // Inside an open window — still honour block closures (e.g. a specific court under repair)
     return closures.filter(c => !c.type || c.type === 'block').some(c => {
       if (c.courtIndex !== null && c.courtIndex !== undefined && c.courtIndex !== '' && c.courtIndex != courtIndex) return false;
       if (dateStr < c.startDate || dateStr > c.endDate) return false;
-      if (c.timeStart && c.timeEnd && timeStr) { if (timeStr < c.timeStart || timeStr >= c.timeEnd) return false; }
+      if (c.timeStart && c.timeEnd && timeStr) return _slotOverlapsClosure(timeStr, c.timeStart, c.timeEnd);
       return true;
     });
   }
 
-  // Normal mode: blocked if it matches any block closure (open windows are ignored)
+  // Normal mode: blocked if it matches any block closure
   return closures.some(c => {
     if (c.type === 'open') return false;
     if (c.courtIndex !== null && c.courtIndex !== undefined && c.courtIndex !== '' && c.courtIndex != courtIndex) return false;
     if (dateStr < c.startDate || dateStr > c.endDate) return false;
-    if (c.timeStart && c.timeEnd && timeStr) { if (timeStr < c.timeStart || timeStr >= c.timeEnd) return false; }
+    if (c.timeStart && c.timeEnd && timeStr) return _slotOverlapsClosure(timeStr, c.timeStart, c.timeEnd);
     return true;
   });
 }
 
-function getSlotBooking(venueId, courtIndex, dateStr, timeStr) {
-  return DB.getBookings().find(b =>
-    b.venueId    === venueId &&
-    b.courtIndex === courtIndex &&
-    b.date       === dateStr &&
-    b.timeSlot   === timeStr
-  );
+function getSlotBooking(venueId, courtIndex, dateStr, slot) {
+  return DB.getBookings().find(b => {
+    if (b.venueId !== venueId || b.courtIndex !== courtIndex || b.date !== dateStr) return false;
+    if (b.timeSlot === slot) return true;
+    // Backward compat: map old hourly timeSlots to morning/afternoon
+    if (slot === 'morning'   && typeof b.timeSlot === 'string' && b.timeSlot >= '07:00' && b.timeSlot < '14:00') return true;
+    if (slot === 'afternoon' && typeof b.timeSlot === 'string' && b.timeSlot >= '14:00' && b.timeSlot < '18:00') return true;
+    return false;
+  });
 }
 
 function uid() {
@@ -563,17 +590,19 @@ const DAY_NAMES      = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const DAY_NAMES_FULL = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
 function getTimeSlots() {
-  const s = DB.getSettings();
-  const slots = [];
-  let [h, m] = s.timeSlotStart.split(':').map(Number);
-  const [eh, em] = s.timeSlotEnd.split(':').map(Number);
-  const endMins = eh * 60 + em;
-  while (h * 60 + m < endMins) {
-    slots.push(`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`);
-    m += s.slotDuration;
-    if (m >= 60) { h += Math.floor(m / 60); m = m % 60; }
-  }
-  return slots;
+  return ['morning', 'afternoon'];
+}
+
+function getSlotLabel(slot) {
+  if (slot === 'morning')   return '07:00 – 14:00';
+  if (slot === 'afternoon') return '14:00 – 18:00';
+  return slot;
+}
+
+function getSlotDisplayName(slot) {
+  if (slot === 'morning')   return 'Morning';
+  if (slot === 'afternoon') return 'Afternoon';
+  return slot;
 }
 
 function slotEndTime(timeStr, durationMins) {

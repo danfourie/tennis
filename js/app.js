@@ -143,6 +143,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     Auth.init();
     NotificationService.init();
     Calendar.init();
+    CourtBooking.init();
     Leagues.init();
     Tournaments.init();
     Admin.init();
@@ -264,9 +265,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (view === 'admin' && !Auth.isAdmin()) return;
       navigate(view);
       // Trigger render for views that need it on activation
-      if (view === 'calendar') Calendar.refresh();
-      if (view === 'myschool') MySchool.refresh();
-      if (view === 'myvenue')  MyVenue.refresh();
+      if (view === 'calendar')     Calendar.refresh();
+      if (view === 'courtbooking') { if (typeof CourtBooking !== 'undefined') CourtBooking.render(); }
+      if (view === 'myschool')     MySchool.refresh();
+      if (view === 'myvenue')      MyVenue.refresh();
     });
   });
 
