@@ -180,7 +180,21 @@ const Calendar = (() => {
 
   // ── Guest screen ─────────────────────────────────────────────
   function _renderGuestScreen() {
-    const container = document.getElementById('calendarContainer');
+    const container  = document.getElementById('calendarContainer');
+    const today      = new Date().toISOString().slice(0, 10);
+    const gklVenue   = DB.getVenues().find(v =>
+      (v.name || '').toLowerCase().includes('groenkloof') || v.openBookings === true
+    );
+    const gklVenueId = gklVenue ? gklVenue.id : null;
+    const gklCourts  = gklVenue
+      ? (Array.isArray(gklVenue.courts) && gklVenue.courts.length
+          ? gklVenue.courts
+          : Array.from({ length: gklVenue.courtCount || 1 }, (_, i) => ({ name: `Court ${i + 1}` })))
+      : [];
+    const gklCourtOpts = gklCourts
+      .map((c, i) => `<option value="${i}">${esc(c.name || `Court ${i + 1}`)}</option>`)
+      .join('');
+
     container.innerHTML = `
       <div class="guest-screen">
         <div style="font-size:3rem;margin-bottom:.75rem">🎾</div>
@@ -189,10 +203,18 @@ const Calendar = (() => {
           Log in to view court availability and league fixtures.
         </p>
         <div style="display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap">
-          <button class="btn btn-primary" id="guestLoginBtn">Login</button>
-          <button class="btn btn-outline" id="guestRegisterBtn">Register</button>
+          <button class="btn btn-primary"  id="guestLoginBtn">Login</button>
+          <button class="btn btn-outline"  id="guestRegisterBtn">Register</button>
           <button class="btn btn-secondary" id="guestContactBtn">Contact Admin</button>
         </div>
+        ${gklVenueId ? `
+        <div style="margin-top:1rem">
+          <button class="btn btn-primary" id="guestGroenkloofBtn" style="min-width:230px">
+            📅 Book at Groenkloof
+          </button>
+        </div>` : ''}
+
+        <!-- ── Contact Admin form ───────────────────────── -->
         <div id="guestContactForm" class="guest-contact-form hidden">
           <div class="form-group">
             <label>Your name <span style="color:var(--danger,#dc2626)">*</span></label>
@@ -212,7 +234,85 @@ const Calendar = (() => {
             <button class="btn btn-primary" id="guestContactSubmitBtn">Send Message</button>
           </div>
         </div>
+
+        <!-- ── Groenkloof Booking form ──────────────────── -->
+        ${gklVenueId ? `
+        <div id="guestGroenkloofForm" class="guest-contact-form hidden" style="max-width:480px;text-align:left">
+          <h4 style="margin:0 0 .75rem;color:var(--primary-dark)">📅 Groenkloof Court Booking</h4>
+          <p style="font-size:.82rem;background:var(--info-bg,#eff6ff);border:1px solid var(--info-border,#bfdbfe);border-radius:var(--radius);padding:.55rem .8rem;margin:0 0 .9rem">
+            <strong>New to Court Campus?</strong> We'll create your account automatically.
+            Already registered? Your password will sign you in and the booking will be placed under your name.
+          </p>
+          <div class="form-group">
+            <label>Full Name <span style="color:var(--danger,#dc2626)">*</span></label>
+            <input type="text" id="gklName" placeholder="Your full name" autocomplete="name">
+          </div>
+          <div class="form-group">
+            <label>Email Address <span style="color:var(--danger,#dc2626)">*</span></label>
+            <input type="email" id="gklEmail" placeholder="your@email.com" autocomplete="email">
+          </div>
+          <div class="form-group">
+            <label>Password <span style="color:var(--danger,#dc2626)">*</span>
+              <span class="text-muted" style="font-weight:400">&nbsp;(min. 6 characters)</span>
+            </label>
+            <input type="password" id="gklPassword" placeholder="Your account password" autocomplete="new-password">
+          </div>
+          <hr style="margin:.5rem 0 .9rem;border:none;border-top:1px solid var(--border)">
+          <div class="form-group">
+            <label>Date <span style="color:var(--danger,#dc2626)">*</span></label>
+            <input type="date" id="gklDate" min="${today}">
+          </div>
+          ${gklCourts.length > 1 ? `
+          <div class="form-group">
+            <label>Court</label>
+            <select id="gklCourt">${gklCourtOpts}</select>
+          </div>` : `<input type="hidden" id="gklCourt" value="0">`}
+          <div class="form-group">
+            <label>Slot</label>
+            <div style="display:flex;gap:.5rem">
+              <button type="button" class="btn btn-primary gkl-slot-btn" data-slot="morning" style="flex:1;line-height:1.3">
+                Morning<br><small style="opacity:.8">07:00 – 14:00</small>
+              </button>
+              <button type="button" class="btn btn-outline gkl-slot-btn" data-slot="afternoon" style="flex:1;line-height:1.3">
+                Afternoon<br><small style="opacity:.8">14:00 – 18:00</small>
+              </button>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Booking Type <span style="color:var(--danger,#dc2626)">*</span></label>
+            <select id="gklType">
+              <option value="">-- Select type --</option>
+              <option value="Practice">Practice</option>
+              <option value="Match">Match</option>
+              <option value="Coaching">Coaching</option>
+              <option value="Tournament">Tournament</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Additional Details <span class="text-muted" style="font-weight:400">(optional)</span></label>
+            <input type="text" id="gklDetails" placeholder="e.g. team name, opponent…">
+          </div>
+          <p id="gklError" class="form-error" style="display:none"></p>
+          <div style="display:flex;gap:.75rem;justify-content:flex-end;margin-top:.5rem">
+            <button class="btn btn-outline btn-sm" id="gklCancelBtn">Cancel</button>
+            <button class="btn btn-primary" id="gklSubmitBtn">Request Booking</button>
+          </div>
+        </div>` : ''}
       </div>`;
+
+    // ── Helper: toggle between forms ──────────────────────────
+    function _showForm(showId, hideId) {
+      const hide = document.getElementById(hideId);
+      if (hide) hide.classList.add('hidden');
+      const show = document.getElementById(showId);
+      if (!show) return;
+      const wasHidden = show.classList.contains('hidden');
+      show.classList.toggle('hidden');
+      if (wasHidden) { const f = show.querySelector('input,textarea,select'); if (f) f.focus(); }
+    }
+
+    // ── Login / Register ──────────────────────────────────────
     document.getElementById('guestLoginBtn').onclick = () => {
       ['loginEmail','loginPassword'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
       document.getElementById('loginError').textContent = '';
@@ -224,14 +324,10 @@ const Calendar = (() => {
         DB.getSchools().map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
       Modal.open('registerModal');
     };
-    document.getElementById('guestContactBtn').onclick = () => {
-      const form = document.getElementById('guestContactForm');
-      form.classList.toggle('hidden');
-      if (!form.classList.contains('hidden')) document.getElementById('guestContactName').focus();
-    };
-    document.getElementById('guestContactCancelBtn').onclick = () => {
-      document.getElementById('guestContactForm').classList.add('hidden');
-    };
+
+    // ── Contact Admin ─────────────────────────────────────────
+    document.getElementById('guestContactBtn').onclick       = () => _showForm('guestContactForm', 'guestGroenkloofForm');
+    document.getElementById('guestContactCancelBtn').onclick = () => document.getElementById('guestContactForm').classList.add('hidden');
     document.getElementById('guestContactSubmitBtn').onclick = async () => {
       const name    = (document.getElementById('guestContactName').value    || '').trim();
       const email   = (document.getElementById('guestContactEmail').value   || '').trim();
@@ -243,8 +339,7 @@ const Calendar = (() => {
       if (!message) { errEl.textContent = 'Please enter a message';    errEl.style.display = 'block'; return; }
       btn.disabled = true; btn.textContent = 'Sending…';
       try {
-        const fn = firebase.functions().httpsCallable('contactAdmin');
-        await fn({ name, email, message });
+        await firebase.functions().httpsCallable('contactAdmin')({ name, email, message });
         document.getElementById('guestContactForm').innerHTML = `
           <p style="text-align:center;color:var(--success,#16a34a);font-weight:600;padding:.75rem 0">
             ✓ Message sent — an admin will be in touch.
@@ -253,6 +348,107 @@ const Calendar = (() => {
         errEl.textContent = 'Could not send message. Please try again later.';
         errEl.style.display = 'block';
         btn.disabled = false; btn.textContent = 'Send Message';
+      }
+    };
+
+    // ── Groenkloof Booking ────────────────────────────────────
+    if (!gklVenueId) return;
+
+    let _gklSlot = 'morning';
+
+    document.getElementById('guestGroenkloofBtn').onclick = () => _showForm('guestGroenkloofForm', 'guestContactForm');
+    document.getElementById('gklCancelBtn').onclick       = () => document.getElementById('guestGroenkloofForm').classList.add('hidden');
+
+    container.querySelectorAll('.gkl-slot-btn').forEach(b => {
+      b.onclick = () => {
+        _gklSlot = b.dataset.slot;
+        container.querySelectorAll('.gkl-slot-btn').forEach(x => {
+          x.classList.toggle('btn-primary', x.dataset.slot === _gklSlot);
+          x.classList.toggle('btn-outline',  x.dataset.slot !== _gklSlot);
+        });
+      };
+    });
+
+    document.getElementById('gklSubmitBtn').onclick = async () => {
+      const name        = (document.getElementById('gklName').value     || '').trim();
+      const email       = (document.getElementById('gklEmail').value    || '').trim();
+      const password    = (document.getElementById('gklPassword').value || '');
+      const date        = document.getElementById('gklDate').value;
+      const courtIndex  = parseInt(document.getElementById('gklCourt').value, 10) || 0;
+      const bookingType = document.getElementById('gklType').value;
+      const details     = (document.getElementById('gklDetails').value  || '').trim();
+      const errEl       = document.getElementById('gklError');
+      const btn         = document.getElementById('gklSubmitBtn');
+
+      errEl.style.display = 'none';
+      if (!name)              { errEl.textContent = 'Full name is required.';                errEl.style.display = 'block'; return; }
+      if (!email)             { errEl.textContent = 'Email address is required.';             errEl.style.display = 'block'; return; }
+      if (password.length < 6){ errEl.textContent = 'Password must be at least 6 characters.'; errEl.style.display = 'block'; return; }
+      if (!date)              { errEl.textContent = 'Please select a date.';                  errEl.style.display = 'block'; return; }
+      if (!bookingType)       { errEl.textContent = 'Please select a booking type.';          errEl.style.display = 'block'; return; }
+
+      btn.disabled = true; btn.textContent = 'Processing…';
+
+      try {
+        let uid, userName;
+
+        // Create account, or sign in if email already registered
+        try {
+          const cred = await firebase.auth().createUserWithEmailAndPassword(email, password);
+          uid = cred.user.uid; userName = name;
+          await cred.user.updateProfile({ displayName: name });
+          await firebase.firestore().collection('users').doc(uid).set(
+            { displayName: name, email, role: 'user', createdAt: new Date().toISOString() },
+            { merge: true }
+          );
+        } catch (authErr) {
+          if (authErr.code === 'auth/email-already-in-use') {
+            const cred = await firebase.auth().signInWithEmailAndPassword(email, password);
+            uid = cred.user.uid;
+            userName = cred.user.displayName || name;
+          } else if (authErr.code === 'auth/invalid-email') {
+            throw new Error('Please enter a valid email address.');
+          } else if (authErr.code === 'auth/weak-password') {
+            throw new Error('Password must be at least 6 characters.');
+          } else {
+            throw authErr;
+          }
+        }
+
+        // Write booking synchronously (before auth state re-renders UI)
+        const reason = bookingType + (details ? ': ' + details : '');
+        const result = DB.addBooking({
+          venueId:         gklVenueId,
+          courtIndex,
+          date,
+          timeSlot:        _gklSlot,
+          type:            bookingType.toLowerCase(),
+          reason,
+          label:           reason,
+          bookerName:      userName,
+          status:          'pending',
+          requestedBy:     uid,
+          requestedByName: userName,
+          requestedAt:     new Date().toISOString(),
+        });
+
+        if (!result) throw new Error('That slot is already taken — please choose a different time or court.');
+
+        // Non-critical: notify venue organizers by email
+        try {
+          await firebase.functions().httpsCallable('notifyBookingRequest')({ bookingId: result.id });
+        } catch (e) { /* non-critical */ }
+
+        toast('Booking requested ✓ — awaiting approval', 'success');
+        // Auth state change fires and re-renders calendar as logged-in user
+
+      } catch (err) {
+        const isWrongPass = err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential';
+        errEl.textContent = isWrongPass
+          ? 'Incorrect password. If you forgot it, use the Login button → Forgot password?'
+          : (err.message || 'Something went wrong. Please try again.');
+        errEl.style.display = 'block';
+        btn.disabled = false; btn.textContent = 'Request Booking';
       }
     };
   }
