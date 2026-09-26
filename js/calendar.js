@@ -252,13 +252,13 @@ const Calendar = (() => {
             <input type="email" id="gklEmail" placeholder="your@email.com" autocomplete="email">
           </div>
           <div class="form-group">
-            <label>Password <span style="color:var(--danger,#dc2626)">*</span>
-              <span class="text-muted" style="font-weight:400">&nbsp;(min. 6 characters)</span>
+            <label>Password
+              <span class="text-muted" style="font-weight:400">&nbsp;— only required for new accounts (min. 6 characters)</span>
             </label>
-            <input type="password" id="gklPassword" placeholder="Your account password" autocomplete="new-password">
+            <input type="password" id="gklPassword" placeholder="Leave blank if already registered" autocomplete="new-password">
           </div>
           <div class="form-group">
-            <label>Contact Number <span class="text-muted" style="font-weight:400">(optional)</span></label>
+            <label>Contact Number <span style="color:var(--danger,#dc2626)">*</span></label>
             <input type="tel" id="gklPhone" placeholder="e.g. 082 000 0000" autocomplete="tel">
           </div>
           <hr style="margin:.5rem 0 .9rem;border:none;border-top:1px solid var(--border)">
@@ -389,73 +389,39 @@ const Calendar = (() => {
       const btn         = document.getElementById('gklSubmitBtn');
 
       errEl.style.display = 'none';
-      if (!name)              { errEl.textContent = 'Full name is required.';                errEl.style.display = 'block'; return; }
-      if (!email)             { errEl.textContent = 'Email address is required.';             errEl.style.display = 'block'; return; }
-      if (password.length < 6){ errEl.textContent = 'Password must be at least 6 characters.'; errEl.style.display = 'block'; return; }
-      if (!date)              { errEl.textContent = 'Please select a date.';                  errEl.style.display = 'block'; return; }
-      if (!bookingType)       { errEl.textContent = 'Please select a booking type.';          errEl.style.display = 'block'; return; }
+      if (!name)        { errEl.textContent = 'Full name is required.';          errEl.style.display = 'block'; return; }
+      if (!email)       { errEl.textContent = 'Email address is required.';       errEl.style.display = 'block'; return; }
+      if (!phone)       { errEl.textContent = 'Contact number is required.';      errEl.style.display = 'block'; return; }
+      if (!date)        { errEl.textContent = 'Please select a date.';            errEl.style.display = 'block'; return; }
+      if (!bookingType) { errEl.textContent = 'Please select a booking type.';    errEl.style.display = 'block'; return; }
 
       btn.disabled = true; btn.textContent = 'Processing…';
 
       try {
-        let uid, userName;
-
-        // Create account, or sign in if email already registered
-        try {
-          const cred = await firebase.auth().createUserWithEmailAndPassword(email, password);
-          uid = cred.user.uid; userName = name;
-          await cred.user.updateProfile({ displayName: name });
-          await firebase.firestore().collection('users').doc(uid).set(
-            { displayName: name, email, role: 'user', createdAt: new Date().toISOString(), ...(phone ? { phone } : {}) },
-            { merge: true }
-          );
-        } catch (authErr) {
-          if (authErr.code === 'auth/email-already-in-use') {
-            const cred = await firebase.auth().signInWithEmailAndPassword(email, password);
-            uid = cred.user.uid;
-            userName = cred.user.displayName || name;
-          } else if (authErr.code === 'auth/invalid-email') {
-            throw new Error('Please enter a valid email address.');
-          } else if (authErr.code === 'auth/weak-password') {
-            throw new Error('Password must be at least 6 characters.');
-          } else {
-            throw authErr;
-          }
-        }
-
-        // Write booking synchronously (before auth state re-renders UI)
-        const reason = bookingType + (details ? ': ' + details : '');
-        const result = DB.addBooking({
-          venueId:         gklVenueId,
+        // Cloud Function handles: existing-user lookup (password ignored), new-user
+        // creation (password required), booking write, and organizer notifications.
+        const fn  = firebase.functions().httpsCallable('bookGroenkloofCourt');
+        const res = await fn({
+          name, email, phone, password,
+          venueId:     gklVenueId,
           courtIndex,
           date,
-          timeSlot:        _gklSlot,
-          type:            bookingType.toLowerCase(),
-          reason,
-          label:           reason,
-          bookerName:      userName,
-          onBehalfContact: phone || null,
-          status:          'pending',
-          requestedBy:     uid,
-          requestedByName: userName,
-          requestedAt:     new Date().toISOString(),
+          timeSlot:    _gklSlot,
+          bookingType,
+          details,
         });
 
-        if (!result) throw new Error('That slot is already taken — please choose a different time or court.');
-
-        // Non-critical: notify venue organizers by email
-        try {
-          await firebase.functions().httpsCallable('notifyBookingRequest')({ bookingId: result.id });
-        } catch (e) { /* non-critical */ }
+        // Sign the user in automatically with the returned custom token
+        if (res.data && res.data.customToken) {
+          await firebase.auth().signInWithCustomToken(res.data.customToken);
+        }
 
         toast('Booking requested ✓ — awaiting approval', 'success');
-        // Auth state change fires and re-renders calendar as logged-in user
+        // Auth state change re-renders the calendar as logged-in user
 
       } catch (err) {
-        const isWrongPass = err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential';
-        errEl.textContent = isWrongPass
-          ? 'Incorrect password. If you forgot it, use the Login button → Forgot password?'
-          : (err.message || 'Something went wrong. Please try again.');
+        const msg = (err.details && err.details.message) || err.message || 'Something went wrong. Please try again.';
+        errEl.textContent = msg;
         errEl.style.display = 'block';
         btn.disabled = false; btn.textContent = 'Request Booking';
       }

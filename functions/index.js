@@ -2011,3 +2011,136 @@ exports.contactAdmin = onCall(
     return { ok: true };
   }
 );
+
+// ── 11. Public: Groenkloof court booking (unauthenticated guests) ─────────────
+// Looks up or creates a user by email, writes the booking via Admin SDK (bypasses
+// Firestore rules), and returns a custom auth token so the client can sign in.
+exports.bookGroenkloofCourt = onCall(
+  { invoker: 'public', secrets: [EMAIL_USER, EMAIL_PASS] },
+  async (request) => {
+    const { name, email, phone, password, venueId, courtIndex, date, timeSlot, bookingType, details } = request.data || {};
+
+    if (!name    || !name.trim())           throw new HttpsError('invalid-argument', 'Full name is required');
+    if (!email   || !email.trim())          throw new HttpsError('invalid-argument', 'Email address is required');
+    if (!phone   || !phone.trim())          throw new HttpsError('invalid-argument', 'Contact number is required');
+    if (!venueId)                           throw new HttpsError('invalid-argument', 'venueId is required');
+    if (!date)                              throw new HttpsError('invalid-argument', 'date is required');
+    if (!timeSlot)                          throw new HttpsError('invalid-argument', 'timeSlot is required');
+    if (!bookingType || !bookingType.trim()) throw new HttpsError('invalid-argument', 'Booking type is required');
+
+    const db        = admin.firestore();
+    const authAdmin = admin.auth();
+    let uid, userName, isNewUser = false;
+
+    // Find existing account, or create one
+    try {
+      const existing = await authAdmin.getUserByEmail(email.trim());
+      uid      = existing.uid;
+      userName = existing.displayName || name.trim();
+    } catch (_notFound) {
+      // No existing account — password required to create one
+      if (!password || password.length < 6) {
+        throw new HttpsError('invalid-argument', 'A password of at least 6 characters is required to create your account');
+      }
+      const newUser = await authAdmin.createUser({ email: email.trim(), password, displayName: name.trim() });
+      uid      = newUser.uid;
+      userName = name.trim();
+      isNewUser = true;
+      await db.collection('users').doc(uid).set({
+        displayName: name.trim(),
+        email:       email.trim(),
+        role:        'user',
+        phone:       phone.trim(),
+        createdAt:   new Date().toISOString(),
+      });
+    }
+
+    // Check slot availability
+    const clash = await db.collection('bookings')
+      .where('venueId',    '==', venueId)
+      .where('courtIndex', '==', courtIndex || 0)
+      .where('date',       '==', date)
+      .where('timeSlot',   '==', timeSlot)
+      .get();
+    if (!clash.empty && clash.docs.some(d => ['confirmed', 'pending'].includes(d.data().status))) {
+      throw new HttpsError('already-exists', 'This slot is already booked — please choose a different time or court');
+    }
+
+    // Write booking via Admin SDK (bypasses Firestore security rules)
+    const reason     = (bookingType + (details && details.trim() ? ': ' + details.trim() : '')).trim();
+    const bookingRef = db.collection('bookings').doc();
+    await bookingRef.set({
+      id:              bookingRef.id,
+      venueId,
+      courtIndex:      courtIndex || 0,
+      date,
+      timeSlot,
+      type:            bookingType.toLowerCase(),
+      reason,
+      label:           reason,
+      bookerName:      userName,
+      onBehalfContact: phone.trim(),
+      status:          'pending',
+      requestedBy:     uid,
+      requestedByName: userName,
+      requestedAt:     new Date().toISOString(),
+    });
+    console.log(`[bookGroenkloofCourt] booking ${bookingRef.id} for uid=${uid} (new=${isNewUser})`);
+
+    // Notify venue organizers + admins
+    const venueSnap  = await db.collection('venues').doc(venueId).get();
+    const venueName  = venueSnap.exists ? (venueSnap.data().name || venueId) : venueId;
+    const adminSnap  = await db.collection('users').where('role', 'in', ['admin', 'master']).get();
+    const schoolSnap = await db.collection('schools').where('venueId', '==', venueId).get();
+    const orgUids    = new Set(adminSnap.docs.map(d => d.id));
+    for (const s of schoolSnap.docs) {
+      const sd = s.data();
+      if (Array.isArray(sd.organisers)) sd.organisers.forEach(o => orgUids.add(o));
+      if (sd.contactUid) orgUids.add(sd.contactUid);
+    }
+    const slotLabel = timeSlot === 'morning' ? 'Morning (07:00–14:00)' : timeSlot === 'afternoon' ? 'Afternoon (14:00–18:00)' : timeSlot;
+    const now        = admin.firestore.FieldValue.serverTimestamp();
+    const nb         = db.batch();
+    const toEmails   = [];
+    for (const oid of orgUids) {
+      nb.set(db.collection('notifications').doc(), {
+        uid: oid, type: 'booking_request',
+        title: `Booking request — ${venueName}`,
+        body:  `${userName} requested ${slotLabel} on ${date} (${reason})`,
+        fromName: userName, bookingId: bookingRef.id, read: false, createdAt: now,
+      });
+      const uSnap = await db.collection('users').doc(oid).get();
+      if (uSnap.exists && uSnap.data().email) toEmails.push(uSnap.data().email);
+    }
+    await nb.commit();
+
+    if (toEmails.length > 0) {
+      const emailUser = EMAIL_USER.value();
+      const emailPass = EMAIL_PASS.value();
+      if (emailUser && emailPass) {
+        try {
+          const transporter = nodemailer.createTransport({ service: 'gmail', auth: { user: emailUser, pass: emailPass } });
+          await transporter.sendMail({
+            from:    `"Court Campus" <${emailUser}>`,
+            to:      toEmails.join(', '),
+            subject: `[Court Campus] Booking request — ${venueName} ${date}`,
+            text: [
+              `A booking request has been submitted at ${venueName}.`,
+              ``,
+              `From:   ${userName} <${email.trim()}> / ${phone.trim()}`,
+              `Date:   ${date}`,
+              `Slot:   ${slotLabel}`,
+              `Court:  Court ${(courtIndex || 0) + 1}`,
+              `Reason: ${reason}`,
+              ``,
+              `Log in to approve or decline: ${APP_URL}`,
+            ].join('\n'),
+          });
+        } catch (e) { console.error('[bookGroenkloofCourt] sendMail failed:', e.message); }
+      }
+    }
+
+    const customToken = await authAdmin.createCustomToken(uid);
+    return { ok: true, bookingId: bookingRef.id, isNewUser, customToken };
+  }
+);
