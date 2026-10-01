@@ -631,18 +631,32 @@ const Calendar = (() => {
           DB.writeAudit('booking_approved', 'booking',
             `Approved request by ${esc(booking.requestedByName || 'user')}: ${esc(booking.reason || booking.label || '')} on ${dateStr}`,
             booking.id, booking.reason || booking.label || '');
+          if (booking.requestedBy && typeof NotificationService !== 'undefined') {
+            NotificationService.send({
+              type:          'booking_approved',
+              title:         'Booking Request Approved ✅',
+              body:          `Your request to book ${esc(booking.label || booking.reason || venue ? venue.name : '')} on ${formatDate(dateStr)} has been approved.`,
+              recipientUids: [booking.requestedBy],
+            });
+          }
           Modal.close('bookingModal');
           render();
           toast('Booking approved ✓', 'success');
-          // Send email notification (fire-and-forget)
           firebase.functions().httpsCallable('notifyBookingStatus')({ bookingId: booking.id, action: 'approved' }).catch(() => {});
         };
         document.getElementById('rejectBookingBtn').onclick = async () => {
           const btn = document.getElementById('rejectBookingBtn');
           if (btn) { btn.disabled = true; btn.textContent = 'Rejecting…'; }
           try {
-            // Send rejection email before deleting the booking doc
             await firebase.functions().httpsCallable('notifyBookingStatus')({ bookingId: booking.id, action: 'rejected' }).catch(() => {});
+            if (booking.requestedBy && typeof NotificationService !== 'undefined') {
+              NotificationService.send({
+                type:          'booking_rejected',
+                title:         'Booking Request Rejected',
+                body:          `Your request to book ${esc(booking.label || booking.reason || '')} on ${formatDate(dateStr)} has been declined.`,
+                recipientUids: [booking.requestedBy],
+              });
+            }
             await DB.rejectBooking(booking.id);
             DB.writeAudit('booking_rejected', 'booking',
               `Rejected request by ${esc(booking.requestedByName || 'user')}: ${esc(booking.reason || booking.label || '')} on ${dateStr}`,

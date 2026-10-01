@@ -985,6 +985,7 @@ const NotificationService = (() => {
       booking_request:             '📩',
       booking_approved:            '✅',
       booking_rejected:            '❌',
+      booking_cancelled:           '🚫',
     };
     return icons[type] || '🔔';
   }

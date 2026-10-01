@@ -290,7 +290,14 @@ const DB = {
       .where('uid', '==', uid)
       .onSnapshot(
         snap => {
-          const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+          const docs = snap.docs.map(d => {
+            const data = d.data();
+            // Normalize Firestore Timestamp → ISO string so sort + display work uniformly
+            if (data.createdAt && typeof data.createdAt.toDate === 'function') {
+              data.createdAt = data.createdAt.toDate().toISOString();
+            }
+            return { id: d.id, ...data };
+          });
           docs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
           callback(docs.slice(0, 50));
         },
