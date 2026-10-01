@@ -231,7 +231,117 @@ const CourtBooking = (() => {
         </div>
       </div>`;
 
+    // ── My Bookings section ─────────────────────────────────
+    const cbUser       = Auth.getUser();
+    const myBookings   = cbUser
+      ? DB.getBookings()
+          .filter(b => b.requestedBy === cbUser.uid)
+          .slice()
+          .sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.requestedAt || '').localeCompare(a.requestedAt || ''))
+      : [];
+
+    if (myBookings.length > 0) {
+      const groups = [];
+      const seenGroups = {};
+      myBookings.forEach(b => {
+        const key = b.groupId || ('__' + b.id);
+        if (!seenGroups[key]) { seenGroups[key] = { groupId: b.groupId || null, bookings: [] }; groups.push(seenGroups[key]); }
+        seenGroups[key].bookings.push(b);
+      });
+
+      let mbHtml = `<div class="card" style="margin-top:1.5rem">
+        <div class="card-header"><div class="card-title" style="margin:0">📋 My Bookings</div></div>
+        <div class="card-body" style="padding:.25rem .75rem .75rem">`;
+
+      groups.forEach(group => {
+        const isMulti      = !!(group.groupId && group.bookings.length > 1);
+        const anyActive    = group.bookings.some(b => b.status === 'pending' || b.status === 'confirmed');
+        if (isMulti) {
+          const label = group.bookings[0].label || group.bookings[0].type || 'Booking';
+          mbHtml += `<div class="cb-group-block" style="margin-bottom:.5rem">
+            <div class="cb-group-header">
+              <span><strong>📦 ${esc(label)}</strong> — ${group.bookings.length} slots</span>
+              ${anyActive ? `<button class="btn btn-sm btn-danger cb-cancel-group-btn" data-group-id="${esc(group.groupId)}">Cancel All</button>` : ''}
+            </div>`;
+        }
+        group.bookings.forEach(b => {
+          const venueName   = (DB.getVenues().find(v => v.id === b.venueId) || {}).name || b.venueId;
+          const isConfirmed = b.status === 'confirmed';
+          const isPending   = b.status === 'pending';
+          const isRejected  = b.status === 'rejected';
+          const isCancelled = b.status === 'cancelled';
+          const statusBadge = isConfirmed
+            ? `<span class="badge" style="background:#dcfce7;color:#166534;font-size:.7rem">Confirmed ✓</span>`
+            : isPending
+              ? `<span class="badge" style="background:#fef9c3;color:#854d0e;font-size:.7rem">Pending ⏳</span>`
+              : isRejected
+                ? `<span class="badge" style="background:#fee2e2;color:#991b1b;font-size:.7rem">Declined ✗</span>`
+                : isCancelled
+                  ? `<span class="badge" style="background:#f3f4f6;color:#6b7280;font-size:.7rem">Cancelled</span>`
+                  : `<span class="badge" style="background:#e0f2fe;color:#0369a1;font-size:.7rem">${esc(b.status || '—')}</span>`;
+          mbHtml += `<div class="admin-list-item${isMulti ? ' group-slot-item' : ''}" style="align-items:flex-start;gap:.75rem">
+            <div style="flex:1;min-width:0">
+              <div style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap">
+                <span style="font-weight:600">${esc(b.label || b.reason || b.type || 'Booking')}</span>${statusBadge}
+              </div>
+              <div class="text-muted" style="font-size:.82rem">
+                🏟️ ${esc(venueName)} &nbsp;📅 ${b.date ? formatDate(b.date) : '—'} &nbsp;⏰ ${getSlotDisplayName(b.timeSlot || '')} &nbsp;🎾 Court ${(typeof b.courtIndex === 'number') ? b.courtIndex + 1 : '—'}
+              </div>
+            </div>
+            <div style="display:flex;gap:.4rem;flex-shrink:0">
+              ${(isPending || isConfirmed) ? `<button class="btn btn-sm btn-danger cb-my-cancel-btn" data-id="${esc(b.id)}">Cancel</button>` : ''}
+            </div>
+          </div>`;
+        });
+        if (isMulti) mbHtml += `</div>`;
+      });
+      mbHtml += `</div></div>`;
+      el.insertAdjacentHTML('beforeend', mbHtml);
+    }
+
     // ── Wire up events ──────────────────────────────────────
+    // Cancel individual booking (My Bookings section)
+    el.querySelectorAll('.cb-my-cancel-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.id;
+        const b  = DB.getBookings().find(x => x.id === id);
+        if (!confirm(`Cancel this booking?\n\n"${b ? (b.label || b.type || 'Booking') : 'Booking'}" on ${b ? (b.date || '—') : '—'}`)) return;
+        btn.disabled = true; btn.textContent = 'Cancelling…';
+        try {
+          await DB.rejectBooking(id, 'cancelled');
+          firebase.functions().httpsCallable('notifyUserCancellation')({ bookingId: id }).catch(() => {});
+          render();
+          toast('Booking cancelled');
+        } catch (err) {
+          console.error('Cancel failed:', err);
+          btn.disabled = false; btn.textContent = 'Cancel';
+          toast('Failed to cancel — please try again', 'error');
+        }
+      });
+    });
+
+    // Cancel all slots in a group (My Bookings section)
+    el.querySelectorAll('.cb-cancel-group-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const groupId    = btn.dataset.groupId;
+        const groupSlots = DB.getBookings().filter(b => b.groupId === groupId && (b.status === 'pending' || b.status === 'confirmed'));
+        if (!confirm(`Cancel all ${groupSlots.length} slot(s) in this group booking?`)) return;
+        btn.disabled = true; btn.textContent = 'Cancelling…';
+        try {
+          for (const b of groupSlots) { await DB.rejectBooking(b.id, 'cancelled'); }
+          if (groupSlots.length > 0) {
+            firebase.functions().httpsCallable('notifyUserCancellation')({ bookingId: groupSlots[0].id, groupId }).catch(() => {});
+          }
+          render();
+          toast(`${groupSlots.length} booking(s) cancelled`);
+        } catch (err) {
+          console.error('Cancel group failed:', err);
+          btn.disabled = false; btn.textContent = 'Cancel All';
+          toast('Failed to cancel — please try again', 'error');
+        }
+      });
+    });
+
     document.getElementById('cbVenue').addEventListener('change', e => {
       _selectedVenueId = e.target.value;
       _cart = [];

@@ -2005,6 +2005,102 @@ exports.notifyBookingStatus = onCall(
   }
 );
 
+/**
+ * Called by the booking requester when they cancel their own booking.
+ * Notifies venue organizers via email + in-app notification.
+ */
+exports.notifyUserCancellation = onCall(
+  { secrets: [EMAIL_USER, EMAIL_PASS] },
+  async (request) => {
+    if (!request.auth) return { ok: false };
+    const { bookingId, groupId } = request.data || {};
+    if (!bookingId) return { ok: false };
+
+    const db = admin.firestore();
+
+    // Load the representative booking for venue/organizer lookup
+    const bSnap = await db.collection('bookings').doc(bookingId).get();
+    // Booking may already be soft-deleted (status=cancelled) — still readable
+    const booking = bSnap.exists ? { id: bSnap.id, ...bSnap.data() } : null;
+    if (!booking) return { ok: false };
+
+    // Only the original requester may call this
+    if (booking.requestedBy !== request.auth.uid) return { ok: false };
+
+    const vSnap = await db.collection('venues').doc(booking.venueId || '').get();
+    const vName = vSnap.exists ? vSnap.data().name : 'Unknown venue';
+
+    // Find organizer emails and UIDs (same logic as notifyBookingRequest)
+    const schoolsSnap = await db.collection('schools').where('venueId', '==', booking.venueId).get();
+    const orgEmails   = [];
+    const orgUids     = [];
+    for (const sDoc of schoolsSnap.docs) {
+      const usersSnap = await db.collection('users').where('schoolId', '==', sDoc.id).get();
+      for (const uDoc of usersSnap.docs) {
+        const u = uDoc.data();
+        if (['master', 'admin', 'organizer'].includes(u.role)) {
+          if (u.email) orgEmails.push(u.email);
+          orgUids.push(uDoc.id);
+        }
+      }
+    }
+    const adminsSnap = await db.collection('users').where('role', 'in', ['master', 'admin']).get();
+    adminsSnap.docs.forEach(d => {
+      if (d.data().email) orgEmails.push(d.data().email);
+      orgUids.push(d.id);
+    });
+
+    const recipients = [...new Set(orgEmails)];
+    const notifUids  = [...new Set(orgUids)];
+
+    const cancellerName = booking.requestedByName || booking.bookerName || 'A user';
+    const slot = booking.timeSlot === 'morning' ? 'Morning (07:00–14:00)' : booking.timeSlot === 'afternoon' ? 'Afternoon (14:00–18:00)' : (booking.timeSlot || '');
+
+    // In-app notifications for organizers
+    if (notifUids.length > 0) {
+      const now = admin.firestore.FieldValue.serverTimestamp();
+      const nb  = db.batch();
+      for (const uid of notifUids) {
+        nb.set(db.collection('notifications').doc(), {
+          uid, type: 'booking_cancelled',
+          title:    `Booking cancelled — ${vName}`,
+          body:     `${cancellerName} cancelled their booking for Court ${(booking.courtIndex || 0) + 1} on ${booking.date} (${booking.reason || booking.label || '—'})`,
+          read: false, createdAt: now, createdBy: request.auth.uid,
+        });
+      }
+      await nb.commit();
+    }
+
+    if (recipients.length === 0) return { ok: true, sent: 0 };
+
+    const emailUser = EMAIL_USER.value();
+    const emailPass = EMAIL_PASS.value();
+    if (!emailUser || !emailPass) return { ok: false };
+
+    const transporter = nodemailer.createTransport({ service: 'gmail', auth: { user: emailUser, pass: emailPass } });
+    const subject = `Court Booking Cancelled — ${vName} ${booking.date}`;
+    const text = [
+      `A court booking has been cancelled by the requester.`,
+      ``,
+      `Venue:  ${vName}`,
+      `Date:   ${booking.date}`,
+      `Court:  Court ${(booking.courtIndex || 0) + 1}`,
+      `Slot:   ${slot}`,
+      `Reason: ${booking.reason || booking.label || '—'}`,
+      `By:     ${cancellerName}`,
+      ``,
+      `Log in to Court Campus for details: ${APP_URL}`,
+    ].join('\n');
+
+    let sent = 0;
+    for (const email of recipients) {
+      try { await transporter.sendMail({ from: `"Court Campus" <${emailUser}>`, to: email, subject, text }); sent++; }
+      catch (e) { console.error('[notifyUserCancellation] sendMail failed:', e.message); }
+    }
+    return { ok: true, sent };
+  }
+);
+
 // ── 9. Scheduled: clean up expired court closures ─────────────────────────────
 // Removes closures whose endDate is more than 7 days in the past.
 exports.cleanExpiredClosures = onSchedule(
