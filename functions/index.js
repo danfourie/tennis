@@ -1827,16 +1827,17 @@ exports.notifyBookingRequest = onCall(
     for (const sDoc of schoolsSnap.docs) {
       const usersSnap = await db.collection('users').where('schoolId', '==', sDoc.id).get();
       for (const uDoc of usersSnap.docs) {
-        const role = uDoc.data().role;
-        if (['master', 'admin', 'organizer'].includes(role)) {
-          if (uDoc.data().email) orgEmails.push(uDoc.data().email);
+        const u = uDoc.data();
+        if (['master', 'admin', 'organizer'].includes(u.role) && !u.noBookingRequests) {
+          if (u.email) orgEmails.push(u.email);
           orgUids.push(uDoc.id);
         }
       }
     }
-    // Also include all admins/masters
+    // Also include all admins/masters (unless opted out of booking request notifications)
     const adminsSnap = await db.collection('users').where('role', 'in', ['master', 'admin']).get();
     adminsSnap.docs.forEach(d => {
+      if (d.data().noBookingRequests) return;
       if (d.data().email) orgEmails.push(d.data().email);
       orgUids.push(d.id);
     });
