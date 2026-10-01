@@ -1923,7 +1923,7 @@ exports.notifyBookingStatus = onCall(
   async (request) => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Login required');
     const { bookingId, action } = request.data || {};
-    if (!bookingId || !['approved', 'rejected'].includes(action)) throw new HttpsError('invalid-argument', 'bookingId and action required');
+    if (!bookingId || !['approved', 'rejected', 'cancelled'].includes(action)) throw new HttpsError('invalid-argument', 'bookingId and action required');
 
     const db         = admin.firestore();
     const callerSnap = await db.doc(`users/${request.auth.uid}`).get();
@@ -1959,7 +1959,9 @@ exports.notifyBookingStatus = onCall(
 
     const subject = action === 'approved'
       ? `Court Booking Approved — ${vName} ${booking.date}`
-      : `Court Booking Declined — ${vName} ${booking.date}`;
+      : action === 'cancelled'
+        ? `Court Booking Cancelled — ${vName} ${booking.date}`
+        : `Court Booking Declined — ${vName} ${booking.date}`;
     const text = action === 'approved'
       ? [
           `Your court booking request has been approved! ✓`,
@@ -1972,17 +1974,29 @@ exports.notifyBookingStatus = onCall(
           ``,
           `View your booking at: ${APP_URL}`,
         ].join('\n')
-      : [
-          `Unfortunately, your court booking request has been declined.`,
-          ``,
-          `Venue: ${vName}`,
-          `Date:  ${booking.date}`,
-          `Court: Court ${(booking.courtIndex || 0) + 1}`,
-          `Slot:  ${slot}`,
-          `Reason: ${booking.reason || booking.label || '—'}`,
-          ``,
-          `Please contact your venue organizer for more information, or submit a new request at: ${APP_URL}`,
-        ].join('\n');
+      : action === 'cancelled'
+        ? [
+            `Your confirmed court booking has been cancelled.`,
+            ``,
+            `Venue: ${vName}`,
+            `Date:  ${booking.date}`,
+            `Court: Court ${(booking.courtIndex || 0) + 1}`,
+            `Slot:  ${slot}`,
+            `Reason: ${booking.reason || booking.label || '—'}`,
+            ``,
+            `Please contact your venue organizer for more information or submit a new request at: ${APP_URL}`,
+          ].join('\n')
+        : [
+            `Unfortunately, your court booking request has been declined.`,
+            ``,
+            `Venue: ${vName}`,
+            `Date:  ${booking.date}`,
+            `Court: Court ${(booking.courtIndex || 0) + 1}`,
+            `Slot:  ${slot}`,
+            `Reason: ${booking.reason || booking.label || '—'}`,
+            ``,
+            `Please contact your venue organizer for more information, or submit a new request at: ${APP_URL}`,
+          ].join('\n');
 
     try {
       await transporter.sendMail({ from: `"Court Campus" <${emailUser}>`, to: reqEmail, subject, text });

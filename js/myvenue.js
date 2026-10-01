@@ -360,8 +360,9 @@ const MyVenue = (() => {
       });
 
       groups.forEach(group => {
-        const isMulti   = !!(group.groupId && group.bookings.length > 1);
-        const anyPending = group.bookings.some(b => b.status === 'pending');
+        const isMulti     = !!(group.groupId && group.bookings.length > 1);
+        const anyPending   = group.bookings.some(b => b.status === 'pending');
+        const anyConfirmed = group.bookings.some(b => b.status === 'confirmed');
 
         if (isMulti) {
           const requester = group.bookings[0].requestedByName || 'User';
@@ -369,9 +370,10 @@ const MyVenue = (() => {
           html += `<div class="cb-group-block">
             <div class="cb-group-header">
               <span><strong>📦 ${esc(requester)}</strong> — ${group.bookings.length} slots · ${esc(label)}</span>
-              ${anyPending ? `<div style="display:flex;gap:.4rem">
-                <button class="btn btn-sm btn-danger mv-reject-group-btn" data-group-id="${esc(group.groupId)}">Reject All</button>
-                <button class="btn btn-sm btn-primary mv-approve-group-btn" data-group-id="${esc(group.groupId)}">Approve All</button>
+              ${(anyPending || anyConfirmed) ? `<div style="display:flex;gap:.4rem">
+                ${(anyPending || anyConfirmed) ? `<button class="btn btn-sm btn-danger mv-cancel-group-btn" data-group-id="${esc(group.groupId)}">Cancel All</button>` : ''}
+                ${anyPending ? `<button class="btn btn-sm btn-danger mv-reject-group-btn" data-group-id="${esc(group.groupId)}">Reject All</button>` : ''}
+                ${anyPending ? `<button class="btn btn-sm btn-primary mv-approve-group-btn" data-group-id="${esc(group.groupId)}">Approve All</button>` : ''}
               </div>` : ''}
             </div>`;
         }
@@ -645,6 +647,35 @@ const MyVenue = (() => {
       });
     });
 
+    // ── Booking: cancel entire group (pending + confirmed) ──────────
+    container.querySelectorAll('.mv-cancel-group-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const groupId      = btn.dataset.groupId;
+        const groupActive  = DB.getBookings().filter(b => b.groupId === groupId && b.venueId === venue.id && ['pending', 'confirmed'].includes(b.status));
+        if (groupActive.length === 0) return;
+        if (!confirm(`Cancel all ${groupActive.length} slot(s) in this group booking?`)) return;
+        btn.disabled = true; btn.textContent = 'Cancelling…';
+        const first = groupActive[0];
+        if (first) {
+          try { await firebase.functions().httpsCallable('notifyBookingStatus')({ bookingId: first.id, action: 'cancelled' }); } catch (e) { /* non-critical */ }
+        }
+        if (first && first.requestedBy && typeof NotificationService !== 'undefined') {
+          NotificationService.send({
+            type:          'booking_cancelled',
+            title:         'Booking Cancelled',
+            body:          `Your ${groupActive.length}-slot booking at ${esc(venue.name)} has been cancelled.`,
+            recipientUids: [first.requestedBy],
+          });
+        }
+        try {
+          for (const b of groupActive) { await DB.rejectBooking(b.id, 'cancelled'); }
+        } catch (e) { /* best-effort */ }
+        DB.writeAudit('booking_cancelled', 'booking',
+          `Cancelled group booking (${groupActive.length} slots) at ${venue.name}`, null, '');
+        toast(`${groupActive.length} booking(s) cancelled`, 'success');
+      });
+    });
+
     // ── Booking: approve ────────────────────────────────────────
     container.querySelectorAll('.mv-approve-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
@@ -682,9 +713,9 @@ const MyVenue = (() => {
         if (!confirm(confirmMsg)) return;
         btn.disabled = true; btn.textContent = wasCancelling ? 'Cancelling…' : 'Rejecting…';
         try {
-          if (!wasCancelling) {
-            try { await firebase.functions().httpsCallable('notifyBookingStatus')({ bookingId: id, action: 'rejected' }); } catch (e) { /* non-critical */ }
-          }
+          try {
+            await firebase.functions().httpsCallable('notifyBookingStatus')({ bookingId: id, action: wasCancelling ? 'cancelled' : 'rejected' });
+          } catch (e) { /* non-critical */ }
           await DB.rejectBooking(id, wasCancelling ? 'cancelled' : 'rejected');
           DB.writeAudit(wasCancelling ? 'booking_cancelled' : 'booking_rejected', 'booking',
             `${wasCancelling ? 'Cancelled' : 'Rejected'} booking: ${booking ? esc(booking.label || '') : ''} on ${booking ? booking.date : ''}`,
