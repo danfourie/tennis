@@ -657,7 +657,7 @@ const Calendar = (() => {
                 recipientUids: [booking.requestedBy],
               });
             }
-            await DB.rejectBooking(booking.id);
+            await DB.rejectBooking(booking.id, 'rejected');
             DB.writeAudit('booking_rejected', 'booking',
               `Rejected request by ${esc(booking.requestedByName || 'user')}: ${esc(booking.reason || booking.label || '')} on ${dateStr}`,
               booking.id, booking.reason || booking.label || '');

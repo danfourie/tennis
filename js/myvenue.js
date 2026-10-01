@@ -331,10 +331,10 @@ const MyVenue = (() => {
 
     // ── Bookings ──────────────────────────────────────────────────
     const venueBookings = DB.getBookings()
-      .filter(b => b.venueId === venue.id && b.status !== 'rejected')
+      .filter(b => b.venueId === venue.id)
       .slice()
       .sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.timeSlot || '').localeCompare(b.timeSlot || ''));
-    const pendingCount = venueBookings.filter(b => b.status !== 'confirmed').length;
+    const pendingCount = venueBookings.filter(b => b.status === 'pending').length;
     const borderColor  = pendingCount > 0 ? 'var(--warning,#f59e0b)' : 'var(--success,#22c55e)';
 
     html += `<div class="card" style="margin-bottom:1.5rem;border-left:4px solid ${borderColor}">
@@ -379,15 +379,22 @@ const MyVenue = (() => {
         group.bookings.forEach(b => {
           const isConfirmed = b.status === 'confirmed';
           const isPending   = b.status === 'pending';
+          const isRejected  = b.status === 'rejected';
+          const isCancelled = b.status === 'cancelled';
           const statusBadge = isConfirmed
             ? `<span class="badge" style="background:#dcfce7;color:#166534;font-size:.7rem">Confirmed ✓</span>`
             : isPending
               ? `<span class="badge" style="background:#fef9c3;color:#854d0e;font-size:.7rem">Request</span>`
-              : `<span class="badge" style="background:#e0f2fe;color:#0369a1;font-size:.7rem">Admin-scheduled</span>`;
-          const actionBtns = isConfirmed
-            ? `<button class="btn btn-sm btn-danger mv-reject-btn" data-id="${esc(b.id)}" data-label="Cancel">Cancel</button>`
-            : `<button class="btn btn-sm btn-danger mv-reject-btn" data-id="${esc(b.id)}" data-label="${isPending ? 'Reject' : 'Delete'}">${isPending ? 'Reject' : 'Delete'}</button>
-               <button class="btn btn-sm btn-primary mv-approve-btn" data-id="${esc(b.id)}">${isPending ? 'Approve ✓' : 'Confirm ✓'}</button>`;
+              : isRejected
+                ? `<span class="badge" style="background:#fee2e2;color:#991b1b;font-size:.7rem">Rejected ✗</span>`
+                : isCancelled
+                  ? `<span class="badge" style="background:#f3f4f6;color:#6b7280;font-size:.7rem">Cancelled</span>`
+                  : `<span class="badge" style="background:#e0f2fe;color:#0369a1;font-size:.7rem">Admin-scheduled</span>`;
+          const actionBtns = (isRejected || isCancelled) ? '' :
+            isConfirmed
+              ? `<button class="btn btn-sm btn-danger mv-reject-btn" data-id="${esc(b.id)}" data-label="Cancel">Cancel</button>`
+              : `<button class="btn btn-sm btn-danger mv-reject-btn" data-id="${esc(b.id)}" data-label="${isPending ? 'Reject' : 'Delete'}">${isPending ? 'Reject' : 'Delete'}</button>
+                 <button class="btn btn-sm btn-primary mv-approve-btn" data-id="${esc(b.id)}">${isPending ? 'Approve ✓' : 'Confirm ✓'}</button>`;
 
           html += `<div class="admin-list-item${isMulti ? ' group-slot-item' : ''}" style="align-items:flex-start;gap:.75rem">
             <div style="flex:1;min-width:0">
@@ -630,7 +637,7 @@ const MyVenue = (() => {
           });
         }
         try {
-          for (const b of groupPending) { await DB.rejectBooking(b.id); }
+          for (const b of groupPending) { await DB.rejectBooking(b.id, 'rejected'); }
         } catch (e) { /* best-effort */ }
         DB.writeAudit('booking_rejected', 'booking',
           `Rejected group booking (${groupPending.length} slots) at ${venue.name}`, null, '');
@@ -675,11 +682,10 @@ const MyVenue = (() => {
         if (!confirm(confirmMsg)) return;
         btn.disabled = true; btn.textContent = wasCancelling ? 'Cancelling…' : 'Rejecting…';
         try {
-          // Email requester before deleting (booking doc must still exist for the CF to read it)
           if (!wasCancelling) {
             try { await firebase.functions().httpsCallable('notifyBookingStatus')({ bookingId: id, action: 'rejected' }); } catch (e) { /* non-critical */ }
           }
-          await DB.rejectBooking(id);
+          await DB.rejectBooking(id, wasCancelling ? 'cancelled' : 'rejected');
           DB.writeAudit(wasCancelling ? 'booking_cancelled' : 'booking_rejected', 'booking',
             `${wasCancelling ? 'Cancelled' : 'Rejected'} booking: ${booking ? esc(booking.label || '') : ''} on ${booking ? booking.date : ''}`,
             id, booking ? booking.label || '' : '');

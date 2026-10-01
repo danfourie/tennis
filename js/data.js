@@ -103,7 +103,7 @@ const DB = {
       b.courtIndex  === booking.courtIndex &&
       b.date        === booking.date &&
       b.timeSlot    === booking.timeSlot &&
-      b.status      !== 'rejected'
+      b.status      !== 'rejected' && b.status !== 'cancelled'
     );
     if (duplicate) return null;  // caller should check for null and toast
     booking.id = booking.id || uid();
@@ -123,7 +123,8 @@ const DB = {
     return _cache.bookings.filter(b =>
       b.venueId    === venueId &&
       b.courtIndex === courtIndex &&
-      b.date       === dateStr
+      b.date       === dateStr &&
+      b.status !== 'rejected' && b.status !== 'cancelled'
     );
   },
 
@@ -138,8 +139,14 @@ const DB = {
     booking.approvedAt = new Date().toISOString();
     this.updateBooking(booking);
   },
-  rejectBooking(id) {
-    return this.deleteBooking(id);
+  rejectBooking(id, status) {
+    const s = status || 'rejected';
+    const booking = _cache.bookings.find(b => b.id === id);
+    if (booking) {
+      booking.status = s;
+      booking.rejectedAt = new Date().toISOString();
+    }
+    return _doc('bookings', id).update({ status: s, rejectedAt: new Date().toISOString() });
   },
 
   // ── Leagues ───────────────────────────────────────────────
@@ -573,6 +580,7 @@ function isCourtClosed(venueId, courtIndex, dateStr, timeStr) {
 
 function getSlotBooking(venueId, courtIndex, dateStr, slot) {
   return DB.getBookings().find(b => {
+    if (['rejected', 'cancelled'].includes(b.status)) return false;
     if (b.venueId !== venueId || b.courtIndex !== courtIndex || b.date !== dateStr) return false;
     if (b.timeSlot === slot) return true;
     // Backward compat: map old hourly timeSlots to morning/afternoon
