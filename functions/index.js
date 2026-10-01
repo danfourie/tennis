@@ -1796,6 +1796,58 @@ body{margin:0;padding:0;background:#f1f5f9;font-family:Arial,sans-serif}
  * Called from CourtBooking.js after a pending request is submitted.
  * Looks up venue organizers and emails them about the new request.
  */
+// ── HTML email helpers for booking notifications ──────────────────────────────
+function _h(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function _bookingEmailHtml({ headerBg, headerLabel, bodyHtml }) {
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    body{font-family:Arial,sans-serif;background:#f4f7fb;margin:0;padding:0}
+    .wrap{max-width:560px;margin:32px auto;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.1)}
+    .hdr{background:${headerBg};padding:28px 32px;text-align:center}
+    .logo{color:#fff;margin:0;font-size:24px;font-weight:700;letter-spacing:-.5px}
+    .sub{color:rgba(255,255,255,.85);margin:6px 0 0;font-size:14px}
+    .bdy{padding:28px 32px;color:#1e293b;line-height:1.6;font-size:15px}
+    .bdy p{margin:0 0 14px}
+    .box{background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:16px 20px;margin:16px 0}
+    .box table{width:100%;border-collapse:collapse;font-size:14px}
+    .box td{padding:5px 0;vertical-align:top}
+    .box td:first-child{color:#64748b;width:120px;white-space:nowrap}
+    .box td:last-child{color:#0f172a;font-weight:500}
+    .stbl{width:100%;font-size:13px;border-collapse:collapse;margin:12px 0;border:1px solid #e2e8f0;border-radius:6px;overflow:hidden}
+    .stbl th,.stbl td{padding:7px 10px;text-align:left}
+    .stbl th{background:#f1f5f9;color:#475569;font-size:11px;text-transform:uppercase;letter-spacing:.5px}
+    .stbl tr+tr td{border-top:1px solid #e2e8f0}
+    .cta{text-align:center;margin:24px 0}
+    .cta a{background:${headerBg};color:#fff!important;text-decoration:none;padding:13px 32px;border-radius:6px;font-size:15px;font-weight:600;display:inline-block}
+    .ftr{text-align:center;padding:16px 32px;font-size:11px;color:#94a3b8;border-top:1px solid #e2e8f0}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="hdr">
+      <div class="logo">🎾 Court Campus</div>
+      <div class="sub">${_h(headerLabel)}</div>
+    </div>
+    <div class="bdy">
+      ${bodyHtml}
+      <div class="cta"><a href="${APP_URL}">Open Court Campus &rarr;</a></div>
+    </div>
+    <div class="ftr">
+      Court Campus &middot; <a href="${APP_URL}" style="color:#94a3b8">${APP_URL}</a><br>
+      You received this automated notification from Court Campus.
+    </div>
+  </div>
+</body>
+</html>`;
+}
+
 exports.notifyBookingRequest = onCall(
   { secrets: [EMAIL_USER, EMAIL_PASS] },
   async (request) => {
@@ -1905,10 +1957,50 @@ exports.notifyBookingRequest = onCall(
       `Log in to Court Campus to approve or decline: ${APP_URL}`,
     ].filter(Boolean).join('\n');
 
+    const sortedSlots = bookings
+      .slice()
+      .sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.courtIndex || 0) - (b.courtIndex || 0));
+    const detailsHtml = bookings.length === 1
+      ? `<div class="box"><table>
+          <tr><td>Venue</td><td>${_h(vName)}</td></tr>
+          <tr><td>Date</td><td>${_h(booking.date)}</td></tr>
+          <tr><td>Court</td><td>Court ${(booking.courtIndex || 0) + 1}</td></tr>
+          <tr><td>Slot</td><td>${_h(_slotStr(booking.timeSlot))}</td></tr>
+          <tr><td>Reason</td><td>${_h(booking.reason || booking.label || '—')}</td></tr>
+          <tr><td>Booker</td><td>${_h(booking.bookerName || booking.requestedByName || '—')}</td></tr>
+          ${booking.onBehalfName ? `<tr><td>On behalf of</td><td>${_h(booking.onBehalfName)}${booking.onBehalfContact ? ` (${_h(booking.onBehalfContact)})` : ''}</td></tr>` : ''}
+        </table></div>`
+      : `<div class="box"><table>
+          <tr><td>Venue</td><td>${_h(vName)}</td></tr>
+          <tr><td>Slots</td><td>${bookings.length}</td></tr>
+          <tr><td>Reason</td><td>${_h(booking.reason || booking.label || '—')}</td></tr>
+          <tr><td>Booker</td><td>${_h(booking.bookerName || booking.requestedByName || '—')}</td></tr>
+        </table></div>
+        <table class="stbl">
+          <thead><tr><th>#</th><th>Date</th><th>Court</th><th>Slot</th></tr></thead>
+          <tbody>${sortedSlots.map((b, i) => `<tr>
+            <td>${i + 1}</td>
+            <td>${_h(b.date)}</td>
+            <td>Court ${(b.courtIndex || 0) + 1}</td>
+            <td>${_h(_slotStr(b.timeSlot))}</td>
+          </tr>`).join('')}</tbody>
+        </table>`;
+    const htmlEmail = _bookingEmailHtml({
+      headerBg:    '#3b82f6',
+      headerLabel: bookings.length > 1 ? `New Booking Request — ${bookings.length} Slots` : 'New Booking Request',
+      bodyHtml: `<p>${bookings.length > 1
+        ? `A new court booking request for <strong>${bookings.length} slots</strong> has been submitted at <strong>${_h(vName)}</strong>.`
+        : `A new court booking request has been submitted at <strong>${_h(vName)}</strong>.`}</p>
+        ${detailsHtml}
+        <p style="font-size:13px;color:#64748b">Please log in to approve or decline this request.</p>`,
+    });
+
     let sent = 0;
     for (const email of recipients) {
-      try { await transporter.sendMail({ from: `"Court Campus" <${emailUser}>`, to: email, subject, text }); sent++; }
-      catch (e) { console.error('[notifyBookingRequest] sendMail failed:', e.message); }
+      try {
+        await transporter.sendMail({ from: `"Court Campus" <${emailUser}>`, to: email, subject, text, html: htmlEmail });
+        sent++;
+      } catch (e) { console.error('[notifyBookingRequest] sendMail failed:', e.message); }
     }
     return { ok: true, sent };
   }
@@ -1998,8 +2090,30 @@ exports.notifyBookingStatus = onCall(
             `Please contact your venue organizer for more information, or submit a new request at: ${APP_URL}`,
           ].join('\n');
 
+    const detailsBox = `<div class="box"><table>
+      <tr><td>Venue</td><td>${_h(vName)}</td></tr>
+      <tr><td>Date</td><td>${_h(booking.date)}</td></tr>
+      <tr><td>Court</td><td>Court ${(booking.courtIndex || 0) + 1}</td></tr>
+      <tr><td>Slot</td><td>${_h(slot)}</td></tr>
+      <tr><td>Reason</td><td>${_h(booking.reason || booking.label || '—')}</td></tr>
+    </table></div>`;
+    const htmlEmail = _bookingEmailHtml(
+      action === 'approved' ? {
+        headerBg:    '#16a34a',
+        headerLabel: 'Booking Approved ✓',
+        bodyHtml:    `<p>Great news — your court booking has been <strong>approved</strong>!</p>${detailsBox}<p style="font-size:13px;color:#64748b">See you on the court!</p>`,
+      } : action === 'cancelled' ? {
+        headerBg:    '#d97706',
+        headerLabel: 'Booking Cancelled',
+        bodyHtml:    `<p>Your confirmed court booking has been <strong>cancelled</strong> by the venue organizer.</p>${detailsBox}<p style="font-size:13px;color:#64748b">Please contact your venue organizer for more information, or submit a new request.</p>`,
+      } : {
+        headerBg:    '#dc2626',
+        headerLabel: 'Booking Request Declined',
+        bodyHtml:    `<p>Unfortunately your court booking request has been <strong>declined</strong>.</p>${detailsBox}<p style="font-size:13px;color:#64748b">Please contact your venue organizer for more information, or submit a new request.</p>`,
+      }
+    );
     try {
-      await transporter.sendMail({ from: `"Court Campus" <${emailUser}>`, to: reqEmail, subject, text });
+      await transporter.sendMail({ from: `"Court Campus" <${emailUser}>`, to: reqEmail, subject, text, html: htmlEmail });
     } catch (e) { console.error('[notifyBookingStatus] sendMail failed:', e.message); }
     return { ok: true };
   }
@@ -2091,11 +2205,26 @@ exports.notifyUserCancellation = onCall(
       ``,
       `Log in to Court Campus for details: ${APP_URL}`,
     ].join('\n');
+    const htmlEmail = _bookingEmailHtml({
+      headerBg:    '#d97706',
+      headerLabel: 'Booking Cancelled by Requester',
+      bodyHtml:    `<p>A court booking has been <strong>cancelled</strong> by the requester.</p>
+        <div class="box"><table>
+          <tr><td>Venue</td><td>${_h(vName)}</td></tr>
+          <tr><td>Date</td><td>${_h(booking.date)}</td></tr>
+          <tr><td>Court</td><td>Court ${(booking.courtIndex || 0) + 1}</td></tr>
+          <tr><td>Slot</td><td>${_h(slot)}</td></tr>
+          <tr><td>Reason</td><td>${_h(booking.reason || booking.label || '—')}</td></tr>
+          <tr><td>Cancelled by</td><td>${_h(cancellerName)}</td></tr>
+        </table></div>`,
+    });
 
     let sent = 0;
     for (const email of recipients) {
-      try { await transporter.sendMail({ from: `"Court Campus" <${emailUser}>`, to: email, subject, text }); sent++; }
-      catch (e) { console.error('[notifyUserCancellation] sendMail failed:', e.message); }
+      try {
+        await transporter.sendMail({ from: `"Court Campus" <${emailUser}>`, to: email, subject, text, html: htmlEmail });
+        sent++;
+      } catch (e) { console.error('[notifyUserCancellation] sendMail failed:', e.message); }
     }
     return { ok: true, sent };
   }
