@@ -672,30 +672,39 @@ const Calendar = (() => {
           }
         };
       } else if (canManage) {
-        // Admin / venue organiser: delete confirmed booking
+        // Admin / venue organiser: cancel confirmed booking (soft-delete)
         footer.innerHTML = `
           <button class="btn btn-secondary" data-modal="bookingModal">Close</button>
-          <button class="btn btn-danger" id="deleteBookingBtn">Delete Booking</button>`;
+          <button class="btn btn-danger" id="deleteBookingBtn">Cancel Booking</button>`;
         document.getElementById('deleteBookingBtn').onclick = async () => {
           const btn = document.getElementById('deleteBookingBtn');
-          if (btn) { btn.disabled = true; btn.textContent = 'Deleting…'; }
+          if (!confirm(`Cancel this booking?\n\n"${booking.label || 'Booking'}" on ${dateStr}\n\nThe requester will be notified.`)) return;
+          if (btn) { btn.disabled = true; btn.textContent = 'Cancelling…'; }
           try {
-            await DB.deleteBooking(booking.id);
-            DB.writeAudit('booking_deleted', 'booking',
-              `Booking deleted: ${esc(booking.label || '')} on ${dateStr}`,
+            firebase.functions().httpsCallable('notifyBookingStatus')({ bookingId: booking.id, action: 'cancelled' }).catch(() => {});
+            if (booking.requestedBy && typeof NotificationService !== 'undefined') {
+              NotificationService.send({
+                type: 'booking_cancelled', title: 'Booking Cancelled',
+                body: `Your confirmed booking for ${esc(booking.label || '')} on ${formatDate(dateStr)} has been cancelled.`,
+                recipientUids: [booking.requestedBy],
+              });
+            }
+            await DB.rejectBooking(booking.id, 'cancelled');
+            DB.writeAudit('booking_cancelled', 'booking',
+              `Booking cancelled: ${esc(booking.label || '')} on ${dateStr}`,
               booking.id, booking.label || '');
             Modal.close('bookingModal');
             render();
-            toast('Booking deleted', 'success');
+            toast('Booking cancelled', 'success');
           } catch (err) {
-            console.error('Delete booking failed:', err);
-            if (btn) { btn.disabled = false; btn.textContent = 'Delete Booking'; }
-            toast('Failed to delete booking — please try again', 'error');
+            console.error('Cancel booking failed:', err);
+            if (btn) { btn.disabled = false; btn.textContent = 'Cancel Booking'; }
+            toast('Failed to cancel booking — please try again', 'error');
             render();
           }
         };
       } else if (isOwnRequest) {
-        // Owner: cancel own pending request
+        // Owner: cancel own pending request (soft-delete)
         footer.innerHTML = `
           <button class="btn btn-secondary" data-modal="bookingModal">Close</button>
           <button class="btn btn-danger" id="cancelRequestBtn">Cancel My Request</button>`;
@@ -703,7 +712,8 @@ const Calendar = (() => {
           const btn = document.getElementById('cancelRequestBtn');
           if (btn) { btn.disabled = true; btn.textContent = 'Cancelling…'; }
           try {
-            await DB.deleteBooking(booking.id);
+            await DB.rejectBooking(booking.id, 'cancelled');
+            firebase.functions().httpsCallable('notifyUserCancellation')({ bookingId: booking.id }).catch(() => {});
             DB.writeAudit('booking_cancelled', 'booking',
               `Request cancelled by requester: ${esc(booking.label || '')} on ${dateStr}`,
               booking.id, booking.label || '');
