@@ -93,15 +93,20 @@ service cloud.firestore {
             && request.resource.data.status == 'pending'
             && request.resource.data.requestedBy == request.auth.uid);
 
-      // Admin/master can update any booking; users can update their own pending bookings;
-      // venue owners can approve/reject any pending booking at their venue
+      // Admin/master: full update
+      // Venue school contacts: approve/reject/cancel any booking at their venue
+      // Requester: update own pending booking, or cancel own booking at any status
       allow update: if isAdminRole()
+        || (isSignedIn()
+            && getUserSchoolId() != null
+            && get(/databases/$(database)/documents/schools/$(getUserSchoolId())).data.venueId == resource.data.venueId)
         || (isSignedIn()
             && resource.data.requestedBy == request.auth.uid
             && resource.data.status == 'pending')
         || (isSignedIn()
-            && getUserSchoolId() != null
-            && get(/databases/$(database)/documents/schools/$(getUserSchoolId())).data.venueId == resource.data.venueId);
+            && resource.data.requestedBy == request.auth.uid
+            && request.resource.data.status == 'cancelled'
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'rejectedAt']));
 
       // Admin/master can delete any booking; users can withdraw their own pending ones;
       // venue owners can reject (delete) pending bookings at their venue
