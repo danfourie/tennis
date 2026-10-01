@@ -708,7 +708,7 @@ const Calendar = (() => {
       }
 
     } else if (Auth.isAdmin() || isOrganizer) {
-      // ── Admin / Venue Organiser: confirmed direct booking ────
+      // ── Admin / Venue Organiser: submit pending booking request ────
       const _prof = Auth.getProfile();
       const _defaultBooker = _prof ? (_prof.displayName || _prof.email || '') : '';
       body.innerHTML = `
@@ -757,9 +757,9 @@ const Calendar = (() => {
 
       footer.innerHTML = `
         <button class="btn btn-secondary" data-modal="bookingModal">Cancel</button>
-        <button class="btn btn-primary"   id="saveBookingBtn">Save Booking</button>`;
+        <button class="btn btn-primary"   id="saveBookingBtn">Submit Booking Request</button>`;
 
-      document.getElementById('saveBookingBtn').onclick = () => {
+      document.getElementById('saveBookingBtn').onclick = async () => {
         const booker        = document.getElementById('newBookingBooker').value.trim();
         const reason        = document.getElementById('newBookingReason').value.trim();
         const type          = document.getElementById('newBookingType').value;
@@ -778,18 +778,22 @@ const Calendar = (() => {
           onBehalfName:       onBehalfName  || null,
           onBehalfContact:    onBehalfContact || null,
           notes:              notes || null,
-          status:             'confirmed',
+          status:             'pending',
           requestedBy:        _adminUser ? _adminUser.uid : null,
           requestedByName:    _adminProf ? (_adminProf.displayName || _adminProf.email) : null,
           requestedAt:        new Date().toISOString(),
         });
         if (!result) { toast('This slot is already booked', 'error'); return; }
-        DB.writeAudit('booking_created', 'booking',
-          `Booked: ${reason} on ${dateStr} (${getSlotDisplayName(timeStr)}) at ${venue.name} Court ${courtIndex + 1}`,
+        DB.writeAudit('booking_requested', 'booking',
+          `Requested: ${reason} on ${dateStr} (${getSlotDisplayName(timeStr)}) at ${venue.name} Court ${courtIndex + 1}`,
           null, reason);
         Modal.close('bookingModal');
         render();
-        toast('Booking confirmed ✓', 'success');
+        toast('Booking request submitted — awaiting approval ✓', 'success');
+        // Notify venue organizers via Cloud Function (fire-and-forget)
+        try {
+          await firebase.functions().httpsCallable('notifyBookingRequest')({ bookingId: result.id });
+        } catch (e) { /* non-critical */ }
       };
 
     } else if (Auth.isLoggedIn()) {
