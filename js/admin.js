@@ -1207,11 +1207,13 @@ function _orgRow(o) {
 
   // ── Bookings log ─────────────────────────────────────────────────────────
   function renderBookingsLog() {
-    // Populate venue filter
+    // Populate venue filter — preserve current selection before rebuilding options
     const vSel = document.getElementById('bookingsVenueFilter');
     if (vSel) {
+      const prevVenue = vSel.value;
       vSel.innerHTML = '<option value="">All Venues</option>' +
         DB.getVenues().map(v => `<option value="${v.id}">${esc(v.name)}</option>`).join('');
+      if (prevVenue) vSel.value = prevVenue;
       vSel.removeEventListener('change', renderBookingsLog);
       vSel.addEventListener('change', renderBookingsLog);
     }
@@ -1220,18 +1222,25 @@ function _orgRow(o) {
       pSel.removeEventListener('change', renderBookingsLog);
       pSel.addEventListener('change', renderBookingsLog);
     }
+    const sSel = document.getElementById('bookingsStatusFilter');
+    if (sSel) {
+      sSel.removeEventListener('change', renderBookingsLog);
+      sSel.addEventListener('change', renderBookingsLog);
+    }
     const exportBtn = document.getElementById('exportBookingsBtn');
     if (exportBtn) {
       exportBtn.onclick = _exportBookingsExcel;
     }
 
-    const venueId = vSel ? vSel.value : '';
-    const period  = pSel ? pSel.value : 'all';
-    const el      = document.getElementById('bookingsLogList');
+    const venueId      = vSel ? vSel.value : '';
+    const period       = pSel ? pSel.value : 'all';
+    const statusFilter = sSel ? sSel.value : '';
+    const el           = document.getElementById('bookingsLogList');
     if (!el) return;
 
     let bookings = DB.getBookings().slice();
-    if (venueId) bookings = bookings.filter(b => b.venueId === venueId);
+    if (venueId)      bookings = bookings.filter(b => b.venueId === venueId);
+    if (statusFilter) bookings = bookings.filter(b => b.status === statusFilter);
 
     // Period filter
     const now      = new Date();
@@ -1272,8 +1281,10 @@ function _orgRow(o) {
             ${bookings.map(b => {
               const venue  = venues.find(v => v.id === b.venueId);
               const slot   = b.timeSlot === 'morning' || b.timeSlot === 'afternoon' ? getSlotDisplayName(b.timeSlot) : b.timeSlot;
-              const status = b.status === 'confirmed' ? '<span class="badge badge-green">Confirmed</span>'
-                           : b.status === 'pending'   ? '<span class="badge badge-amber">Pending</span>'
+              const status = b.status === 'confirmed'  ? '<span class="badge badge-green">Confirmed</span>'
+                           : b.status === 'pending'    ? '<span class="badge badge-amber">Pending</span>'
+                           : b.status === 'cancelled'  ? '<span class="badge badge-gray">Cancelled</span>'
+                           : b.status === 'rejected'   ? '<span class="badge badge-red">Rejected</span>'
                            : `<span class="badge badge-red">${esc(b.status)}</span>`;
               return `<tr>
                 <td>${esc(formatDate(b.date))}</td>
