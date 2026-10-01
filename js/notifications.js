@@ -272,7 +272,15 @@ const NotificationService = (() => {
     if (!panel) return;
     const willOpen = panel.classList.contains('hidden');
     panel.classList.toggle('hidden', !willOpen);
-    if (willOpen) _refreshPanel();
+    if (willOpen) {
+      try {
+        _refreshPanel();
+      } catch (err) {
+        console.error('[NotificationService] _refreshPanel error:', err);
+        const list = document.getElementById('notifList');
+        if (list) list.innerHTML = '<div class="notif-empty">Could not load notifications</div>';
+      }
+    }
   }
 
   let _showReadNotifs = false;
@@ -950,7 +958,10 @@ const NotificationService = (() => {
   // ── Helpers ──────────────────────────────────────────────────
   function _relativeTime(isoStr) {
     if (!isoStr) return '';
-    const diff = Date.now() - new Date(isoStr).getTime();
+    // Firestore Timestamp objects have a .toDate() method; ISO strings go through new Date()
+    const date = (typeof isoStr.toDate === 'function') ? isoStr.toDate() : new Date(isoStr);
+    if (isNaN(date.getTime())) return '';
+    const diff = Date.now() - date.getTime();
     const mins  = Math.floor(diff / 60000);
     if (mins < 1)   return 'just now';
     if (mins < 60)  return `${mins}m ago`;
@@ -958,7 +969,7 @@ const NotificationService = (() => {
     if (hrs  < 24)  return `${hrs}h ago`;
     const days = Math.floor(hrs / 24);
     if (days < 7)   return `${days}d ago`;
-    return formatDate(isoStr.slice(0, 10));
+    return formatDate(date.toISOString().slice(0, 10));
   }
 
   function _typeIcon(type) {
