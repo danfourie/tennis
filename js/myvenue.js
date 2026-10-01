@@ -623,6 +623,10 @@ const MyVenue = (() => {
         const groupId      = btn.dataset.groupId;
         const groupPending = DB.getBookings().filter(b => b.groupId === groupId && b.venueId === venue.id && b.status === 'pending');
         if (groupPending.length === 0) return;
+        if (!bookingCancellationAllowed(groupPending[0])) {
+          toast('Cancellations are not permitted within 4 hours of the booking time or after the event has taken place.', 'error');
+          return;
+        }
         if (!confirm(`Reject all ${groupPending.length} slots in this group request?`)) return;
         btn.disabled = true; btn.textContent = 'Rejecting…';
         const first = groupPending[0];
@@ -653,6 +657,10 @@ const MyVenue = (() => {
         const groupId      = btn.dataset.groupId;
         const groupActive  = DB.getBookings().filter(b => b.groupId === groupId && b.venueId === venue.id && ['pending', 'confirmed'].includes(b.status));
         if (groupActive.length === 0) return;
+        if (!bookingCancellationAllowed(groupActive[0])) {
+          toast('Cancellations are not permitted within 4 hours of the booking time or after the event has taken place.', 'error');
+          return;
+        }
         if (!confirm(`Cancel all ${groupActive.length} slot(s) in this group booking?`)) return;
         btn.disabled = true; btn.textContent = 'Cancelling…';
         const first = groupActive[0];
@@ -707,6 +715,10 @@ const MyVenue = (() => {
         const label         = btn.dataset.label || 'Reject';
         const booking       = DB.getBookings().find(b => b.id === id);
         const wasCancelling = label === 'Cancel';
+        if (!bookingCancellationAllowed(booking)) {
+          toast('Cancellations are not permitted within 4 hours of the booking time or after the event has taken place.', 'error');
+          return;
+        }
         const confirmMsg    = wasCancelling
           ? `Cancel this confirmed booking?\n\n"${booking ? (booking.label || 'Booking') : 'Booking'}" on ${booking && booking.date ? formatDate(booking.date) : '—'}\n\nThis will notify the requester.`
           : `${label} this booking request?`;

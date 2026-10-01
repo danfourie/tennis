@@ -305,6 +305,10 @@ const CourtBooking = (() => {
       btn.addEventListener('click', async () => {
         const id = btn.dataset.id;
         const b  = DB.getBookings().find(x => x.id === id);
+        if (!bookingCancellationAllowed(b)) {
+          toast('Cancellations are not permitted within 4 hours of the booking time or after the event has taken place.', 'error');
+          return;
+        }
         if (!confirm(`Cancel this booking?\n\n"${b ? (b.label || b.type || 'Booking') : 'Booking'}" on ${b ? (b.date || '—') : '—'}`)) return;
         btn.disabled = true; btn.textContent = 'Cancelling…';
         try {
@@ -325,6 +329,10 @@ const CourtBooking = (() => {
       btn.addEventListener('click', async () => {
         const groupId    = btn.dataset.groupId;
         const groupSlots = DB.getBookings().filter(b => b.groupId === groupId && (b.status === 'pending' || b.status === 'confirmed'));
+        if (groupSlots.length > 0 && !bookingCancellationAllowed(groupSlots[0])) {
+          toast('Cancellations are not permitted within 4 hours of the booking time or after the event has taken place.', 'error');
+          return;
+        }
         if (!confirm(`Cancel all ${groupSlots.length} slot(s) in this group booking?`)) return;
         btn.disabled = true; btn.textContent = 'Cancelling…';
         try {

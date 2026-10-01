@@ -678,6 +678,10 @@ const Calendar = (() => {
           <button class="btn btn-danger" id="deleteBookingBtn">Cancel Booking</button>`;
         document.getElementById('deleteBookingBtn').onclick = async () => {
           const btn = document.getElementById('deleteBookingBtn');
+          if (!bookingCancellationAllowed(booking)) {
+            toast('Cancellations are not permitted within 4 hours of the booking time or after the event has taken place.', 'error');
+            return;
+          }
           if (!confirm(`Cancel this booking?\n\n"${booking.label || 'Booking'}" on ${dateStr}\n\nThe requester will be notified.`)) return;
           if (btn) { btn.disabled = true; btn.textContent = 'Cancelling…'; }
           try {
@@ -710,6 +714,10 @@ const Calendar = (() => {
           <button class="btn btn-danger" id="cancelRequestBtn">Cancel My Request</button>`;
         document.getElementById('cancelRequestBtn').onclick = async () => {
           const btn = document.getElementById('cancelRequestBtn');
+          if (!bookingCancellationAllowed(booking)) {
+            toast('Cancellations are not permitted within 4 hours of the booking time or after the event has taken place.', 'error');
+            return;
+          }
           if (btn) { btn.disabled = true; btn.textContent = 'Cancelling…'; }
           try {
             await DB.rejectBooking(booking.id, 'cancelled');

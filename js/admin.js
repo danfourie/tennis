@@ -388,6 +388,10 @@ const Admin = (() => {
     el.querySelectorAll('[data-reject]').forEach(btn => {
       btn.addEventListener('click', () => {
         const booking = DB.getBookings().find(b => b.id === btn.dataset.reject);
+        if (!bookingCancellationAllowed(booking)) {
+          toast('Cancellations are not permitted within 4 hours of the booking time or after the event has taken place.', 'error');
+          return;
+        }
         DB.rejectBooking(btn.dataset.reject);
         DB.writeAudit(
           'booking_rejected', 'booking',

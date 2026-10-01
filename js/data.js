@@ -620,6 +620,18 @@ function getSlotDisplayName(slot) {
   return slot;
 }
 
+// Returns false if the booking is within 4 hours of its start time, or already past.
+function bookingCancellationAllowed(booking) {
+  if (!booking || !booking.date) return true;
+  const slot = booking.timeSlot;
+  const startTime = slot === 'morning'   ? '07:00'
+                  : slot === 'afternoon' ? '14:00'
+                  : (typeof slot === 'string' && /^\d{2}:\d{2}$/.test(slot)) ? slot
+                  : '07:00';
+  const eventStart = new Date(`${booking.date}T${startTime}:00`);
+  return Date.now() < eventStart.getTime() - 4 * 60 * 60 * 1000;
+}
+
 function slotEndTime(timeStr, durationMins) {
   let [h, m] = timeStr.split(':').map(Number);
   m += durationMins;
