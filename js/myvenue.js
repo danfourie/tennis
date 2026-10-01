@@ -350,35 +350,64 @@ const MyVenue = (() => {
     if (venueBookings.length === 0) {
       html += `<p class="text-muted" style="padding:.4rem 0;margin:0">No bookings recorded for this venue yet.</p>`;
     } else {
+      // Group bookings by groupId (null groupId = standalone booking)
+      const groups = [];
+      const seenGroups = {};
       venueBookings.forEach(b => {
-        const isConfirmed = b.status === 'confirmed';
-        const isPending   = b.status === 'pending';
-        const statusBadge = isConfirmed
-          ? `<span class="badge" style="background:#dcfce7;color:#166534;font-size:.7rem">Confirmed ✓</span>`
-          : isPending
-            ? `<span class="badge" style="background:#fef9c3;color:#854d0e;font-size:.7rem">Request</span>`
-            : `<span class="badge" style="background:#e0f2fe;color:#0369a1;font-size:.7rem">Admin-scheduled</span>`;
-        const actionBtns = isConfirmed
-          ? `<button class="btn btn-sm btn-danger mv-reject-btn" data-id="${esc(b.id)}" data-label="Cancel">Cancel</button>`
-          : `<button class="btn btn-sm btn-danger mv-reject-btn" data-id="${esc(b.id)}" data-label="${isPending ? 'Reject' : 'Delete'}">${isPending ? 'Reject' : 'Delete'}</button>
-             <button class="btn btn-sm btn-primary mv-approve-btn" data-id="${esc(b.id)}">${isPending ? 'Approve ✓' : 'Confirm ✓'}</button>`;
-
-        html += `<div class="admin-list-item" style="align-items:flex-start;gap:.75rem">
-          <div style="flex:1;min-width:0">
-            <div style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap">
-              <span style="font-weight:600">${esc(b.label || b.type || 'Booking')}</span>${statusBadge}
-            </div>
-            <div class="text-muted" style="font-size:.82rem">
-              📅 ${b.date ? formatDate(b.date) : '—'}
-              ${b.timeSlot ? ` ⏰ ${esc(b.timeSlot)}` : ''}
-              🎾 Court ${(typeof b.courtIndex === 'number') ? b.courtIndex + 1 : '—'}
-            </div>
-            ${b.requestedByName ? `<div class="text-muted" style="font-size:.8rem">Requested by: ${esc(b.requestedByName)}${b.schoolName ? ' · ' + esc(b.schoolName) : ''}</div>` : ''}
-            ${b.notes ? `<div class="text-muted" style="font-size:.8rem;font-style:italic">${esc(b.notes)}</div>` : ''}
-          </div>
-          <div style="display:flex;gap:.4rem;flex-shrink:0;align-items:center">${actionBtns}</div>
-        </div>`;
+        const key = b.groupId || ('__' + b.id);
+        if (!seenGroups[key]) { seenGroups[key] = { groupId: b.groupId || null, bookings: [] }; groups.push(seenGroups[key]); }
+        seenGroups[key].bookings.push(b);
       });
+
+      groups.forEach(group => {
+        const isMulti   = !!(group.groupId && group.bookings.length > 1);
+        const anyPending = group.bookings.some(b => b.status === 'pending');
+
+        if (isMulti) {
+          const requester = group.bookings[0].requestedByName || 'User';
+          const label     = group.bookings[0].label || group.bookings[0].type || 'Booking';
+          html += `<div class="cb-group-block">
+            <div class="cb-group-header">
+              <span><strong>📦 ${esc(requester)}</strong> — ${group.bookings.length} slots · ${esc(label)}</span>
+              ${anyPending ? `<div style="display:flex;gap:.4rem">
+                <button class="btn btn-sm btn-danger mv-reject-group-btn" data-group-id="${esc(group.groupId)}">Reject All</button>
+                <button class="btn btn-sm btn-primary mv-approve-group-btn" data-group-id="${esc(group.groupId)}">Approve All</button>
+              </div>` : ''}
+            </div>`;
+        }
+
+        group.bookings.forEach(b => {
+          const isConfirmed = b.status === 'confirmed';
+          const isPending   = b.status === 'pending';
+          const statusBadge = isConfirmed
+            ? `<span class="badge" style="background:#dcfce7;color:#166534;font-size:.7rem">Confirmed ✓</span>`
+            : isPending
+              ? `<span class="badge" style="background:#fef9c3;color:#854d0e;font-size:.7rem">Request</span>`
+              : `<span class="badge" style="background:#e0f2fe;color:#0369a1;font-size:.7rem">Admin-scheduled</span>`;
+          const actionBtns = isConfirmed
+            ? `<button class="btn btn-sm btn-danger mv-reject-btn" data-id="${esc(b.id)}" data-label="Cancel">Cancel</button>`
+            : `<button class="btn btn-sm btn-danger mv-reject-btn" data-id="${esc(b.id)}" data-label="${isPending ? 'Reject' : 'Delete'}">${isPending ? 'Reject' : 'Delete'}</button>
+               <button class="btn btn-sm btn-primary mv-approve-btn" data-id="${esc(b.id)}">${isPending ? 'Approve ✓' : 'Confirm ✓'}</button>`;
+
+          html += `<div class="admin-list-item${isMulti ? ' group-slot-item' : ''}" style="align-items:flex-start;gap:.75rem">
+            <div style="flex:1;min-width:0">
+              <div style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap">
+                <span style="font-weight:600">${esc(b.label || b.type || 'Booking')}</span>${statusBadge}
+              </div>
+              <div class="text-muted" style="font-size:.82rem">
+                📅 ${b.date ? formatDate(b.date) : '—'}
+                ${b.timeSlot ? ` ⏰ ${esc(b.timeSlot)}` : ''}
+                🎾 Court ${(typeof b.courtIndex === 'number') ? b.courtIndex + 1 : '—'}
+              </div>
+              ${!isMulti && b.requestedByName ? `<div class="text-muted" style="font-size:.8rem">Requested by: ${esc(b.requestedByName)}${b.schoolName ? ' · ' + esc(b.schoolName) : ''}</div>` : ''}
+              ${b.notes ? `<div class="text-muted" style="font-size:.8rem;font-style:italic">${esc(b.notes)}</div>` : ''}
+            </div>
+            <div style="display:flex;gap:.4rem;flex-shrink:0;align-items:center">${actionBtns}</div>
+          </div>`;
+        }); // end group.bookings.forEach
+
+        if (isMulti) html += `</div>`; // close cb-group-block
+      }); // end groups.forEach
     }
     html += `</div></div>`;
 
@@ -551,6 +580,62 @@ const MyVenue = (() => {
         MySchool.impersonate(linkSchoolId);
       }
       MySchool.openSettings();
+    });
+
+    // ── Booking: approve entire group ───────────────────────────
+    container.querySelectorAll('.mv-approve-group-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const groupId      = btn.dataset.groupId;
+        const groupPending = DB.getBookings().filter(b => b.groupId === groupId && b.venueId === venue.id && b.status === 'pending');
+        if (groupPending.length === 0) return;
+        btn.disabled = true; btn.textContent = 'Approving…';
+        for (const b of groupPending) { DB.approveBooking(b.id); }
+        DB.writeAudit('booking_approved', 'booking',
+          `Approved group booking (${groupPending.length} slots) at ${venue.name}`, null, groupPending[0]?.label || '');
+        const first = groupPending[0];
+        if (first && first.requestedBy && typeof NotificationService !== 'undefined') {
+          NotificationService.send({
+            type:          'booking_approved',
+            title:         'Booking Request Approved ✅',
+            body:          `Your ${groupPending.length}-slot booking request at ${esc(venue.name)} has been approved.`,
+            recipientUids: [first.requestedBy],
+          });
+        }
+        if (first) {
+          try { await firebase.functions().httpsCallable('notifyBookingStatus')({ bookingId: first.id, action: 'approved' }); } catch (e) { /* non-critical */ }
+        }
+        toast(`${groupPending.length} bookings approved ✓`, 'success');
+      });
+    });
+
+    // ── Booking: reject entire group ─────────────────────────────
+    container.querySelectorAll('.mv-reject-group-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const groupId      = btn.dataset.groupId;
+        const groupPending = DB.getBookings().filter(b => b.groupId === groupId && b.venueId === venue.id && b.status === 'pending');
+        if (groupPending.length === 0) return;
+        if (!confirm(`Reject all ${groupPending.length} slots in this group request?`)) return;
+        btn.disabled = true; btn.textContent = 'Rejecting…';
+        const first = groupPending[0];
+        // Email before deleting (booking docs must still exist for the CF to read)
+        if (first) {
+          try { await firebase.functions().httpsCallable('notifyBookingStatus')({ bookingId: first.id, action: 'rejected' }); } catch (e) { /* non-critical */ }
+        }
+        if (first && first.requestedBy && typeof NotificationService !== 'undefined') {
+          NotificationService.send({
+            type:          'booking_rejected',
+            title:         'Booking Request Rejected',
+            body:          `Your ${groupPending.length}-slot booking request at ${esc(venue.name)} has been declined.`,
+            recipientUids: [first.requestedBy],
+          });
+        }
+        try {
+          for (const b of groupPending) { await DB.rejectBooking(b.id); }
+        } catch (e) { /* best-effort */ }
+        DB.writeAudit('booking_rejected', 'booking',
+          `Rejected group booking (${groupPending.length} slots) at ${venue.name}`, null, '');
+        toast(`${groupPending.length} booking requests rejected`, 'success');
+      });
     });
 
     // ── Booking: approve ────────────────────────────────────────

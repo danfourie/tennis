@@ -1,25 +1,18 @@
 /**
  * courtbooking.js — Court Booking view
  *
- * Any logged-in user can book:
- *   • Courts at their own school's venue (confirmed immediately for organizers,
- *     pending approval otherwise)
- *   • Courts at Groenkloof or any venue flagged as openBookings (pending approval)
- *
- * Booking form captures:
- *   - Venue, date, court, slot (morning / afternoon)
- *   - Booker name (default: logged-in user's display name)
- *   - On-behalf name + contact (optional)
- *   - Reason (required)
+ * Supports multi-slot booking: user selects any number of court/date/slot
+ * combinations into a cart, fills in booking details once, and submits
+ * them as a single grouped request. Organizers approve/reject each slot
+ * individually or use the "Approve All / Reject All" group actions.
  */
 
 const CourtBooking = (() => {
 
   // ── State ───────────────────────────────────────────────────
-  let _selectedVenueId  = null;
-  let _selectedDate     = toDateStr(new Date());
-  let _selectedCourt    = 0;
-  let _selectedSlot     = 'morning';
+  let _selectedVenueId = null;
+  let _selectedDate    = toDateStr(new Date());
+  let _cart            = []; // [{ courtIndex, date, slot }]
 
   // ── Helpers ─────────────────────────────────────────────────
 
@@ -28,14 +21,12 @@ const CourtBooking = (() => {
     const profile = Auth.getProfile();
     const venues  = DB.getVenues();
 
-    // Own venue
     const ownVenueId = (() => {
       if (!profile || !profile.schoolId) return null;
       const school = DB.getSchools().find(s => s.id === profile.schoolId);
       return school ? school.venueId : null;
     })();
 
-    // Any venue marked openBookings or named "groenkloof"
     const result = [];
     venues.forEach(v => {
       const isOwn  = v.id === ownVenueId;
@@ -45,27 +36,17 @@ const CourtBooking = (() => {
     return result;
   }
 
-  function _isVenueOrganizer(venueId) {
-    if (!Auth.isLoggedIn()) return false;
-    const profile = Auth.getProfile();
-    if (!profile || !profile.schoolId) return false;
-    const school = DB.getSchools().find(s => s.id === profile.schoolId);
-    return !!(school && school.venueId === venueId);
-  }
-
   function _slotAvailable(venueId, courtIdx, dateStr, slot) {
     if (isCourtClosed(venueId, courtIdx, dateStr, slot)) return false;
     if (getSlotBooking(venueId, courtIdx, dateStr, slot)) return false;
-    // Check league fixtures
-    const leagues = DB.getLeagues();
+    const leagues   = DB.getLeagues();
     const slotStart = slot === 'morning' ? 7 * 60 : 14 * 60;
     const slotEnd   = slot === 'morning' ? 14 * 60 : 18 * 60;
     for (const league of leagues) {
       for (const f of (league.fixtures || [])) {
         if (f.venueId !== venueId || f.date !== dateStr) continue;
         const fMins = _timeToMins(f.timeSlot || '14:00');
-        const fEnd  = fMins + 180;
-        if (fMins < slotEnd && fEnd > slotStart) return false;
+        if (fMins < slotEnd && (fMins + 180) > slotStart) return false;
       }
     }
     return true;
@@ -76,12 +57,25 @@ const CourtBooking = (() => {
     return h * 60 + m;
   }
 
+  function _cartKey(ci, date, slot) { return `${ci}|${date}|${slot}`; }
+
+  function _inCart(ci, date, slot) {
+    const key = _cartKey(ci, date, slot);
+    return _cart.some(x => _cartKey(x.courtIndex, x.date, x.slot) === key);
+  }
+
+  function _toggleCart(ci, date, slot) {
+    const key = _cartKey(ci, date, slot);
+    const idx = _cart.findIndex(x => _cartKey(x.courtIndex, x.date, x.slot) === key);
+    if (idx >= 0) _cart.splice(idx, 1);
+    else _cart.push({ courtIndex: ci, date, slot });
+  }
+
   // ── Entry point (called from calendar "Court Booking →" button) ─
   function openWith(venueId, courtIdx, dateStr, slot) {
     _selectedVenueId = venueId;
-    _selectedCourt   = courtIdx;
     _selectedDate    = dateStr;
-    _selectedSlot    = slot;
+    _cart = [{ courtIndex: courtIdx, date: dateStr, slot }];
     navigate('courtbooking');
     render();
   }
@@ -104,63 +98,53 @@ const CourtBooking = (() => {
       return;
     }
 
-    // Default venue
     if (!_selectedVenueId || !venues.find(v => v.id === _selectedVenueId)) {
       _selectedVenueId = venues[0].id;
     }
+
+    const today     = toDateStr(new Date());
+    _cart           = _cart.filter(x => x.date >= today); // drop past-date cart items
 
     const venue     = venues.find(v => v.id === _selectedVenueId);
     const courts    = venue ? (venue.courts || 4) : 4;
     const bookerDef = profile ? (profile.displayName || profile.email || '') : '';
 
-    // Build availability table for selected venue + date
+    // Availability grid for selected venue + date
     const availRows = [];
     for (let ci = 0; ci < courts; ci++) {
       ['morning', 'afternoon'].forEach(slot => {
         const avail   = _slotAvailable(_selectedVenueId, ci, _selectedDate, slot);
         const booking = getSlotBooking(_selectedVenueId, ci, _selectedDate, slot);
-        availRows.push({ ci, slot, avail, booking });
+        const inCart  = _inCart(ci, _selectedDate, slot);
+        availRows.push({ ci, slot, avail, booking, inCart });
       });
     }
+
+    // Cart chips
+    const cartChipsHtml = _cart.length === 0
+      ? `<div class="cb-cart-empty">No slots selected — click an available slot on the right to add it to your request.</div>`
+      : _cart.map((x, idx) => `
+          <div class="cb-cart-chip">
+            <span>Court ${x.courtIndex + 1} · ${formatDate(x.date)} · ${getSlotDisplayName(x.slot)}</span>
+            <button type="button" class="cb-cart-remove" data-idx="${idx}" title="Remove">×</button>
+          </div>`).join('');
+
+    const nSlots      = _cart.length;
+    const submitLabel = nSlots > 1 ? `Submit ${nSlots} Booking Requests` : 'Submit Booking Request';
 
     el.innerHTML = `
       <div class="cb-layout">
         <!-- ── Booking form ─────────────────────────────────── -->
         <div class="cb-form-panel">
-          <h3 style="margin:0 0 1rem">New Booking Request</h3>
+          <h3 style="margin:0 0 .75rem">New Booking Request</h3>
 
           <div class="form-group">
-            <label>Venue</label>
-            <select id="cbVenue">
-              ${venues.map(v => `<option value="${v.id}"${v.id === _selectedVenueId ? ' selected' : ''}>${esc(v.name)}${v.isOwn ? ' (My Venue)' : ''}</option>`).join('')}
-            </select>
+            <label style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.25rem">
+              <span>Selected Slots${nSlots > 0 ? ` <span class="badge" style="background:var(--primary);color:#fff;vertical-align:middle;font-size:.7rem">${nSlots}</span>` : ''}</span>
+              ${nSlots > 0 ? `<button type="button" id="cbClearCart" style="font-size:.78rem;color:var(--danger);background:none;border:none;cursor:pointer;padding:0">Clear all</button>` : ''}
+            </label>
+            <div class="cb-cart-chips">${cartChipsHtml}</div>
           </div>
-
-          <div class="form-group">
-            <label>Date</label>
-            <input type="date" id="cbDate" value="${_selectedDate}" min="${toDateStr(new Date())}">
-          </div>
-
-          <div class="form-group">
-            <label>Court</label>
-            <select id="cbCourt">
-              ${Array.from({ length: courts }, (_, i) => `<option value="${i}"${i === _selectedCourt ? ' selected' : ''}>Court ${i + 1}</option>`).join('')}
-            </select>
-          </div>
-
-          <div class="form-group">
-            <label>Slot</label>
-            <div class="timeslot-picker">
-              <button type="button" class="timeslot-btn${_selectedSlot === 'morning' ? ' selected' : ''}" id="cbSlotMorning">
-                Morning<span style="display:block;font-size:.72rem;opacity:.7">07:00 – 14:00</span>
-              </button>
-              <button type="button" class="timeslot-btn${_selectedSlot === 'afternoon' ? ' selected' : ''}" id="cbSlotAfternoon">
-                Afternoon<span style="display:block;font-size:.72rem;opacity:.7">14:00 – 18:00</span>
-              </button>
-            </div>
-          </div>
-
-          <div id="cbAvailBadge" style="margin-bottom:.75rem"></div>
 
           <div class="form-group">
             <label>Your Name <span class="text-muted">(booker)</span></label>
@@ -200,105 +184,101 @@ const CourtBooking = (() => {
             <input type="text" id="cbNotes" placeholder="Any additional info">
           </div>
 
-          <button class="btn btn-primary btn-full" id="cbSubmitBtn" style="width:100%">Submit Booking Request</button>
+          <button class="btn btn-primary btn-full" id="cbSubmitBtn" style="width:100%"${nSlots === 0 ? ' disabled' : ''}>
+            ${submitLabel}
+          </button>
           <p id="cbError" class="text-danger" style="margin-top:.5rem;font-size:.85rem"></p>
         </div>
 
         <!-- ── Availability panel ───────────────────────────── -->
         <div class="cb-avail-panel">
-          <h3 style="margin:0 0 .75rem">Availability — ${esc(venue ? venue.name : '')} · ${formatDate(_selectedDate)}</h3>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem;margin-bottom:.75rem">
+            <div class="form-group" style="margin:0">
+              <label style="font-size:.8rem">Venue</label>
+              <select id="cbVenue">
+                ${venues.map(v => `<option value="${v.id}"${v.id === _selectedVenueId ? ' selected' : ''}>${esc(v.name)}${v.isOwn ? ' (My Venue)' : ''}</option>`).join('')}
+              </select>
+            </div>
+            <div class="form-group" style="margin:0">
+              <label style="font-size:.8rem">Date</label>
+              <input type="date" id="cbDate" value="${_selectedDate}" min="${today}">
+            </div>
+          </div>
+          <h4 style="margin:0 0 .5rem;font-size:.88rem;color:var(--neutral)">${esc(venue ? venue.name : '')} · ${formatDate(_selectedDate)}</h4>
           <div class="cb-avail-grid">
             ${availRows.map(r => {
               const slotName = getSlotDisplayName(r.slot);
               const slotLbl  = getSlotLabel(r.slot);
-              if (!r.avail) {
-                const lbl = r.booking ? (r.booking.reason || r.booking.label || (r.booking.status === 'pending' ? 'Pending ⏳' : 'Booked')) : 'Unavailable';
-                const cls  = r.booking && r.booking.status === 'pending' ? 'pending-request' : r.booking ? 'booked' : 'closed';
-                return `<div class="cb-avail-cell ${cls}"><span class="cb-court-lbl">Court ${r.ci + 1}</span><span class="cb-slot-name">${slotName}</span><span class="cb-slot-info">${esc(lbl.substring(0,24))}</span></div>`;
+              if (!r.avail && !r.inCart) {
+                const lbl = r.booking
+                  ? (r.booking.reason || r.booking.label || (r.booking.status === 'pending' ? 'Pending ⏳' : 'Booked'))
+                  : 'Unavailable';
+                const cls = r.booking && r.booking.status === 'pending' ? 'pending-request' : r.booking ? 'booked' : 'closed';
+                return `<div class="cb-avail-cell ${cls}">
+                  <span class="cb-court-lbl">Court ${r.ci + 1}</span>
+                  <span class="cb-slot-name">${slotName}</span>
+                  <span class="cb-slot-info">${esc(lbl.substring(0, 24))}</span>
+                </div>`;
               }
-              const isSelected = r.ci === _selectedCourt && r.slot === _selectedSlot;
-              return `<button class="cb-avail-cell available${isSelected ? ' selected' : ''}" data-ci="${r.ci}" data-slot="${r.slot}">
+              return `<button class="cb-avail-cell available${r.inCart ? ' in-cart' : ''}" data-ci="${r.ci}" data-slot="${r.slot}">
                 <span class="cb-court-lbl">Court ${r.ci + 1}</span>
-                <span class="cb-slot-name">${slotName}</span>
-                <span class="cb-slot-info" style="color:var(--primary-dark)">${slotLbl}</span>
+                <span class="cb-slot-name">${slotName}${r.inCart ? ' ✓' : ''}</span>
+                <span class="cb-slot-info">${r.inCart ? 'Selected' : slotLbl}</span>
               </button>`;
             }).join('')}
           </div>
-          <p class="text-muted" style="font-size:.78rem;margin-top:.5rem">Click an available slot to pre-fill the form.</p>
+          <p class="text-muted" style="font-size:.78rem;margin-top:.5rem">Click a slot to add it to your request. Click again to remove. Change the date above to browse other days.</p>
         </div>
       </div>`;
 
     // ── Wire up events ──────────────────────────────────────
     document.getElementById('cbVenue').addEventListener('change', e => {
       _selectedVenueId = e.target.value;
+      _cart = [];
       render();
     });
     document.getElementById('cbDate').addEventListener('change', e => {
       _selectedDate = e.target.value;
       render();
     });
-    document.getElementById('cbCourt').addEventListener('change', e => {
-      _selectedCourt = parseInt(e.target.value);
-      _updateAvailBadge();
+    document.getElementById('cbClearCart')?.addEventListener('click', () => {
+      _cart = [];
+      render();
     });
-    document.getElementById('cbSlotMorning').addEventListener('click', () => {
-      _selectedSlot = 'morning';
-      document.getElementById('cbSlotMorning').classList.add('selected');
-      document.getElementById('cbSlotAfternoon').classList.remove('selected');
-      _updateAvailBadge();
-    });
-    document.getElementById('cbSlotAfternoon').addEventListener('click', () => {
-      _selectedSlot = 'afternoon';
-      document.getElementById('cbSlotAfternoon').classList.add('selected');
-      document.getElementById('cbSlotMorning').classList.remove('selected');
-      _updateAvailBadge();
-    });
-
-    // Availability cell clicks
-    el.querySelectorAll('.cb-avail-cell[data-ci]').forEach(btn => {
+    el.querySelectorAll('.cb-cart-remove').forEach(btn => {
       btn.addEventListener('click', () => {
-        _selectedCourt = parseInt(btn.dataset.ci);
-        _selectedSlot  = btn.dataset.slot;
-        document.getElementById('cbCourt').value = _selectedCourt;
-        if (_selectedSlot === 'morning') {
-          document.getElementById('cbSlotMorning').classList.add('selected');
-          document.getElementById('cbSlotAfternoon').classList.remove('selected');
-        } else {
-          document.getElementById('cbSlotAfternoon').classList.add('selected');
-          document.getElementById('cbSlotMorning').classList.remove('selected');
-        }
-        _updateAvailBadge();
+        _cart.splice(parseInt(btn.dataset.idx), 1);
+        render();
       });
     });
-
+    el.querySelectorAll('.cb-avail-cell[data-ci]').forEach(cell => {
+      cell.addEventListener('click', () => {
+        _toggleCart(parseInt(cell.dataset.ci), _selectedDate, cell.dataset.slot);
+        render();
+      });
+    });
     document.getElementById('cbSubmitBtn').addEventListener('click', _submit);
-    _updateAvailBadge();
-  }
-
-  function _updateAvailBadge() {
-    const badge = document.getElementById('cbAvailBadge');
-    if (!badge) return;
-    const avail = _slotAvailable(_selectedVenueId, _selectedCourt, _selectedDate, _selectedSlot);
-    badge.innerHTML = avail
-      ? `<span style="color:#15803d;font-weight:600">✓ This slot is available</span>`
-      : `<span style="color:#dc2626;font-weight:600">✗ This slot is not available — choose another</span>`;
   }
 
   async function _submit() {
-    const btn    = document.getElementById('cbSubmitBtn');
-    const errEl  = document.getElementById('cbError');
-    const booker = document.getElementById('cbBooker').value.trim();
+    const btn             = document.getElementById('cbSubmitBtn');
+    const errEl           = document.getElementById('cbError');
+    const booker          = document.getElementById('cbBooker').value.trim();
     const bookingType     = document.getElementById('cbType').value;
     const details         = document.getElementById('cbReason').value.trim();
     const onBehalfName    = document.getElementById('cbOnBehalfName').value.trim();
     const onBehalfContact = document.getElementById('cbOnBehalfContact').value.trim();
-    const notes  = document.getElementById('cbNotes').value.trim();
-    const reason = bookingType + (details ? ': ' + details : '');
+    const notes           = document.getElementById('cbNotes').value.trim();
+    const reason          = bookingType + (details ? ': ' + details : '');
 
     errEl.textContent = '';
-    if (!bookingType) { errEl.textContent = 'Please select a booking type.'; return; }
-    if (!_slotAvailable(_selectedVenueId, _selectedCourt, _selectedDate, _selectedSlot)) {
-      errEl.textContent = 'This slot is no longer available. Please choose a different slot.';
+    if (_cart.length === 0) { errEl.textContent = 'Please select at least one slot.'; return; }
+    if (!bookingType)        { errEl.textContent = 'Please select a booking type.'; return; }
+
+    const unavail = _cart.filter(x => !_slotAvailable(_selectedVenueId, x.courtIndex, x.date, x.slot));
+    if (unavail.length > 0) {
+      errEl.textContent = `${unavail.length} selected slot(s) are no longer available. Please review your selection.`;
+      render();
       return;
     }
 
@@ -307,65 +287,79 @@ const CourtBooking = (() => {
     try {
       const user    = Auth.getUser();
       const profile = Auth.getProfile();
-      const status = 'pending';
       const venue   = DB.getVenues().find(v => v.id === _selectedVenueId);
+      const cartSnap = [..._cart];
+      const groupId  = cartSnap.length > 1
+        ? (Date.now().toString(36) + Math.random().toString(36).slice(2, 8))
+        : null;
 
-      const result = DB.addBooking({
-        venueId:         _selectedVenueId,
-        courtIndex:      _selectedCourt,
-        date:            _selectedDate,
-        timeSlot:        _selectedSlot,
-        type:            bookingType.toLowerCase() || 'booking',
-        reason,
-        label:           reason,
-        bookerName:      booker || (profile ? (profile.displayName || profile.email) : ''),
-        onBehalfName:    onBehalfName    || null,
-        onBehalfContact: onBehalfContact || null,
-        notes:           notes           || null,
-        status,
-        requestedBy:     user    ? user.uid                             : null,
-        requestedByName: profile ? (profile.displayName || profile.email) : null,
-        requestedAt:     new Date().toISOString(),
-      });
+      const bookingIds = [];
+      const failed     = [];
 
-      if (!result) {
-        errEl.textContent = 'This slot was just booked by someone else. Please choose a different slot.';
-        btn.disabled = false; btn.textContent = 'Submit Booking Request';
+      for (const item of cartSnap) {
+        const result = DB.addBooking({
+          venueId:         _selectedVenueId,
+          courtIndex:      item.courtIndex,
+          date:            item.date,
+          timeSlot:        item.slot,
+          type:            bookingType.toLowerCase() || 'booking',
+          reason,
+          label:           reason,
+          bookerName:      booker || (profile ? (profile.displayName || profile.email) : ''),
+          onBehalfName:    onBehalfName    || null,
+          onBehalfContact: onBehalfContact || null,
+          notes:           notes           || null,
+          status:          'pending',
+          groupId:         groupId || null,
+          groupSize:       groupId ? cartSnap.length : null,
+          requestedBy:     user    ? user.uid                               : null,
+          requestedByName: profile ? (profile.displayName || profile.email) : null,
+          requestedAt:     new Date().toISOString(),
+        });
+        if (result) bookingIds.push(result.id);
+        else failed.push(item);
+      }
+
+      if (bookingIds.length === 0) {
+        errEl.textContent = 'All selected slots were just booked. Please choose different slots.';
+        btn.disabled = false;
+        btn.textContent = cartSnap.length > 1 ? `Submit ${cartSnap.length} Booking Requests` : 'Submit Booking Request';
         render();
         return;
       }
 
       DB.writeAudit('booking_requested', 'booking',
-        `Requested: ${reason} on ${_selectedDate} (${getSlotDisplayName(_selectedSlot)}) at ${venue ? venue.name : _selectedVenueId} Court ${_selectedCourt + 1}`,
+        `Requested ${bookingIds.length} slot(s): ${reason} at ${venue ? venue.name : _selectedVenueId}`,
         null, reason);
 
-      toast('Booking request submitted — awaiting approval ✓', 'success');
-      // Notify venue organizers via Cloud Function (fire-and-forget)
+      const failNote = failed.length > 0 ? ` (${failed.length} slot(s) were already taken and skipped)` : '';
+      const msg = bookingIds.length === 1
+        ? `Booking request submitted — awaiting approval ✓${failNote}`
+        : `${bookingIds.length} booking requests submitted — awaiting approval ✓${failNote}`;
+      toast(msg, 'success');
+
       try {
-        await firebase.functions().httpsCallable('notifyBookingRequest')({
-          bookingId: result.id,
-        });
+        await firebase.functions().httpsCallable('notifyBookingRequest')(
+          groupId ? { groupId } : { bookingId: bookingIds[0] }
+        );
       } catch (e) { /* non-critical */ }
 
-      // Reset form after success
-      _selectedSlot = 'morning';
-      document.getElementById('cbType').value  = '';
-      document.getElementById('cbReason').value = '';
-      document.getElementById('cbOnBehalfName').value = '';
+      _cart = [];
+      document.getElementById('cbType').value           = '';
+      document.getElementById('cbReason').value         = '';
+      document.getElementById('cbOnBehalfName').value   = '';
       document.getElementById('cbOnBehalfContact').value = '';
-      document.getElementById('cbNotes').value = '';
+      document.getElementById('cbNotes').value          = '';
       render();
     } catch (err) {
       console.error('[CourtBooking] submit failed:', err);
       errEl.textContent = 'Failed to submit request — ' + (err.message || err);
-      btn.disabled = false; btn.textContent = 'Submit Booking Request';
+      btn.disabled = false;
+      btn.textContent = _cart.length > 1 ? `Submit ${_cart.length} Booking Requests` : 'Submit Booking Request';
     }
   }
 
-  function init() {
-    render();
-  }
-
+  function init()    { render(); }
   function refresh() {
     const section = document.getElementById('view-courtbooking');
     if (section && !section.classList.contains('hidden')) render();

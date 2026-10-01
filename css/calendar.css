@@ -293,6 +293,9 @@
 .cb-avail-cell.available:hover { filter: brightness(.93); }
 .cb-avail-cell.available.selected { background: var(--primary); color: white; }
 .cb-avail-cell.available.selected .cb-slot-info { color: rgba(255,255,255,.8) !important; }
+.cb-avail-cell.available.in-cart { background: #16a34a; border-color: #15803d; color: #fff; }
+.cb-avail-cell.available.in-cart .cb-slot-info { color: rgba(255,255,255,.85) !important; }
+.cb-avail-cell.available.in-cart:hover { filter: brightness(.88); }
 .cb-avail-cell.booked { background: #fef3c7; border-color: #fcd34d; }
 .cb-avail-cell.pending-request { background: #fff7ed; border: 1.5px dashed #f97316; }
 .cb-avail-cell.closed { background: #f3f4f6; }
@@ -301,6 +304,37 @@
 .cb-slot-info { font-size: .72rem; }
 
 .text-danger { color: var(--danger, #dc2626); }
+
+/* ── Cart chips (multi-slot booking) ── */
+.cb-cart-chips { display: flex; flex-direction: column; gap: .35rem; min-height: 2rem; }
+.cb-cart-empty { font-size: .8rem; color: var(--neutral); padding: .3rem 0; font-style: italic; }
+.cb-cart-chip {
+  display: flex; align-items: center; justify-content: space-between;
+  background: var(--primary-light); border: 1px solid var(--primary);
+  border-radius: var(--radius); padding: .3rem .6rem; font-size: .82rem; gap: .5rem;
+}
+.cb-cart-remove {
+  background: none; border: none; cursor: pointer;
+  color: var(--danger, #dc2626); font-size: 1.1rem; line-height: 1;
+  padding: 0 .1rem; flex-shrink: 0;
+}
+.cb-cart-remove:hover { opacity: .7; }
+
+/* ── Grouped booking block in My Venue ── */
+.cb-group-block {
+  border: 1.5px solid #fcd34d; border-radius: var(--radius);
+  margin-bottom: .75rem; overflow: hidden;
+}
+.cb-group-header {
+  display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: .5rem;
+  background: #fffbeb; padding: .5rem .75rem; font-size: .82rem;
+}
+.group-slot-item {
+  border-top: 1px solid var(--border) !important;
+  padding: .5rem .75rem !important;
+  margin: 0 !important;
+}
 
 @media (max-width: 640px) {
   /* Contain the 700px-wide grid within the scroll container.

@@ -1800,13 +1800,21 @@ exports.notifyBookingRequest = onCall(
   { secrets: [EMAIL_USER, EMAIL_PASS] },
   async (request) => {
     if (!request.auth) return { ok: false };
-    const { bookingId } = request.data || {};
-    if (!bookingId) return { ok: false };
+    const { bookingId, groupId } = request.data || {};
+    if (!bookingId && !groupId) return { ok: false };
 
-    const db     = admin.firestore();
-    const bSnap  = await db.collection('bookings').doc(bookingId).get();
-    if (!bSnap.exists) return { ok: false };
-    const booking = bSnap.data();
+    const db = admin.firestore();
+    let bookings = [];
+    if (groupId) {
+      const gSnap = await db.collection('bookings').where('groupId', '==', groupId).get();
+      bookings = gSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      if (bookings.length === 0) return { ok: false };
+    } else {
+      const bSnap = await db.collection('bookings').doc(bookingId).get();
+      if (!bSnap.exists) return { ok: false };
+      bookings = [{ id: bSnap.id, ...bSnap.data() }];
+    }
+    const booking = bookings[0]; // representative for venue / organizer lookup
 
     // Find venue
     const vSnap  = await db.collection('venues').doc(booking.venueId || '').get();
@@ -1838,16 +1846,20 @@ exports.notifyBookingRequest = onCall(
 
     // Write in-app notifications for each organizer
     if (notifUids.length > 0) {
-      const now       = admin.firestore.FieldValue.serverTimestamp();
-      const userName  = booking.requestedByName || booking.bookerName || 'Someone';
+      const now      = admin.firestore.FieldValue.serverTimestamp();
+      const userName = booking.requestedByName || booking.bookerName || 'Someone';
       const slotLabel = booking.timeSlot === 'morning' ? 'Morning (07:00–14:00)' : booking.timeSlot === 'afternoon' ? 'Afternoon (14:00–18:00)' : (booking.timeSlot || '');
-      const nb        = db.batch();
+      const notifBody = bookings.length > 1
+        ? `${userName} requested ${bookings.length} slots: ${bookings.map(b => `Court ${(b.courtIndex || 0) + 1} on ${b.date}`).join(', ')} (${booking.reason || booking.label || '—'})`
+        : `${userName} requested ${slotLabel} on ${booking.date} (${booking.reason || booking.label || '—'})`;
+      const nb = db.batch();
       for (const uid of notifUids) {
         nb.set(db.collection('notifications').doc(), {
           uid, type: 'booking_request',
           title:    `New booking request — ${vName}`,
-          body:     `${userName} requested ${slotLabel} on ${booking.date} (${booking.reason || booking.label || '—'})`,
-          fromName: userName, bookingId, read: false, createdAt: now, createdBy: booking.requestedBy || null,
+          body:     notifBody,
+          fromName: userName, bookingId: booking.id || bookingId || null,
+          groupId:  groupId || null, read: false, createdAt: now, createdBy: booking.requestedBy || null,
         });
       }
       await nb.commit();
@@ -1861,15 +1873,30 @@ exports.notifyBookingRequest = onCall(
 
     const transporter = nodemailer.createTransport({ service: 'gmail', auth: { user: emailUser, pass: emailPass } });
 
-    const slot      = booking.timeSlot === 'morning' ? 'Morning (07:00–14:00)' : booking.timeSlot === 'afternoon' ? 'Afternoon (14:00–18:00)' : (booking.timeSlot || '');
-    const subject   = `New Court Booking Request — ${vName}`;
-    const text      = [
-      `A new court booking request has been submitted.`,
+    const _slotStr = s => s === 'morning' ? 'Morning (07:00–14:00)' : s === 'afternoon' ? 'Afternoon (14:00–18:00)' : (s || '');
+    const subject  = bookings.length > 1
+      ? `New Court Booking Request (${bookings.length} slots) — ${vName}`
+      : `New Court Booking Request — ${vName}`;
+    const slotsSection = bookings.length === 1
+      ? [
+          `Date:  ${booking.date}`,
+          `Court: Court ${(booking.courtIndex || 0) + 1}`,
+          `Slot:  ${_slotStr(booking.timeSlot)}`,
+        ]
+      : [
+          `Slots (${bookings.length}):`,
+          ...bookings
+            .slice()
+            .sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.courtIndex || 0) - (b.courtIndex || 0))
+            .map((b, i) => `  ${i + 1}. ${b.date}  Court ${(b.courtIndex || 0) + 1}  ${_slotStr(b.timeSlot)}`),
+        ];
+    const text = [
+      bookings.length > 1
+        ? `A new court booking request has been submitted for ${bookings.length} slots.`
+        : `A new court booking request has been submitted.`,
       ``,
-      `Venue: ${vName}`,
-      `Date:  ${booking.date}`,
-      `Court: Court ${(booking.courtIndex || 0) + 1}`,
-      `Slot:  ${slot}`,
+      `Venue:  ${vName}`,
+      ...slotsSection,
       `Reason: ${booking.reason || booking.label || '—'}`,
       `Booker: ${booking.bookerName || booking.requestedByName || '—'}`,
       booking.onBehalfName ? `On behalf of: ${booking.onBehalfName} (${booking.onBehalfContact || 'no contact'})` : '',
