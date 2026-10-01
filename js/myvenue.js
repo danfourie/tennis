@@ -555,7 +555,7 @@ const MyVenue = (() => {
 
     // ── Booking: approve ────────────────────────────────────────
     container.querySelectorAll('.mv-approve-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', async () => {
         const id      = btn.dataset.id;
         const booking = DB.getBookings().find(b => b.id === id);
         btn.disabled = true; btn.textContent = 'Approving…';
@@ -571,6 +571,8 @@ const MyVenue = (() => {
             recipientUids: [booking.requestedBy],
           });
         }
+        // Email the requester
+        try { await firebase.functions().httpsCallable('notifyBookingStatus')({ bookingId: id, action: 'approved' }); } catch (e) { /* non-critical */ }
         toast('Booking approved ✓', 'success');
       });
     });
@@ -588,6 +590,10 @@ const MyVenue = (() => {
         if (!confirm(confirmMsg)) return;
         btn.disabled = true; btn.textContent = wasCancelling ? 'Cancelling…' : 'Rejecting…';
         try {
+          // Email requester before deleting (booking doc must still exist for the CF to read it)
+          if (!wasCancelling) {
+            try { await firebase.functions().httpsCallable('notifyBookingStatus')({ bookingId: id, action: 'rejected' }); } catch (e) { /* non-critical */ }
+          }
           await DB.rejectBooking(id);
           DB.writeAudit(wasCancelling ? 'booking_cancelled' : 'booking_rejected', 'booking',
             `${wasCancelling ? 'Cancelled' : 'Rejected'} booking: ${booking ? esc(booking.label || '') : ''} on ${booking ? booking.date : ''}`,

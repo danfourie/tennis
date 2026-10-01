@@ -1812,23 +1812,47 @@ exports.notifyBookingRequest = onCall(
     const vSnap  = await db.collection('venues').doc(booking.venueId || '').get();
     const vName  = vSnap.exists ? vSnap.data().name : 'Unknown venue';
 
-    // Find organizer emails: users whose school's venueId matches
+    // Find organizer emails and UIDs: users whose school's venueId matches
     const schoolsSnap = await db.collection('schools').where('venueId', '==', booking.venueId).get();
     const orgEmails   = [];
+    const orgUids     = [];
     for (const sDoc of schoolsSnap.docs) {
       const usersSnap = await db.collection('users').where('schoolId', '==', sDoc.id).get();
       for (const uDoc of usersSnap.docs) {
         const role = uDoc.data().role;
-        if (['master', 'admin', 'organizer'].includes(role) && uDoc.data().email) {
-          orgEmails.push(uDoc.data().email);
+        if (['master', 'admin', 'organizer'].includes(role)) {
+          if (uDoc.data().email) orgEmails.push(uDoc.data().email);
+          orgUids.push(uDoc.id);
         }
       }
     }
     // Also include all admins/masters
     const adminsSnap = await db.collection('users').where('role', 'in', ['master', 'admin']).get();
-    adminsSnap.docs.forEach(d => { if (d.data().email) orgEmails.push(d.data().email); });
+    adminsSnap.docs.forEach(d => {
+      if (d.data().email) orgEmails.push(d.data().email);
+      orgUids.push(d.id);
+    });
 
     const recipients = [...new Set(orgEmails)];
+    const notifUids  = [...new Set(orgUids)];
+
+    // Write in-app notifications for each organizer
+    if (notifUids.length > 0) {
+      const now       = admin.firestore.FieldValue.serverTimestamp();
+      const userName  = booking.requestedByName || booking.bookerName || 'Someone';
+      const slotLabel = booking.timeSlot === 'morning' ? 'Morning (07:00–14:00)' : booking.timeSlot === 'afternoon' ? 'Afternoon (14:00–18:00)' : (booking.timeSlot || '');
+      const nb        = db.batch();
+      for (const uid of notifUids) {
+        nb.set(db.collection('notifications').doc(), {
+          uid, type: 'booking_request',
+          title:    `New booking request — ${vName}`,
+          body:     `${userName} requested ${slotLabel} on ${booking.date} (${booking.reason || booking.label || '—'})`,
+          fromName: userName, bookingId, read: false, createdAt: now, createdBy: booking.requestedBy || null,
+        });
+      }
+      await nb.commit();
+    }
+
     if (recipients.length === 0) return { ok: true, sent: 0 };
 
     const emailUser = EMAIL_USER.value();
@@ -1873,14 +1897,23 @@ exports.notifyBookingStatus = onCall(
     const { bookingId, action } = request.data || {};
     if (!bookingId || !['approved', 'rejected'].includes(action)) throw new HttpsError('invalid-argument', 'bookingId and action required');
 
-    const callerSnap = await admin.firestore().doc(`users/${request.auth.uid}`).get();
+    const db         = admin.firestore();
+    const callerSnap = await db.doc(`users/${request.auth.uid}`).get();
     const caller     = callerSnap.exists ? callerSnap.data() : null;
-    if (!caller || !['master', 'admin'].includes(caller.role)) throw new HttpsError('permission-denied', 'Admins only');
+    if (!caller) throw new HttpsError('permission-denied', 'Unauthorized');
 
-    const db    = admin.firestore();
     const bSnap = await db.collection('bookings').doc(bookingId).get();
     if (!bSnap.exists) throw new HttpsError('not-found', 'Booking not found');
     const booking = bSnap.data();
+
+    // Allow master/admin/organizer roles, or any user who organizes this venue
+    const isGlobal = ['master', 'admin', 'organizer'].includes(caller.role);
+    if (!isGlobal) {
+      const sSnap = caller.schoolId ? await db.collection('schools').doc(caller.schoolId).get() : null;
+      if (!sSnap || !sSnap.exists || sSnap.data().venueId !== booking.venueId) {
+        throw new HttpsError('permission-denied', 'Not authorized for this venue');
+      }
+    }
 
     // Get requester email from users collection
     if (!booking.requestedBy) return { ok: true, sent: 0 };

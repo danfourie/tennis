@@ -307,8 +307,7 @@ const CourtBooking = (() => {
     try {
       const user    = Auth.getUser();
       const profile = Auth.getProfile();
-      const isOrganizer = _isVenueOrganizer(_selectedVenueId);
-      const status  = (Auth.isAdmin() || isOrganizer) ? 'confirmed' : 'pending';
+      const status = 'pending';
       const venue   = DB.getVenues().find(v => v.id === _selectedVenueId);
 
       const result = DB.addBooking({
@@ -337,20 +336,16 @@ const CourtBooking = (() => {
       }
 
       DB.writeAudit('booking_requested', 'booking',
-        `${status === 'confirmed' ? 'Booked' : 'Requested'}: ${reason} on ${_selectedDate} (${getSlotDisplayName(_selectedSlot)}) at ${venue ? venue.name : _selectedVenueId} Court ${_selectedCourt + 1}`,
+        `Requested: ${reason} on ${_selectedDate} (${getSlotDisplayName(_selectedSlot)}) at ${venue ? venue.name : _selectedVenueId} Court ${_selectedCourt + 1}`,
         null, reason);
 
-      if (status === 'confirmed') {
-        toast('Court booked ✓', 'success');
-      } else {
-        toast('Booking request submitted — awaiting approval ✓', 'success');
-        // Notify venue organizers via Cloud Function (fire-and-forget)
-        try {
-          await firebase.functions().httpsCallable('notifyBookingRequest')({
-            bookingId: result.id,
-          });
-        } catch (e) { /* non-critical */ }
-      }
+      toast('Booking request submitted — awaiting approval ✓', 'success');
+      // Notify venue organizers via Cloud Function (fire-and-forget)
+      try {
+        await firebase.functions().httpsCallable('notifyBookingRequest')({
+          bookingId: result.id,
+        });
+      } catch (e) { /* non-critical */ }
 
       // Reset form after success
       _selectedSlot = 'morning';
