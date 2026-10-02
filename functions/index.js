@@ -2484,7 +2484,11 @@ exports.bookGroenkloofCourt = onCall(
     }
     await nb.commit();
 
-    if (toEmails.length > 0) {
+    // Remove system/dev accounts that should not receive guest booking notifications
+    const GUEST_EMAIL_BLOCKLIST = ['jendev7@gmail.com'];
+    const filteredEmails = toEmails.filter(e => !GUEST_EMAIL_BLOCKLIST.includes(e.toLowerCase()));
+
+    if (filteredEmails.length > 0) {
       const emailUser = EMAIL_USER.value();
       const emailPass = EMAIL_PASS.value();
       if (emailUser && emailPass) {
@@ -2528,7 +2532,7 @@ exports.bookGroenkloofCourt = onCall(
           const htmlEmail = _bookingEmailHtml({ headerBg: '#3b82f6', headerLabel: 'New Booking Request', bodyHtml });
           await transporter.sendMail({
             from:    `"Court Campus" <${emailUser}>`,
-            to:      toEmails.join(', '),
+            to:      filteredEmails.join(', '),
             subject: `[Court Campus] Booking request — ${venueName}`,
             text:    `A booking request from ${userName} <${email.trim()}> / ${phone.trim()}.\n\n${bodyNote}\n\nReason: ${reason}\n\nLog in to approve: ${APP_URL}`,
             html:    htmlEmail,
