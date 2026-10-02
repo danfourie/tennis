@@ -69,11 +69,16 @@ const MyBookings = (() => {
     const first   = slots[0];
     const venue   = venues[first.venueId];
     const isGroup = slots.length > 1;
-    const allActive = slots.every(b => b.status === 'pending' || b.status === 'confirmed');
-    const allowedToCancel = canCancel && allActive && bookingCancellationAllowed(first);
 
-    // "Cancel All Slots" button — only shown for groups
-    const cancelAllBtn = (allowedToCancel && isGroup)
+    // Per-slot cancellability: active status + 4-hour cutoff checked individually
+    const slotAllowed = b =>
+      canCancel &&
+      (b.status === 'pending' || b.status === 'confirmed') &&
+      bookingCancellationAllowed(b);
+
+    // "Cancel All Slots" — only if every slot in the group is still cancellable
+    const allCancellable = isGroup && slots.every(slotAllowed);
+    const cancelAllBtn = allCancellable
       ? `<button class="btn btn-sm btn-danger mb-cancel-btn"
            style="font-size:.78rem;padding:.25rem .65rem"
            data-ids="${slots.map(b => b.id).join(',')}"
@@ -83,7 +88,7 @@ const MyBookings = (() => {
       : '';
 
     // Single-booking cancel button
-    const cancelSingleBtn = (allowedToCancel && !isGroup)
+    const cancelSingleBtn = (!isGroup && slotAllowed(first))
       ? `<button class="btn btn-sm btn-danger mb-cancel-btn"
            style="font-size:.78rem;padding:.25rem .65rem"
            data-ids="${first.id}"
@@ -99,7 +104,7 @@ const MyBookings = (() => {
           ${isGroup ? '' : _statusBadge(first.status)}
         </div>
         ${isGroup
-          ? slots.map(b => _slotRow(b, venues[b.venueId], allowedToCancel)).join('')
+          ? slots.map(b => _slotRow(b, venues[b.venueId], slotAllowed(b))).join('')
           : `<div style="font-size:.85rem;color:var(--neutral)">${esc(_slotLabel(first.timeSlot))} &middot; ${esc(_courtLabel(first, venue))}</div>`
         }
         ${first.reason ? `<div style="font-size:.82rem;color:var(--neutral);margin-top:.2rem">${esc(first.reason)}</div>` : ''}
