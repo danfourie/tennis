@@ -85,6 +85,13 @@ const Auth = (() => {
       if (doc.exists) {
         _profile = doc.data();
         _role    = _profile.role || 'user';
+        // Self-heal profiles created by Cloud Functions that omit the uid field.
+        // NotificationService.loadForCurrentUser() uses profile.uid and will crash
+        // (and force a sign-out) if it is missing.
+        if (!_profile.uid) {
+          _profile.uid = uid;
+          ref.update({ uid }).catch(() => {});
+        }
         console.log('[Auth] profile loaded — uid:', uid, '| role:', _role);
         if (typeof NotificationService !== 'undefined') NotificationService.loadForCurrentUser();
 

@@ -537,8 +537,16 @@ const Calendar = (() => {
           details,
         });
 
-        if (res.data && res.data.customToken) {
-          await firebase.auth().signInWithCustomToken(res.data.customToken);
+        if (res.data && res.data.isNewUser && password) {
+          try {
+            await firebase.auth().signInWithEmailAndPassword(email, password);
+          } catch (_) {
+            if (res.data.customToken) {
+              try { await firebase.auth().signInWithCustomToken(res.data.customToken); } catch (_2) {}
+            }
+          }
+        } else if (res.data && res.data.customToken) {
+          try { await firebase.auth().signInWithCustomToken(res.data.customToken); } catch (_) {}
         }
 
         _gklCart      = [];

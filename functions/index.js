@@ -2396,6 +2396,7 @@ exports.bookGroenkloofCourt = onCall(
       userName = name.trim();
       isNewUser = true;
       await db.collection('users').doc(uid).set({
+        uid,
         displayName: name.trim(),
         email:       email.trim(),
         role:        'user',
@@ -2541,7 +2542,12 @@ exports.bookGroenkloofCourt = onCall(
       }
     }
 
-    const customToken = await authAdmin.createCustomToken(uid);
+    let customToken = null;
+    try {
+      customToken = await authAdmin.createCustomToken(uid);
+    } catch (e) {
+      console.warn('[bookGroenkloofCourt] createCustomToken failed (IAM):', e.message);
+    }
     return { ok: true, bookingIds, isNewUser, customToken };
   }
 );
