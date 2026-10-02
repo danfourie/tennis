@@ -185,6 +185,8 @@ const Calendar = (() => {
 
   // ── Guest screen ─────────────────────────────────────────────
   function _renderGuestScreen() {
+    const calHdr = document.querySelector('#view-calendar .view-header');
+    if (calHdr) calHdr.style.display = 'none';
     const container  = document.getElementById('calendarContainer');
     const today      = new Date().toISOString().slice(0, 10);
     const gklVenue   = DB.getVenues().find(v =>
@@ -555,6 +557,9 @@ const Calendar = (() => {
   // ── Main render ─────────────────────────────────────────────
   function render() {
     if (!Auth.isLoggedIn()) { _renderGuestScreen(); return; }
+
+    const calHdr = document.querySelector('#view-calendar .view-header');
+    if (calHdr) calHdr.style.display = '';
 
     // Rebuild fixture→court mapping so allocations always reflect actual
     // sharing at each venue+date (fixes stale stored courtIndex values too).
