@@ -2325,7 +2325,11 @@ exports.getGroenkloofAvailability = onCall(
     // Load venue courts
     const venueSnap = await db.collection('venues').doc(venueId).get();
     if (!venueSnap.exists) throw new HttpsError('not-found', 'Venue not found');
-    const courts = venueSnap.data().courts || [];
+    // courts may be stored as a count (number) or an array of objects
+    const rawCourts = venueSnap.data().courts;
+    const courts = typeof rawCourts === 'number'
+      ? Array.from({ length: rawCourts }, (_, i) => ({ name: `Court ${i + 1}` }))
+      : (Array.isArray(rawCourts) ? rawCourts : []);
 
     // Active bookings for this venue + date
     const bookSnap = await db.collection('bookings')
