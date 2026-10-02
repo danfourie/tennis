@@ -132,8 +132,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (['tournaments', 'venues'].includes(collection))                          Tournaments.refresh();
       // MySchool and MyVenue must refresh when league scores / school / booking data change
       if (['leagues', 'schools', 'venues', 'closures', 'bookings'].includes(collection)) {
-        if (typeof MySchool !== 'undefined') MySchool.refresh();
-        if (typeof MyVenue  !== 'undefined') MyVenue.refresh();
+        if (typeof MySchool    !== 'undefined') MySchool.refresh();
+        if (typeof MyVenue     !== 'undefined') MyVenue.refresh();
+      }
+      if (collection === 'bookings') {
+        if (typeof MyBookings !== 'undefined') MyBookings.refresh();
       }
       // Global settings changes (e.g. tournament page toggle) — apply immediately
       if (collection === 'settings') applyTournamentVisibility();
@@ -149,6 +152,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     Admin.init();
     MySchool.init();
     MyVenue.init();
+    if (typeof MyBookings !== 'undefined') MyBookings.init();
 
   } catch (err) {
     console.error('Firebase init failed:', err);
@@ -267,8 +271,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       // Trigger render for views that need it on activation
       if (view === 'calendar')     Calendar.refresh();
       if (view === 'courtbooking') { if (typeof CourtBooking !== 'undefined') CourtBooking.render(); }
-      if (view === 'myschool')     MySchool.refresh();
-      if (view === 'myvenue')      MyVenue.refresh();
+      if (view === 'myschool')    MySchool.refresh();
+      if (view === 'myvenue')     MyVenue.refresh();
+      if (view === 'mybookings' && typeof MyBookings !== 'undefined') MyBookings.render();
     });
   });
 

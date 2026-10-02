@@ -20,9 +20,10 @@
       </div>
       <nav class="main-nav" id="mainNav">
         <button class="nav-btn active" data-view="calendar">Calendar</button>
-        <button class="nav-btn user-only hidden" data-view="leagues">Leagues</button>
+        <button class="nav-btn hidden" data-view="leagues">Leagues</button>
         <button class="nav-btn hidden" data-view="tournaments">Tournaments</button>
         <button class="nav-btn user-only hidden" data-view="courtbooking">🎾 Court Booking</button>
+        <button class="nav-btn user-only hidden" data-view="mybookings">My Bookings</button>
         <button class="nav-btn hidden" data-view="myschool">🏫 My School</button>
         <button class="nav-btn hidden" data-view="myvenue">🏟 My Venue</button>
         <button class="nav-btn admin-only hidden" data-view="admin">Admin</button>
@@ -128,6 +129,14 @@
         </div>
       </div>
       <div id="myvenueContent"></div>
+    </section>
+
+    <!-- My Bookings View -->
+    <section id="view-mybookings" class="view hidden">
+      <div class="view-header">
+        <h2>My Bookings</h2>
+      </div>
+      <div id="myBookingsContent"></div>
     </section>
 
     <!-- Admin View -->
@@ -1150,7 +1159,7 @@
   <!-- App Scripts -->
   <script src="js/firebase-config.js"></script>
   <script src="js/data.js?v=20261002c"></script>
-  <script src="js/auth.js?v=20261002g"></script>
+  <script src="js/auth.js?v=20261002h"></script>
   <script src="js/notifications.js?v=20261001b"></script>
   <script src="js/calendar.js?v=20261002f"></script>
   <script src="js/courtbooking.js?v=20261002c"></script>
@@ -1159,6 +1168,7 @@
   <script src="js/admin.js?v=20261002b"></script>
   <script src="js/myschool.js?v=20260426"></script>
   <script src="js/myvenue.js?v=20261002c"></script>
+  <script src="js/mybookings.js?v=20261002a"></script>
   <script src="js/app.js?v=20260807"></script>
 </body>
 </html>

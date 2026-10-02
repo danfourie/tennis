@@ -316,12 +316,15 @@ const Auth = (() => {
       }
     }
 
+    const hasSchool = loggedIn && _profile && _profile.schoolId;
+
+    // "Leagues" nav button — only for school-linked users or admins
+    const leaguesBtn = document.querySelector('[data-view="leagues"]');
+    if (leaguesBtn) leaguesBtn.classList.toggle('hidden', !(hasSchool || adminUser));
+
     // "My School" nav button — visible only when logged in with a school
     const mySchoolBtn = document.querySelector('[data-view="myschool"]');
-    if (mySchoolBtn) {
-      const hasSchool = loggedIn && _profile && _profile.schoolId;
-      mySchoolBtn.classList.toggle('hidden', !hasSchool);
-    }
+    if (mySchoolBtn) mySchoolBtn.classList.toggle('hidden', !hasSchool);
 
     // Re-apply global feature-flag visibility (e.g. Tournaments tab) so that
     // auth state changes don't accidentally override the setting.
@@ -337,6 +340,7 @@ const Auth = (() => {
       if (typeof Tournaments  !== 'undefined') Tournaments.refresh();
       if (typeof MySchool     !== 'undefined') MySchool.refresh();
       if (typeof MyVenue      !== 'undefined') MyVenue.refresh();
+      if (typeof MyBookings   !== 'undefined') MyBookings.refresh();
       if (typeof Admin        !== 'undefined') Admin.refresh();
     }, 0);
   }
