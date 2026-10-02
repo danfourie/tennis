@@ -167,12 +167,20 @@ const Calendar = (() => {
     const venues = DB.getVenues(); // already sorted alphabetically by getter
     while (sel.options.length > 1) sel.remove(1);
     venues.forEach(v => sel.add(new Option(v.name, v.id)));
-    // Default to the user's home venue on first load (only when still on 'all')
-    if (currentVenueFilter === 'all' && Auth.isLoggedIn()) {
+    // Default to the user's home venue on first load (only when still on 'all').
+    // Users without a school default to Groenkloof; non-logged-in users also get Groenkloof.
+    if (currentVenueFilter === 'all') {
       const profile = Auth.getProfile();
       if (profile && profile.schoolId) {
         const school = DB.getSchools().find(s => s.id === profile.schoolId);
-        if (school && school.venueId) currentVenueFilter = school.venueId;
+        if (school && school.venueId) {
+          currentVenueFilter = school.venueId;
+        }
+      }
+      // Fall back to Groenkloof when no school venue was found
+      if (currentVenueFilter === 'all') {
+        const gkl = venues.find(v => (v.name || '').toLowerCase().includes('groenkloof'));
+        if (gkl) currentVenueFilter = gkl.id;
       }
     }
     sel.value = currentVenueFilter;

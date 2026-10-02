@@ -1,9 +1,11 @@
 /**
  * mybookings.js — "My Bookings" view
  *
- * Shows all bookings made by the currently logged-in user, sorted with
- * upcoming first and past bookings collapsed below.  Status badges and
- * venue/court/slot details are shown per booking.
+ * Active (upcoming):  date >= today  AND  status pending | confirmed
+ * History:            date <  today  OR   status cancelled | rejected
+ *
+ * Cancel is available on active bookings outside the 4-hour cutoff.
+ * Multi-slot groups are collapsed together with a single "Cancel All" action.
  */
 
 const MyBookings = (() => {
@@ -40,23 +42,66 @@ const MyBookings = (() => {
     return `<span style="font-size:.75rem;font-weight:600;padding:.2rem .55rem;border-radius:999px;background:${s.bg};color:${s.color};white-space:nowrap">${s.label}</span>`;
   }
 
-  function _bookingCard(b, venues) {
-    const venue = venues[b.venueId];
-    const groupTag = b.groupId
-      ? `<span style="font-size:.72rem;color:var(--neutral);margin-left:.35rem">(group)</span>` : '';
+  // One row inside a card (used for both single and grouped slots)
+  function _slotRow(b, venue) {
+    return `
+      <div style="font-size:.85rem;color:var(--neutral);display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;padding:.18rem 0">
+        <span>${formatDate(b.date)}</span>
+        <span style="opacity:.4">&middot;</span>
+        <span>${esc(_slotLabel(b.timeSlot))}</span>
+        <span style="opacity:.4">&middot;</span>
+        <span>${esc(_courtLabel(b, venue))}</span>
+        ${_statusBadge(b.status)}
+      </div>`;
+  }
+
+  // Full card for a single booking or a group
+  function _card(slots, venues, canCancel) {
+    const first   = slots[0];
+    const venue   = venues[first.venueId];
+    const isGroup = slots.length > 1;
+    const allActive = slots.every(b => b.status === 'pending' || b.status === 'confirmed');
+    const allowedToCancel = canCancel && allActive && bookingCancellationAllowed(first);
+
+    const cancelBtn = allowedToCancel
+      ? `<button class="btn btn-sm btn-danger mb-cancel-btn"
+           style="font-size:.78rem;padding:.25rem .65rem"
+           data-ids="${slots.map(b => b.id).join(',')}"
+           data-groupid="${first.groupId || ''}"
+           data-label="${esc(first.reason || first.label || 'Booking')}"
+           data-date="${first.date}">
+           ${isGroup ? 'Cancel All Slots' : 'Cancel'}
+         </button>`
+      : '';
+
     return `
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:.75rem 1rem;margin-bottom:.5rem">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:.5rem;flex-wrap:wrap">
-          <div>
-            <div style="font-weight:600;font-size:.95rem">${esc(venue ? venue.name : b.venueId)}${groupTag}</div>
-            <div style="font-size:.85rem;color:var(--neutral);margin-top:.15rem">
-              ${formatDate(b.date)} &middot; ${esc(_slotLabel(b.timeSlot))} &middot; ${esc(_courtLabel(b, venue))}
-            </div>
-            ${b.reason ? `<div style="font-size:.82rem;color:var(--neutral);margin-top:.1rem">${esc(b.reason)}</div>` : ''}
-          </div>
-          ${_statusBadge(b.status)}
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:.5rem;flex-wrap:wrap;margin-bottom:${isGroup ? '.4rem' : '.2rem'}">
+          <div style="font-weight:600;font-size:.95rem">${esc(venue ? venue.name : first.venueId)}</div>
+          ${isGroup ? '' : _statusBadge(first.status)}
         </div>
+        ${isGroup
+          ? slots.map(b => _slotRow(b, venues[b.venueId])).join('')
+          : `<div style="font-size:.85rem;color:var(--neutral)">${esc(_slotLabel(first.timeSlot))} &middot; ${esc(_courtLabel(first, venue))}</div>`
+        }
+        ${first.reason ? `<div style="font-size:.82rem;color:var(--neutral);margin-top:.2rem">${esc(first.reason)}</div>` : ''}
+        ${cancelBtn ? `<div style="margin-top:.55rem">${cancelBtn}</div>` : ''}
       </div>`;
+  }
+
+  // Group bookings by groupId, keeping singletons as-is
+  function _groupSlots(bookings) {
+    const groups = new Map(); // groupId → [booking]
+    const singles = [];
+    bookings.forEach(b => {
+      if (b.groupId) {
+        if (!groups.has(b.groupId)) groups.set(b.groupId, []);
+        groups.get(b.groupId).push(b);
+      } else {
+        singles.push([b]);
+      }
+    });
+    return [...singles, ...[...groups.values()]];
   }
 
   // ── render ────────────────────────────────────────────────────
@@ -73,40 +118,96 @@ const MyBookings = (() => {
     const user = Auth.getUser();
     if (!user) return;
 
-    const today   = toDateStr(new Date());
-    const venues  = _venueMap();
+    const today  = toDateStr(new Date());
+    const venues = _venueMap();
 
-    const all = DB.getBookings()
+    const mine = DB.getBookings()
       .filter(b => b.requestedBy === user.uid && !b.deleted)
       .sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
 
-    const upcoming = all.filter(b => b.date >= today);
-    const past     = all.filter(b => b.date <  today).reverse();
+    // Active: upcoming date, pending or confirmed
+    const active = mine.filter(b =>
+      b.date >= today && (b.status === 'pending' || b.status === 'confirmed')
+    );
 
-    if (all.length === 0) {
+    // History: past OR cancelled/rejected (at any date)
+    const history = mine
+      .filter(b => b.date < today || b.status === 'cancelled' || b.status === 'rejected')
+      .sort((a, b) => a.date > b.date ? -1 : a.date < b.date ? 1 : 0); // newest first
+
+    const activeGroups  = _groupSlots(active);
+    const historyGroups = _groupSlots(history);
+
+    if (mine.length === 0) {
       el.innerHTML = `<div class="empty-state"><p class="text-muted">You have no bookings yet.</p></div>`;
       return;
     }
 
-    const upcomingHtml = upcoming.length > 0
-      ? upcoming.map(b => _bookingCard(b, venues)).join('')
+    const activeHtml = activeGroups.length > 0
+      ? activeGroups.map(g => _card(g, venues, true)).join('')
       : `<p style="font-size:.88rem;color:var(--neutral);margin-bottom:1rem">No upcoming bookings.</p>`;
 
-    const pastHtml = past.length > 0
+    const historyHtml = historyGroups.length > 0
       ? `<details style="margin-top:1.25rem">
           <summary style="font-size:.82rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--neutral);cursor:pointer;user-select:none;padding:.25rem 0">
-            Past bookings (${past.length})
+            History (${historyGroups.length})
           </summary>
-          <div style="margin-top:.6rem">${past.map(b => _bookingCard(b, venues)).join('')}</div>
+          <div style="margin-top:.6rem">${historyGroups.map(g => _card(g, venues, false)).join('')}</div>
         </details>`
       : '';
 
     el.innerHTML = `
       <div style="font-size:.82rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--neutral);margin-bottom:.6rem">
-        Upcoming (${upcoming.length})
+        Upcoming (${activeGroups.length})
       </div>
-      ${upcomingHtml}
-      ${pastHtml}`;
+      ${activeHtml}
+      ${historyHtml}`;
+
+    // ── Wire cancel buttons ───────────────────────────────────
+    el.querySelectorAll('.mb-cancel-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const ids     = btn.dataset.ids.split(',').filter(Boolean);
+        const groupId = btn.dataset.groupid;
+        const label   = btn.dataset.label;
+        const date    = btn.dataset.date;
+        const isGroup = ids.length > 1;
+
+        // Re-fetch to get latest status (data may have updated since render)
+        const bookings = ids.map(id => DB.getBookings().find(b => b.id === id)).filter(Boolean);
+        if (bookings.length === 0) { render(); return; }
+
+        if (!bookingCancellationAllowed(bookings[0])) {
+          toast('Cancellations are not permitted within 4 hours of the booking time.', 'error');
+          return;
+        }
+
+        const msg = isGroup
+          ? `Cancel all ${ids.length} slots in this group booking?\n\n"${label}" — from ${formatDate(date)}`
+          : `Cancel this booking?\n\n"${label}" on ${formatDate(date)}`;
+        if (!confirm(msg)) return;
+
+        btn.disabled    = true;
+        btn.textContent = 'Cancelling…';
+
+        try {
+          for (const b of bookings) {
+            await DB.rejectBooking(b.id, 'cancelled');
+          }
+          // Notify venue/admin — non-critical
+          const firstId = ids[0];
+          const fn = firebase.functions().httpsCallable('notifyUserCancellation');
+          fn(groupId ? { bookingId: firstId, groupId } : { bookingId: firstId }).catch(() => {});
+
+          toast('Booking cancelled');
+          render();
+        } catch (err) {
+          console.error('[MyBookings] cancel failed:', err);
+          btn.disabled    = false;
+          btn.textContent = isGroup ? 'Cancel All Slots' : 'Cancel';
+          toast('Failed to cancel — please try again', 'error');
+        }
+      });
+    });
   }
 
   // ── lifecycle ─────────────────────────────────────────────────
