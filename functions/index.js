@@ -2312,20 +2312,66 @@ exports.contactAdmin = onCall(
   }
 );
 
-// ── 11. Public: Groenkloof court booking (unauthenticated guests) ─────────────
-// Looks up or creates a user by email, writes the booking via Admin SDK (bypasses
-// Firestore rules), and returns a custom auth token so the client can sign in.
+// ── 11a. Public: Groenkloof availability check (unauthenticated guests) ───────
+exports.getGroenkloofAvailability = onCall(
+  { invoker: 'public' },
+  async (request) => {
+    const { venueId, date } = request.data || {};
+    if (!venueId) throw new HttpsError('invalid-argument', 'venueId is required');
+    if (!date)    throw new HttpsError('invalid-argument', 'date is required');
+
+    const db = admin.firestore();
+
+    // Load venue courts
+    const venueSnap = await db.collection('venues').doc(venueId).get();
+    if (!venueSnap.exists) throw new HttpsError('not-found', 'Venue not found');
+    const courts = venueSnap.data().courts || [];
+
+    // Active bookings for this venue + date
+    const bookSnap = await db.collection('bookings')
+      .where('venueId', '==', venueId)
+      .where('date',    '==', date)
+      .get();
+    const booked = bookSnap.docs
+      .filter(d => ['pending', 'confirmed'].includes(d.data().status))
+      .map(d => ({ courtIndex: d.data().courtIndex, timeSlot: d.data().timeSlot, status: d.data().status }));
+
+    // Closures for this venue + date
+    const closeSnap = await db.collection('closures')
+      .where('venueId', '==', venueId)
+      .where('date',    '==', date)
+      .get();
+    const closed = closeSnap.docs.map(d => ({
+      courtIndex: d.data().courtIndex != null ? d.data().courtIndex : -1,
+      timeSlot:   d.data().timeSlot || 'all',
+    }));
+
+    return { courts, booked, closed };
+  }
+);
+
+// ── 11b. Public: Groenkloof court booking (unauthenticated guests) ─────────────
+// Accepts either a `slots` array (multi-slot) or legacy single-slot fields.
+// Looks up or creates a user by email, writes booking(s) via Admin SDK, and
+// returns a custom auth token so the client can sign in.
 exports.bookGroenkloofCourt = onCall(
   { invoker: 'public', secrets: [EMAIL_USER, EMAIL_PASS] },
   async (request) => {
-    const { name, email, phone, password, venueId, courtIndex, date, timeSlot, bookingType, details } = request.data || {};
+    const { name, email, phone, password, venueId, bookingType, details } = request.data || {};
 
-    if (!name    || !name.trim())           throw new HttpsError('invalid-argument', 'Full name is required');
-    if (!email   || !email.trim())          throw new HttpsError('invalid-argument', 'Email address is required');
-    if (!phone   || !phone.trim())          throw new HttpsError('invalid-argument', 'Contact number is required');
-    if (!venueId)                           throw new HttpsError('invalid-argument', 'venueId is required');
-    if (!date)                              throw new HttpsError('invalid-argument', 'date is required');
-    if (!timeSlot)                          throw new HttpsError('invalid-argument', 'timeSlot is required');
+    // Support multi-slot `slots` array, falling back to legacy single-slot fields
+    let slots = request.data.slots;
+    if (!Array.isArray(slots) || slots.length === 0) {
+      // Legacy single-slot path
+      const { courtIndex, date, timeSlot } = request.data;
+      if (!date || !timeSlot) throw new HttpsError('invalid-argument', 'slots array (or date+timeSlot) is required');
+      slots = [{ courtIndex: courtIndex || 0, date, timeSlot }];
+    }
+
+    if (!name    || !name.trim())            throw new HttpsError('invalid-argument', 'Full name is required');
+    if (!email   || !email.trim())           throw new HttpsError('invalid-argument', 'Email address is required');
+    if (!phone   || !phone.trim())           throw new HttpsError('invalid-argument', 'Contact number is required');
+    if (!venueId)                            throw new HttpsError('invalid-argument', 'venueId is required');
     if (!bookingType || !bookingType.trim()) throw new HttpsError('invalid-argument', 'Booking type is required');
 
     const db        = admin.firestore();
@@ -2338,7 +2384,6 @@ exports.bookGroenkloofCourt = onCall(
       uid      = existing.uid;
       userName = existing.displayName || name.trim();
     } catch (_notFound) {
-      // No existing account — password required to create one
       if (!password || password.length < 6) {
         throw new HttpsError('invalid-argument', 'A password of at least 6 characters is required to create your account');
       }
@@ -2355,41 +2400,52 @@ exports.bookGroenkloofCourt = onCall(
       });
     }
 
-    // Check slot availability
-    const clash = await db.collection('bookings')
-      .where('venueId',    '==', venueId)
-      .where('courtIndex', '==', courtIndex || 0)
-      .where('date',       '==', date)
-      .where('timeSlot',   '==', timeSlot)
-      .get();
-    if (!clash.empty && clash.docs.some(d => ['confirmed', 'pending'].includes(d.data().status))) {
-      throw new HttpsError('already-exists', 'This slot is already booked — please choose a different time or court');
+    const reason  = (bookingType + (details && details.trim() ? ': ' + details.trim() : '')).trim();
+    const groupId = slots.length > 1 ? db.collection('bookings').doc().id : null;
+    const venueSnap = await db.collection('venues').doc(venueId).get();
+    const venueName = venueSnap.exists ? (venueSnap.data().name || venueId) : venueId;
+    const courts    = (venueSnap.exists && venueSnap.data().courts) || [];
+
+    const bookingIds = [];
+    for (const slot of slots) {
+      const { courtIndex = 0, date, timeSlot } = slot;
+      // Clash check per slot
+      const clash = await db.collection('bookings')
+        .where('venueId',    '==', venueId)
+        .where('courtIndex', '==', courtIndex)
+        .where('date',       '==', date)
+        .where('timeSlot',   '==', timeSlot)
+        .get();
+      if (!clash.empty && clash.docs.some(d => ['confirmed', 'pending'].includes(d.data().status))) {
+        const cName = courts[courtIndex] ? courts[courtIndex].name : `Court ${courtIndex + 1}`;
+        const slotL = timeSlot === 'morning' ? 'Morning' : timeSlot === 'afternoon' ? 'Afternoon' : timeSlot;
+        throw new HttpsError('already-exists', `${cName} ${slotL} on ${date} is already booked — please choose a different slot`);
+      }
+
+      const bookingRef = db.collection('bookings').doc();
+      const doc = {
+        id:              bookingRef.id,
+        venueId,
+        courtIndex,
+        date,
+        timeSlot,
+        type:            bookingType.toLowerCase(),
+        reason,
+        label:           reason,
+        bookerName:      userName,
+        onBehalfContact: phone.trim(),
+        status:          'pending',
+        requestedBy:     uid,
+        requestedByName: userName,
+        requestedAt:     new Date().toISOString(),
+      };
+      if (groupId) doc.groupId = groupId;
+      await bookingRef.set(doc);
+      bookingIds.push(bookingRef.id);
+      console.log(`[bookGroenkloofCourt] booking ${bookingRef.id} for uid=${uid} (new=${isNewUser})`);
     }
 
-    // Write booking via Admin SDK (bypasses Firestore security rules)
-    const reason     = (bookingType + (details && details.trim() ? ': ' + details.trim() : '')).trim();
-    const bookingRef = db.collection('bookings').doc();
-    await bookingRef.set({
-      id:              bookingRef.id,
-      venueId,
-      courtIndex:      courtIndex || 0,
-      date,
-      timeSlot,
-      type:            bookingType.toLowerCase(),
-      reason,
-      label:           reason,
-      bookerName:      userName,
-      onBehalfContact: phone.trim(),
-      status:          'pending',
-      requestedBy:     uid,
-      requestedByName: userName,
-      requestedAt:     new Date().toISOString(),
-    });
-    console.log(`[bookGroenkloofCourt] booking ${bookingRef.id} for uid=${uid} (new=${isNewUser})`);
-
     // Notify venue organizers + admins
-    const venueSnap  = await db.collection('venues').doc(venueId).get();
-    const venueName  = venueSnap.exists ? (venueSnap.data().name || venueId) : venueId;
     const adminSnap  = await db.collection('users').where('role', 'in', ['admin', 'master']).get();
     const schoolSnap = await db.collection('schools').where('venueId', '==', venueId).get();
     const orgUids    = new Set(adminSnap.docs.map(d => d.id));
@@ -2398,16 +2454,26 @@ exports.bookGroenkloofCourt = onCall(
       if (Array.isArray(sd.organisers)) sd.organisers.forEach(o => orgUids.add(o));
       if (sd.contactUid) orgUids.add(sd.contactUid);
     }
-    const slotLabel = timeSlot === 'morning' ? 'Morning (07:00–14:00)' : timeSlot === 'afternoon' ? 'Afternoon (14:00–18:00)' : timeSlot;
-    const now        = admin.firestore.FieldValue.serverTimestamp();
-    const nb         = db.batch();
-    const toEmails   = [];
+
+    const slotLabel = s => s === 'morning' ? 'Morning (07:00–14:00)' : s === 'afternoon' ? 'Afternoon (14:00–18:00)' : s;
+    const slotsDesc = slots.map(s => {
+      const cName = courts[s.courtIndex] ? courts[s.courtIndex].name : `Court ${s.courtIndex + 1}`;
+      return `${s.date} · ${cName} · ${slotLabel(s.timeSlot)}`;
+    });
+
+    const now      = admin.firestore.FieldValue.serverTimestamp();
+    const nb       = db.batch();
+    const toEmails = [];
+    const bodyNote = slotsDesc.length === 1
+      ? slotsDesc[0]
+      : `${slotsDesc.length} slots:\n  • ` + slotsDesc.join('\n  • ');
+
     for (const oid of orgUids) {
       nb.set(db.collection('notifications').doc(), {
         uid: oid, type: 'booking_request',
         title: `Booking request — ${venueName}`,
-        body:  `${userName} requested ${slotLabel} on ${date} (${reason})`,
-        fromName: userName, bookingId: bookingRef.id, read: false, createdAt: now,
+        body:  `${userName} requested ${slotsDesc.length === 1 ? slotsDesc[0] : slotsDesc.length + ' slots'} (${reason})`,
+        fromName: userName, bookingId: bookingIds[0], read: false, createdAt: now,
       });
       const uSnap = await db.collection('users').doc(oid).get();
       if (uSnap.exists && uSnap.data().email) toEmails.push(uSnap.data().email);
@@ -2420,27 +2486,54 @@ exports.bookGroenkloofCourt = onCall(
       if (emailUser && emailPass) {
         try {
           const transporter = nodemailer.createTransport({ service: 'gmail', auth: { user: emailUser, pass: emailPass } });
+          // Build HTML slots table for multi-slot, or a single detail box for single
+          let slotsHtml;
+          if (slots.length === 1) {
+            const s = slots[0];
+            const cName = courts[s.courtIndex] ? courts[s.courtIndex].name : `Court ${s.courtIndex + 1}`;
+            slotsHtml = `<div class="box"><table>
+              <tr><td>Court</td><td>${_h(cName)}</td></tr>
+              <tr><td>Date</td><td>${_h(s.date)}</td></tr>
+              <tr><td>Slot</td><td>${_h(slotLabel(s.timeSlot))}</td></tr>
+            </table></div>`;
+          } else {
+            slotsHtml = `<table class="stbl" style="width:100%;font-size:13px;border-collapse:collapse;margin:12px 0">
+              <thead><tr>
+                <th style="text-align:left;padding:5px 8px;background:#f1f5f9;border-bottom:1px solid #e2e8f0">Date</th>
+                <th style="text-align:left;padding:5px 8px;background:#f1f5f9;border-bottom:1px solid #e2e8f0">Court</th>
+                <th style="text-align:left;padding:5px 8px;background:#f1f5f9;border-bottom:1px solid #e2e8f0">Slot</th>
+              </tr></thead><tbody>
+              ${slots.map(s => {
+                const cName = courts[s.courtIndex] ? courts[s.courtIndex].name : `Court ${s.courtIndex + 1}`;
+                return `<tr>
+                  <td style="padding:5px 8px;border-bottom:1px solid #f1f5f9">${_h(s.date)}</td>
+                  <td style="padding:5px 8px;border-bottom:1px solid #f1f5f9">${_h(cName)}</td>
+                  <td style="padding:5px 8px;border-bottom:1px solid #f1f5f9">${_h(slotLabel(s.timeSlot))}</td>
+                </tr>`;
+              }).join('')}
+              </tbody></table>`;
+          }
+          const bodyHtml = `
+            <p>A booking request has been submitted at <strong>${_h(venueName)}</strong>.</p>
+            <div class="box"><table>
+              <tr><td>From</td><td>${_h(userName)} &lt;${_h(email.trim())}&gt; / ${_h(phone.trim())}</td></tr>
+              <tr><td>Reason</td><td>${_h(reason)}</td></tr>
+            </table></div>
+            ${slotsHtml}
+            <p style="font-size:.85em;color:#64748b">Log in to approve or decline.</p>`;
+          const htmlEmail = _bookingEmailHtml({ headerBg: '#3b82f6', headerLabel: 'New Booking Request', bodyHtml });
           await transporter.sendMail({
             from:    `"Court Campus" <${emailUser}>`,
             to:      toEmails.join(', '),
-            subject: `[Court Campus] Booking request — ${venueName} ${date}`,
-            text: [
-              `A booking request has been submitted at ${venueName}.`,
-              ``,
-              `From:   ${userName} <${email.trim()}> / ${phone.trim()}`,
-              `Date:   ${date}`,
-              `Slot:   ${slotLabel}`,
-              `Court:  Court ${(courtIndex || 0) + 1}`,
-              `Reason: ${reason}`,
-              ``,
-              `Log in to approve or decline: ${APP_URL}`,
-            ].join('\n'),
+            subject: `[Court Campus] Booking request — ${venueName}`,
+            text:    `A booking request from ${userName} <${email.trim()}> / ${phone.trim()}.\n\n${bodyNote}\n\nReason: ${reason}\n\nLog in to approve: ${APP_URL}`,
+            html:    htmlEmail,
           });
         } catch (e) { console.error('[bookGroenkloofCourt] sendMail failed:', e.message); }
       }
     }
 
     const customToken = await authAdmin.createCustomToken(uid);
-    return { ok: true, bookingId: bookingRef.id, isNewUser, customToken };
+    return { ok: true, bookingIds, isNewUser, customToken };
   }
 );

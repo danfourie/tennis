@@ -14,6 +14,11 @@ const Calendar = (() => {
   let currentWeekStart   = weekStart(new Date());
   let currentVenueFilter = 'all';
 
+  // ── Guest booking state (persists across form re-renders) ────
+  let _gklCart      = [];   // [{courtIndex, date, slot}]
+  let _gklDate      = '';   // date currently shown in avail grid
+  let _gklAvailData = null; // {courts, booked:[{courtIndex,timeSlot,status}], closed:[...]}
+
   // ── Time helper ─────────────────────────────────────────────
   function _timeToMins(t) {
     const [h, m] = (t || '00:00').split(':').map(Number);
@@ -262,28 +267,22 @@ const Calendar = (() => {
             <input type="tel" id="gklPhone" placeholder="e.g. 082 000 0000" autocomplete="tel">
           </div>
           <hr style="margin:.5rem 0 .9rem;border:none;border-top:1px solid var(--border)">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin-bottom:.5rem">
+            <strong style="font-size:.88rem">Select Slot(s)</strong>
+          </div>
           <div class="form-group">
             <label>Date <span style="color:var(--danger,#dc2626)">*</span></label>
-            <input type="date" id="gklDate" min="${today}">
+            <input type="date" id="gklDate" min="${today}" value="${_gklDate || today}">
           </div>
-          ${gklCourts.length > 1 ? `
-          <div class="form-group">
-            <label>Court</label>
-            <select id="gklCourt">${gklCourtOpts}</select>
-          </div>` : `<input type="hidden" id="gklCourt" value="0">`}
-          <div class="form-group">
-            <label>Slot</label>
-            <div style="display:flex;gap:.5rem;width:100%">
-              <button type="button" class="gkl-slot-btn" data-slot="morning"
-                style="flex:1;padding:.55rem .4rem;line-height:1.35;border-radius:6px;cursor:pointer;font-size:.85rem;font-weight:600;border:2px solid #2563eb;background:#2563eb;color:#fff">
-                Morning<br><small style="font-weight:400;opacity:.85">07:00 – 14:00</small>
-              </button>
-              <button type="button" class="gkl-slot-btn" data-slot="afternoon"
-                style="flex:1;padding:.55rem .4rem;line-height:1.35;border-radius:6px;cursor:pointer;font-size:.85rem;font-weight:600;border:2px solid #2563eb;background:#fff;color:#2563eb">
-                Afternoon<br><small style="font-weight:400;opacity:.85">14:00 – 18:00</small>
-              </button>
-            </div>
+          <!-- Availability grid — populated by JS after CF call -->
+          <div id="gklAvailGrid" style="margin-bottom:.5rem">
+            <p style="font-size:.83rem;color:var(--neutral);font-style:italic;padding:.25rem 0">
+              Select a date above to check court availability.
+            </p>
           </div>
+          <!-- Cart: selected slots -->
+          <div id="gklCartChips" style="margin-bottom:.75rem"></div>
+          <hr style="margin:.5rem 0 .9rem;border:none;border-top:1px solid var(--border)">
           <div class="form-group">
             <label>Booking Type <span style="color:var(--danger,#dc2626)">*</span></label>
             <select id="gklType">
@@ -360,20 +359,151 @@ const Calendar = (() => {
     // ── Groenkloof Booking ────────────────────────────────────
     if (!gklVenueId) return;
 
-    let _gklSlot = 'morning';
+    document.getElementById('guestGroenkloofBtn').onclick = () => {
+      _showForm('guestGroenkloofForm', 'guestContactForm');
+      // If we have a date already, load availability immediately
+      const dateEl = document.getElementById('gklDate');
+      if (dateEl && dateEl.value) _gklLoadAvail(gklVenueId);
+    };
+    document.getElementById('gklCancelBtn').onclick = () => {
+      document.getElementById('guestGroenkloofForm').classList.add('hidden');
+    };
 
-    document.getElementById('guestGroenkloofBtn').onclick = () => _showForm('guestGroenkloofForm', 'guestContactForm');
-    document.getElementById('gklCancelBtn').onclick       = () => document.getElementById('guestGroenkloofForm').classList.add('hidden');
+    // Slot label helper
+    function _slotLabel(slot) {
+      if (slot === 'morning')   return 'Morning (07:00–14:00)';
+      if (slot === 'afternoon') return 'Afternoon (14:00–18:00)';
+      return slot;
+    }
 
-    function _updateGklSlotUI() {
-      container.querySelectorAll('.gkl-slot-btn').forEach(x => {
-        const active = x.dataset.slot === _gklSlot;
-        x.style.background = active ? '#2563eb' : '#fff';
-        x.style.color      = active ? '#fff'    : '#2563eb';
+    // Render cart chips beneath the avail grid
+    function _gklRenderCartChips() {
+      const el = document.getElementById('gklCartChips');
+      if (!el) return;
+      if (_gklCart.length === 0) { el.innerHTML = ''; return; }
+      const venue = DB.getVenues().find(v => v.id === gklVenueId);
+      const courts = (venue && venue.courts) || [];
+      el.innerHTML = `
+        <p style="font-size:.77rem;color:var(--neutral);margin:0 0 .3rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em">
+          Selected (${_gklCart.length})
+        </p>
+        <div class="cb-cart-chips">
+          ${_gklCart.map((item, i) => {
+            const cName = courts[item.courtIndex] ? courts[item.courtIndex].name : `Court ${item.courtIndex + 1}`;
+            return `<span class="cb-cart-chip" style="display:inline-flex;align-items:center;gap:.3rem;background:#dbeafe;color:#1d4ed8;border-radius:999px;padding:.22rem .65rem;font-size:.78rem;font-weight:600;margin:.15rem">
+              ${esc(cName)} · ${esc(item.date)} · ${esc(_slotLabel(item.slot))}
+              <button type="button" data-gkl-remove="${i}"
+                style="background:none;border:none;cursor:pointer;font-size:.85rem;color:#1d4ed8;line-height:1;padding:0;margin-left:.1rem"
+                aria-label="Remove">✕</button>
+            </span>`;
+          }).join('')}
+        </div>`;
+      el.querySelectorAll('[data-gkl-remove]').forEach(btn => {
+        btn.onclick = () => {
+          _gklCart.splice(parseInt(btn.dataset.gklRemove, 10), 1);
+          _gklRenderCartChips();
+          _gklRenderAvailGrid(); // refresh cell states
+        };
       });
     }
-    container.querySelectorAll('.gkl-slot-btn').forEach(b => {
-      b.onclick = () => { _gklSlot = b.dataset.slot; _updateGklSlotUI(); };
+
+    // Render the availability grid for _gklDate
+    function _gklRenderAvailGrid() {
+      const gridEl = document.getElementById('gklAvailGrid');
+      if (!gridEl) return;
+      if (!_gklAvailData) {
+        gridEl.innerHTML = `<p style="font-size:.83rem;color:var(--neutral);font-style:italic;padding:.25rem 0">Select a date above to check court availability.</p>`;
+        return;
+      }
+      const { courts, booked, closed } = _gklAvailData;
+      const slots = ['morning', 'afternoon'];
+      const isBooked = (ci, slot) => booked.some(b => b.courtIndex === ci && b.timeSlot === slot);
+      const isClosed = (ci, slot) => closed.some(c => c.courtIndex === ci && c.timeSlot === slot);
+      const inCart   = (ci, slot) => _gklCart.some(c => c.courtIndex === ci && c.slot === slot && c.date === _gklDate);
+
+      let html = `<div style="overflow-x:auto;margin-bottom:.25rem">
+        <table style="width:100%;border-collapse:collapse;font-size:.8rem">
+          <thead>
+            <tr>
+              <th style="padding:.3rem .5rem;text-align:left;color:var(--neutral);font-weight:600">Court</th>
+              ${slots.map(s => `<th style="padding:.3rem .5rem;text-align:center;color:var(--neutral);font-weight:600">${_slotLabel(s)}</th>`).join('')}
+            </tr>
+          </thead>
+          <tbody>`;
+      courts.forEach((court, ci) => {
+        html += `<tr>
+          <td style="padding:.3rem .5rem;font-weight:600;white-space:nowrap">${esc(court.name || `Court ${ci+1}`)}</td>`;
+        slots.forEach(slot => {
+          const booked_ = isBooked(ci, slot);
+          const closed_ = isClosed(ci, slot);
+          const inCart_ = inCart(ci, slot);
+          let bg, color, cursor, label, clickable;
+          if (booked_ || closed_) {
+            bg = '#f1f5f9'; color = '#94a3b8'; cursor = 'default';
+            label = booked_ ? 'Booked' : 'Closed'; clickable = false;
+          } else if (inCart_) {
+            bg = '#2563eb'; color = '#fff'; cursor = 'pointer';
+            label = '✓ Added'; clickable = true;
+          } else {
+            bg = '#dcfce7'; color = '#166534'; cursor = 'pointer';
+            label = 'Available'; clickable = true;
+          }
+          const dataAttrs = clickable ? `data-gkl-ci="${ci}" data-gkl-slot="${slot}"` : '';
+          html += `<td style="padding:.3rem .4rem;text-align:center">
+            <span ${dataAttrs} style="display:inline-block;padding:.3rem .6rem;border-radius:5px;background:${bg};color:${color};cursor:${cursor};font-size:.77rem;font-weight:600;min-width:70px;user-select:none">
+              ${label}
+            </span>
+          </td>`;
+        });
+        html += `</tr>`;
+      });
+      html += `</tbody></table></div>
+        <p style="font-size:.75rem;color:var(--neutral);margin:.2rem 0 0">Click an available slot to add it to your request.</p>`;
+      gridEl.innerHTML = html;
+
+      // Click handlers on available cells
+      gridEl.querySelectorAll('[data-gkl-ci]').forEach(cell => {
+        cell.onclick = () => {
+          const ci   = parseInt(cell.dataset.gklCi, 10);
+          const slot = cell.dataset.gklSlot;
+          const idx  = _gklCart.findIndex(c => c.courtIndex === ci && c.slot === slot && c.date === _gklDate);
+          if (idx >= 0) {
+            _gklCart.splice(idx, 1); // deselect
+          } else {
+            _gklCart.push({ courtIndex: ci, date: _gklDate, slot });
+          }
+          _gklRenderAvailGrid();
+          _gklRenderCartChips();
+        };
+      });
+    }
+
+    // Fetch availability from the public CF, then render
+    async function _gklLoadAvail(venueId) {
+      const gridEl = document.getElementById('gklAvailGrid');
+      if (!gridEl) return;
+      const date = document.getElementById('gklDate').value;
+      if (!date) return;
+      _gklDate      = date;
+      _gklAvailData = null;
+      gridEl.innerHTML = `<p style="font-size:.83rem;color:var(--neutral);font-style:italic;padding:.25rem 0">Checking availability…</p>`;
+      try {
+        const fn  = firebase.functions().httpsCallable('getGroenkloofAvailability');
+        const res = await fn({ venueId, date });
+        _gklAvailData = res.data;
+        _gklRenderAvailGrid();
+      } catch (e) {
+        gridEl.innerHTML = `<p style="font-size:.83rem;color:var(--danger,#dc2626);padding:.25rem 0">Could not load availability. Please try again.</p>`;
+      }
+    }
+
+    // Date picker triggers availability load
+    document.getElementById('gklDate').addEventListener('change', () => {
+      // Clear cart slots for old date that differ from new date
+      const newDate = document.getElementById('gklDate').value;
+      _gklCart = _gklCart.filter(c => c.date === newDate);
+      _gklRenderCartChips();
+      _gklLoadAvail(gklVenueId);
     });
 
     document.getElementById('gklSubmitBtn').onclick = async () => {
@@ -381,43 +511,37 @@ const Calendar = (() => {
       const email       = (document.getElementById('gklEmail').value    || '').trim();
       const password    = (document.getElementById('gklPassword').value || '');
       const phone       = (document.getElementById('gklPhone').value    || '').trim();
-      const date        = document.getElementById('gklDate').value;
-      const courtIndex  = parseInt(document.getElementById('gklCourt').value, 10) || 0;
       const bookingType = document.getElementById('gklType').value;
       const details     = (document.getElementById('gklDetails').value  || '').trim();
       const errEl       = document.getElementById('gklError');
       const btn         = document.getElementById('gklSubmitBtn');
 
       errEl.style.display = 'none';
-      if (!name)        { errEl.textContent = 'Full name is required.';          errEl.style.display = 'block'; return; }
-      if (!email)       { errEl.textContent = 'Email address is required.';       errEl.style.display = 'block'; return; }
-      if (!phone)       { errEl.textContent = 'Contact number is required.';      errEl.style.display = 'block'; return; }
-      if (!date)        { errEl.textContent = 'Please select a date.';            errEl.style.display = 'block'; return; }
-      if (!bookingType) { errEl.textContent = 'Please select a booking type.';    errEl.style.display = 'block'; return; }
+      if (!name)             { errEl.textContent = 'Full name is required.';          errEl.style.display = 'block'; return; }
+      if (!email)            { errEl.textContent = 'Email address is required.';       errEl.style.display = 'block'; return; }
+      if (!phone)            { errEl.textContent = 'Contact number is required.';      errEl.style.display = 'block'; return; }
+      if (_gklCart.length === 0) { errEl.textContent = 'Please select at least one slot from the availability grid.'; errEl.style.display = 'block'; return; }
+      if (!bookingType)      { errEl.textContent = 'Please select a booking type.';    errEl.style.display = 'block'; return; }
 
       btn.disabled = true; btn.textContent = 'Processing…';
 
       try {
-        // Cloud Function handles: existing-user lookup (password ignored), new-user
-        // creation (password required), booking write, and organizer notifications.
         const fn  = firebase.functions().httpsCallable('bookGroenkloofCourt');
         const res = await fn({
           name, email, phone, password,
-          venueId:     gklVenueId,
-          courtIndex,
-          date,
-          timeSlot:    _gklSlot,
+          venueId: gklVenueId,
+          slots:   _gklCart.map(c => ({ courtIndex: c.courtIndex, date: c.date, timeSlot: c.slot })),
           bookingType,
           details,
         });
 
-        // Sign the user in automatically with the returned custom token
         if (res.data && res.data.customToken) {
           await firebase.auth().signInWithCustomToken(res.data.customToken);
         }
 
+        _gklCart      = [];
+        _gklAvailData = null;
         toast('Booking requested ✓ — awaiting approval', 'success');
-        // Auth state change re-renders the calendar as logged-in user
 
       } catch (err) {
         const msg = (err.details && err.details.message) || err.message || 'Something went wrong. Please try again.';
