@@ -18,8 +18,8 @@
 const MyVenue = (() => {
 
   // ── state ────────────────────────────────────────────────────
-  let _showUpcomingOnly = false;   // toggle: all | upcoming
-  let _activeVenueId    = null;    // null = auto-select first venue
+  let _viewMode      = 'upcoming'; // 'upcoming' | 'all' | 'history'
+  let _activeVenueId = null;       // null = auto-select first venue
   let _showSettings     = false;   // inline settings panel open?
 
   // ── helpers ─────────────────────────────────────────────────
@@ -131,31 +131,20 @@ const MyVenue = (() => {
 
   // ── toggle buttons ───────────────────────────────────────────
   function _syncToggleBtns() {
-    const btnAll      = document.getElementById('mvViewAll');
-    const btnUpcoming = document.getElementById('mvViewUpcoming');
-    if (!btnAll || !btnUpcoming) return;
-    btnAll     .className = `btn btn-sm ${!_showUpcomingOnly ? 'btn-primary' : 'btn-secondary'}`;
-    btnUpcoming.className = `btn btn-sm ${_showUpcomingOnly  ? 'btn-primary' : 'btn-secondary'}`;
+    ['mvViewUpcoming', 'mvViewAll', 'mvViewHistory'].forEach(id => {
+      const btn = document.getElementById(id);
+      if (!btn) return;
+      const mode = id === 'mvViewUpcoming' ? 'upcoming' : id === 'mvViewAll' ? 'all' : 'history';
+      btn.className = `btn btn-sm ${_viewMode === mode ? 'btn-primary' : 'btn-secondary'}`;
+    });
   }
 
   // ── public API ───────────────────────────────────────────────
   function init() {
-    const btnAll      = document.getElementById('mvViewAll');
-    const btnUpcoming = document.getElementById('mvViewUpcoming');
-    if (btnAll) {
-      btnAll.addEventListener('click', () => {
-        _showUpcomingOnly = false;
-        _syncToggleBtns();
-        _render();
-      });
-    }
-    if (btnUpcoming) {
-      btnUpcoming.addEventListener('click', () => {
-        _showUpcomingOnly = true;
-        _syncToggleBtns();
-        _render();
-      });
-    }
+    [['mvViewUpcoming', 'upcoming'], ['mvViewAll', 'all'], ['mvViewHistory', 'history']].forEach(([id, mode]) => {
+      const btn = document.getElementById(id);
+      if (btn) btn.addEventListener('click', () => { _viewMode = mode; _syncToggleBtns(); _render(); });
+    });
   }
 
   function refresh() {
@@ -335,17 +324,17 @@ const MyVenue = (() => {
       .slice()
       .sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.timeSlot || '').localeCompare(b.timeSlot || ''));
 
-    // Active: upcoming date AND pending/confirmed
+    // Bookings split by view mode
     const activeBookings  = allVenueBookings.filter(b =>
       b.date >= today && (b.status === 'pending' || b.status === 'confirmed')
     );
-    // History: past date OR cancelled/rejected (regardless of date)
     const historyBookings = allVenueBookings
       .filter(b => b.date < today || b.status === 'cancelled' || b.status === 'rejected')
-      .sort((a, b) => (b.date || '').localeCompare(a.date || '')); // newest first
+      .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
 
-    const pendingCount = activeBookings.filter(b => b.status === 'pending').length;
-    const borderColor  = pendingCount > 0 ? 'var(--warning,#f59e0b)' : 'var(--success,#22c55e)';
+    const shownBookings  = _viewMode === 'history'  ? historyBookings
+                         : _viewMode === 'upcoming' ? activeBookings
+                         : allVenueBookings; // 'all'
 
     // Helper: render a list of bookings into html (active or history)
     function _renderBookingRows(list) {
@@ -419,59 +408,65 @@ const MyVenue = (() => {
       return out;
     }
 
-    html += `<div class="card" style="margin-bottom:1.5rem;border-left:4px solid ${borderColor}">
+    // Bookings card — show only what the current view mode calls for
+    const pendingCountDisplay = activeBookings.filter(b => b.status === 'pending').length;
+    const borderColorDisplay  = pendingCountDisplay > 0 ? 'var(--warning,#f59e0b)' : 'var(--success,#22c55e)';
+
+    html += `<div class="card" style="margin-bottom:1.5rem;border-left:4px solid ${borderColorDisplay}">
       <div class="card-header">
         <div class="card-title" style="margin:0">📩 Venue Bookings
-          ${pendingCount > 0
-            ? `<span class="badge" style="background:#fef9c3;color:#854d0e;margin-left:.5rem">${pendingCount} awaiting confirmation</span>`
+          ${pendingCountDisplay > 0
+            ? `<span class="badge" style="background:#fef9c3;color:#854d0e;margin-left:.5rem">${pendingCountDisplay} awaiting confirmation</span>`
             : `<span class="badge" style="background:#dcfce7;color:#166534;margin-left:.5rem">All confirmed ✓</span>`}
         </div>
       </div>
       <div class="card-body" style="padding:.25rem .75rem .75rem">`;
 
-    if (activeBookings.length === 0) {
-      html += `<p class="text-muted" style="padding:.4rem 0;margin:0">No upcoming bookings for this venue.</p>`;
+    if (shownBookings.length === 0) {
+      const emptyMsg = _viewMode === 'history'  ? 'No past or cancelled bookings.'
+                     : _viewMode === 'upcoming' ? 'No upcoming bookings for this venue.'
+                     : 'No bookings recorded for this venue yet.';
+      html += `<p class="text-muted" style="padding:.4rem 0;margin:0">${emptyMsg}</p>`;
     } else {
-      html += _renderBookingRows(activeBookings);
-    }
-
-    // History (collapsed)
-    if (historyBookings.length > 0) {
-      html += `<details style="margin-top:.75rem">
-        <summary style="font-size:.78rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--neutral);cursor:pointer;user-select:none;padding:.2rem 0">
-          History (${historyBookings.length})
-        </summary>
-        <div style="margin-top:.5rem;opacity:.85">${_renderBookingRows(historyBookings)}</div>
-      </details>`;
+      html += _renderBookingRows(shownBookings);
     }
 
     html += `</div></div>`;
 
     // ── Fixtures by date ──────────────────────────────────────────
-    const fixturesByDate = new Map();
+    const allFixturesByDate = new Map();
     DB.getLeagues().forEach(league => {
       (league.fixtures || []).forEach(f => {
         if (f.venueId !== venue.id) return;
-        if (_showUpcomingOnly && f.date && f.date < today) return;
-        if (!fixturesByDate.has(f.date)) fixturesByDate.set(f.date, []);
-        fixturesByDate.get(f.date).push({ fixture: f, league });
+        if (!allFixturesByDate.has(f.date)) allFixturesByDate.set(f.date, []);
+        allFixturesByDate.get(f.date).push({ fixture: f, league });
       });
     });
 
-    const sortedDates = [...fixturesByDate.keys()].sort();
+    // Split fixture dates by past / upcoming, then filter by view mode
+    const allFixtureDates     = [...allFixturesByDate.keys()].sort();
+    const upcomingFixtureDates = allFixtureDates.filter(d => d >= today);
+    const pastFixtureDates     = allFixtureDates.filter(d => d < today).reverse(); // newest-past first
 
-    if (sortedDates.length === 0) {
+    const shownFixtureDates = _viewMode === 'history'  ? pastFixtureDates
+                            : _viewMode === 'upcoming' ? upcomingFixtureDates
+                            : allFixtureDates; // 'all' = upcoming order, past appended
+
+    if (shownFixtureDates.length === 0) {
+      const fixtureEmpty = _viewMode === 'history'  ? 'No past fixtures at this venue.'
+                         : _viewMode === 'upcoming' ? 'No upcoming fixtures scheduled at'
+                         : 'No fixtures scheduled at';
       html += `<div class="empty-state" style="margin-top:1rem">
         <div class="empty-icon">📅</div>
-        <p>No ${_showUpcomingOnly ? 'upcoming ' : ''}fixtures scheduled at <strong>${esc(venue.name)}</strong>.</p>
+        <p>${fixtureEmpty} <strong>${esc(venue.name)}</strong>.</p>
       </div>`;
       container.innerHTML = html;
       _wireHandlers(container, venue, school);
       return;
     }
 
-    sortedDates.forEach(date => {
-      const entries = fixturesByDate.get(date);
+    function _renderFixtureDateCard(date) {
+      const entries = allFixturesByDate.get(date);
       const booked  = entries.reduce((sum, e) => sum + (e.fixture.courtsBooked || 3), 0);
       const isOver  = totalCourts > 0 && booked > totalCourts;
       const isNear  = totalCourts > 0 && !isOver && booked >= totalCourts;
@@ -483,7 +478,7 @@ const MyVenue = (() => {
                         : totalCourts ? `✓ ${booked}/${totalCourts} courts`
                         : `${booked} courts booked`;
 
-      html += `<div class="card" style="margin-bottom:1rem;border-left:4px solid ${statusColor}${isPast ? ';opacity:.7' : ''}">
+      let out = `<div class="card" style="margin-bottom:1rem;border-left:4px solid ${statusColor}${isPast ? ';opacity:.8' : ''}">
         <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem">
           <div>
             <div class="card-title" style="margin:0">
@@ -504,7 +499,7 @@ const MyVenue = (() => {
           const homeSchool = DB.getSchools().find(s => s.id === f.homeSchoolId);
           const awaySchool = DB.getSchools().find(s => s.id === f.awaySchoolId);
 
-          html += `<div class="myschool-fixture" style="margin:.5rem 0;background:var(--surface2,#f8fafc);border-radius:6px;padding:.5rem .75rem">
+          out += `<div class="myschool-fixture" style="margin:.5rem 0;background:var(--surface2,#f8fafc);border-radius:6px;padding:.5rem .75rem">
             <div class="fixture-meta" style="margin-bottom:.2rem">
               <span class="text-muted" style="font-size:.78rem">🏆 ${esc(league.name)}${league.division ? ' · ' + esc(league.division) : ''}</span>
               ${f.timeSlot ? `<span class="text-muted" style="font-size:.78rem">⏰ ${esc(f.timeSlot)}</span>` : ''}
@@ -524,8 +519,23 @@ const MyVenue = (() => {
           </div>`;
         });
 
-      html += `</div></div>`;
-    });
+      return out + `</div></div>`;
+    }
+
+    // In 'all' mode render upcoming first, then past; other modes just render shownFixtureDates
+    if (_viewMode === 'all') {
+      upcomingFixtureDates.forEach(d => { html += _renderFixtureDateCard(d); });
+      if (pastFixtureDates.length > 0) {
+        html += `<details style="margin-top:.5rem">
+          <summary style="font-size:.78rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--neutral);cursor:pointer;user-select:none;padding:.25rem 0">
+            Past fixtures (${pastFixtureDates.length} date${pastFixtureDates.length !== 1 ? 's' : ''})
+          </summary>
+          <div style="margin-top:.5rem">${pastFixtureDates.map(_renderFixtureDateCard).join('')}</div>
+        </details>`;
+      }
+    } else {
+      shownFixtureDates.forEach(d => { html += _renderFixtureDateCard(d); });
+    }
 
     container.innerHTML = html;
     _wireHandlers(container, venue, school);
