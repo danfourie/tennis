@@ -330,44 +330,43 @@ const MyVenue = (() => {
     }
 
     // ── Bookings ──────────────────────────────────────────────────
-    const venueBookings = DB.getBookings()
+    const allVenueBookings = DB.getBookings()
       .filter(b => b.venueId === venue.id)
       .slice()
       .sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.timeSlot || '').localeCompare(b.timeSlot || ''));
-    const pendingCount = venueBookings.filter(b => b.status === 'pending').length;
+
+    // Active: upcoming date AND pending/confirmed
+    const activeBookings  = allVenueBookings.filter(b =>
+      b.date >= today && (b.status === 'pending' || b.status === 'confirmed')
+    );
+    // History: past date OR cancelled/rejected (regardless of date)
+    const historyBookings = allVenueBookings
+      .filter(b => b.date < today || b.status === 'cancelled' || b.status === 'rejected')
+      .sort((a, b) => (b.date || '').localeCompare(a.date || '')); // newest first
+
+    const pendingCount = activeBookings.filter(b => b.status === 'pending').length;
     const borderColor  = pendingCount > 0 ? 'var(--warning,#f59e0b)' : 'var(--success,#22c55e)';
 
-    html += `<div class="card" style="margin-bottom:1.5rem;border-left:4px solid ${borderColor}">
-      <div class="card-header">
-        <div class="card-title" style="margin:0">📩 Venue Bookings
-          ${pendingCount > 0
-            ? `<span class="badge" style="background:#fef9c3;color:#854d0e;margin-left:.5rem">${pendingCount} awaiting confirmation</span>`
-            : `<span class="badge" style="background:#dcfce7;color:#166534;margin-left:.5rem">All confirmed ✓</span>`}
-        </div>
-      </div>
-      <div class="card-body" style="padding:.25rem .75rem .75rem">`;
-
-    if (venueBookings.length === 0) {
-      html += `<p class="text-muted" style="padding:.4rem 0;margin:0">No bookings recorded for this venue yet.</p>`;
-    } else {
-      // Group bookings by groupId (null groupId = standalone booking)
+    // Helper: render a list of bookings into html (active or history)
+    function _renderBookingRows(list) {
+      let out = '';
       const groups = [];
       const seenGroups = {};
-      venueBookings.forEach(b => {
+      list.forEach(b => {
         const key = b.groupId || ('__' + b.id);
         if (!seenGroups[key]) { seenGroups[key] = { groupId: b.groupId || null, bookings: [] }; groups.push(seenGroups[key]); }
         seenGroups[key].bookings.push(b);
       });
 
       groups.forEach(group => {
-        const isMulti     = !!(group.groupId && group.bookings.length > 1);
+        const isMulti      = !!(group.groupId && group.bookings.length > 1);
         const anyPending   = group.bookings.some(b => b.status === 'pending');
         const anyConfirmed = group.bookings.some(b => b.status === 'confirmed');
 
         if (isMulti) {
           const requester = group.bookings[0].requestedByName || 'User';
           const label     = group.bookings[0].label || group.bookings[0].type || 'Booking';
-          html += `<div class="cb-group-block">
+          out += `<div class="cb-group-block">
             <div class="cb-group-header">
               <span><strong>📦 ${esc(requester)}</strong> — ${group.bookings.length} slots · ${esc(label)}</span>
               ${(anyPending || anyConfirmed) ? `<div style="display:flex;gap:.4rem">
@@ -398,7 +397,7 @@ const MyVenue = (() => {
               : `<button class="btn btn-sm btn-danger mv-reject-btn" data-id="${esc(b.id)}" data-label="${isPending ? 'Reject' : 'Delete'}">${isPending ? 'Reject' : 'Delete'}</button>
                  <button class="btn btn-sm btn-primary mv-approve-btn" data-id="${esc(b.id)}">${isPending ? 'Approve ✓' : 'Confirm ✓'}</button>`;
 
-          html += `<div class="admin-list-item${isMulti ? ' group-slot-item' : ''}" style="align-items:flex-start;gap:.75rem">
+          out += `<div class="admin-list-item${isMulti ? ' group-slot-item' : ''}" style="align-items:flex-start;gap:.75rem">
             <div style="flex:1;min-width:0">
               <div style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap">
                 <span style="font-weight:600">${esc(b.label || b.type || 'Booking')}</span>${statusBadge}
@@ -413,11 +412,39 @@ const MyVenue = (() => {
             </div>
             <div style="display:flex;gap:.4rem;flex-shrink:0;align-items:center">${actionBtns}</div>
           </div>`;
-        }); // end group.bookings.forEach
+        });
 
-        if (isMulti) html += `</div>`; // close cb-group-block
-      }); // end groups.forEach
+        if (isMulti) out += `</div>`;
+      });
+      return out;
     }
+
+    html += `<div class="card" style="margin-bottom:1.5rem;border-left:4px solid ${borderColor}">
+      <div class="card-header">
+        <div class="card-title" style="margin:0">📩 Venue Bookings
+          ${pendingCount > 0
+            ? `<span class="badge" style="background:#fef9c3;color:#854d0e;margin-left:.5rem">${pendingCount} awaiting confirmation</span>`
+            : `<span class="badge" style="background:#dcfce7;color:#166534;margin-left:.5rem">All confirmed ✓</span>`}
+        </div>
+      </div>
+      <div class="card-body" style="padding:.25rem .75rem .75rem">`;
+
+    if (activeBookings.length === 0) {
+      html += `<p class="text-muted" style="padding:.4rem 0;margin:0">No upcoming bookings for this venue.</p>`;
+    } else {
+      html += _renderBookingRows(activeBookings);
+    }
+
+    // History (collapsed)
+    if (historyBookings.length > 0) {
+      html += `<details style="margin-top:.75rem">
+        <summary style="font-size:.78rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--neutral);cursor:pointer;user-select:none;padding:.2rem 0">
+          History (${historyBookings.length})
+        </summary>
+        <div style="margin-top:.5rem;opacity:.85">${_renderBookingRows(historyBookings)}</div>
+      </details>`;
+    }
+
     html += `</div></div>`;
 
     // ── Fixtures by date ──────────────────────────────────────────
