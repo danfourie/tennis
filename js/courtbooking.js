@@ -232,36 +232,42 @@ const CourtBooking = (() => {
       </div>`;
 
     // ── My Bookings section ─────────────────────────────────
-    const cbUser       = Auth.getUser();
-    const myBookings   = cbUser
+    const cbUser     = Auth.getUser();
+    const cbToday    = toDateStr(new Date());
+    const allMine    = cbUser
       ? DB.getBookings()
           .filter(b => b.requestedBy === cbUser.uid)
           .slice()
-          .sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.requestedAt || '').localeCompare(a.requestedAt || ''))
+          .sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.requestedAt || '').localeCompare(b.requestedAt || ''))
       : [];
 
-    if (myBookings.length > 0) {
+    // Active: upcoming date AND pending/confirmed
+    const cbActive  = allMine.filter(b =>
+      b.date >= cbToday && (b.status === 'pending' || b.status === 'confirmed')
+    );
+    // History: past date OR cancelled/rejected
+    const cbHistory = allMine
+      .filter(b => b.date < cbToday || b.status === 'cancelled' || b.status === 'rejected')
+      .sort((a, b) => (b.date || '').localeCompare(a.date || '')); // newest first
+
+    function _cbGroupRows(list, includeCancel) {
+      let out = '';
       const groups = [];
       const seenGroups = {};
-      myBookings.forEach(b => {
+      list.forEach(b => {
         const key = b.groupId || ('__' + b.id);
         if (!seenGroups[key]) { seenGroups[key] = { groupId: b.groupId || null, bookings: [] }; groups.push(seenGroups[key]); }
         seenGroups[key].bookings.push(b);
       });
-
-      let mbHtml = `<div class="card" style="margin-top:1.5rem">
-        <div class="card-header"><div class="card-title" style="margin:0">📋 My Bookings</div></div>
-        <div class="card-body" style="padding:.25rem .75rem .75rem">`;
-
       groups.forEach(group => {
-        const isMulti      = !!(group.groupId && group.bookings.length > 1);
-        const anyActive    = group.bookings.some(b => b.status === 'pending' || b.status === 'confirmed');
+        const isMulti   = !!(group.groupId && group.bookings.length > 1);
+        const anyActive = group.bookings.some(b => b.status === 'pending' || b.status === 'confirmed');
         if (isMulti) {
           const label = group.bookings[0].label || group.bookings[0].type || 'Booking';
-          mbHtml += `<div class="cb-group-block" style="margin-bottom:.5rem">
+          out += `<div class="cb-group-block" style="margin-bottom:.5rem">
             <div class="cb-group-header">
               <span><strong>📦 ${esc(label)}</strong> — ${group.bookings.length} slots</span>
-              ${anyActive ? `<button class="btn btn-sm btn-danger cb-cancel-group-btn" data-group-id="${esc(group.groupId)}">Cancel All</button>` : ''}
+              ${(includeCancel && anyActive) ? `<button class="btn btn-sm btn-danger cb-cancel-group-btn" data-group-id="${esc(group.groupId)}">Cancel All</button>` : ''}
             </div>`;
         }
         group.bookings.forEach(b => {
@@ -279,7 +285,8 @@ const CourtBooking = (() => {
                 : isCancelled
                   ? `<span class="badge" style="background:#f3f4f6;color:#6b7280;font-size:.7rem">Cancelled</span>`
                   : `<span class="badge" style="background:#e0f2fe;color:#0369a1;font-size:.7rem">${esc(b.status || '—')}</span>`;
-          mbHtml += `<div class="admin-list-item${isMulti ? ' group-slot-item' : ''}" style="align-items:flex-start;gap:.75rem">
+          const showCancel = includeCancel && (isPending || isConfirmed) && bookingCancellationAllowed(b);
+          out += `<div class="admin-list-item${isMulti ? ' group-slot-item' : ''}" style="align-items:flex-start;gap:.75rem">
             <div style="flex:1;min-width:0">
               <div style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap">
                 <span style="font-weight:600">${esc(b.label || b.reason || b.type || 'Booking')}</span>${statusBadge}
@@ -289,12 +296,35 @@ const CourtBooking = (() => {
               </div>
             </div>
             <div style="display:flex;gap:.4rem;flex-shrink:0">
-              ${(isPending || isConfirmed) ? `<button class="btn btn-sm btn-danger cb-my-cancel-btn" data-id="${esc(b.id)}">Cancel</button>` : ''}
+              ${showCancel ? `<button class="btn btn-sm btn-danger cb-my-cancel-btn" data-id="${esc(b.id)}">Cancel</button>` : ''}
             </div>
           </div>`;
         });
-        if (isMulti) mbHtml += `</div>`;
+        if (isMulti) out += `</div>`;
       });
+      return out;
+    }
+
+    if (allMine.length > 0) {
+      let mbHtml = `<div class="card" style="margin-top:1.5rem">
+        <div class="card-header"><div class="card-title" style="margin:0">📋 My Bookings</div></div>
+        <div class="card-body" style="padding:.25rem .75rem .75rem">`;
+
+      if (cbActive.length === 0) {
+        mbHtml += `<p class="text-muted" style="padding:.4rem 0;margin:0">No upcoming bookings.</p>`;
+      } else {
+        mbHtml += _cbGroupRows(cbActive, true);
+      }
+
+      if (cbHistory.length > 0) {
+        mbHtml += `<details style="margin-top:.75rem">
+          <summary style="font-size:.78rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--neutral);cursor:pointer;user-select:none;padding:.2rem 0">
+            History (${cbHistory.length})
+          </summary>
+          <div style="margin-top:.5rem;opacity:.85">${_cbGroupRows(cbHistory, false)}</div>
+        </details>`;
+      }
+
       mbHtml += `</div></div>`;
       el.insertAdjacentHTML('beforeend', mbHtml);
     }
