@@ -1886,6 +1886,13 @@ exports.notifyBookingRequest = onCall(
         }
       }
     }
+    // Also include users directly assigned this venue via managedVenueIds
+    const directSnap = await db.collection('users').where('managedVenueIds', 'array-contains', booking.venueId).get();
+    directSnap.docs.forEach(d => {
+      if (d.data().noBookingRequests) return;
+      if (d.data().email) orgEmails.push(d.data().email);
+      orgUids.push(d.id);
+    });
     // Also include all admins/masters (unless opted out of booking request notifications)
     const adminsSnap = await db.collection('users').where('role', 'in', ['master', 'admin']).get();
     adminsSnap.docs.forEach(d => {
@@ -2026,9 +2033,10 @@ exports.notifyBookingStatus = onCall(
     if (!bSnap.exists) throw new HttpsError('not-found', 'Booking not found');
     const booking = bSnap.data();
 
-    // Allow master/admin/organizer roles, or any user who organizes this venue
-    const isGlobal = ['master', 'admin', 'organizer'].includes(caller.role);
-    if (!isGlobal) {
+    // Allow master/admin/organizer roles, direct venue assignment, or school-linked organizer
+    const isGlobal  = ['master', 'admin', 'organizer'].includes(caller.role);
+    const isDirect  = Array.isArray(caller.managedVenueIds) && caller.managedVenueIds.includes(booking.venueId);
+    if (!isGlobal && !isDirect) {
       const sSnap = caller.schoolId ? await db.collection('schools').doc(caller.schoolId).get() : null;
       if (!sSnap || !sSnap.exists || sSnap.data().venueId !== booking.venueId) {
         throw new HttpsError('permission-denied', 'Not authorized for this venue');
@@ -2158,6 +2166,12 @@ exports.notifyUserCancellation = onCall(
         }
       }
     }
+    // Also include users directly assigned this venue via managedVenueIds
+    const directSnap2 = await db.collection('users').where('managedVenueIds', 'array-contains', booking.venueId).get();
+    directSnap2.docs.forEach(d => {
+      if (d.data().email) orgEmails.push(d.data().email);
+      orgUids.push(d.id);
+    });
     const adminsSnap = await db.collection('users').where('role', 'in', ['master', 'admin']).get();
     adminsSnap.docs.forEach(d => {
       if (d.data().email) orgEmails.push(d.data().email);

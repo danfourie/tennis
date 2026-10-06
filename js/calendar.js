@@ -32,7 +32,11 @@ const Calendar = (() => {
   function _isVenueOrganizer(venueId) {
     if (!Auth.isLoggedIn()) return false;
     const profile = Auth.getProfile();
-    if (!profile || !profile.schoolId) return false;
+    if (!profile) return false;
+    // Direct venue assignment (managedVenueIds set by admin)
+    if (Array.isArray(profile.managedVenueIds) && profile.managedVenueIds.includes(venueId)) return true;
+    // School-linked organizer
+    if (!profile.schoolId) return false;
     const school = DB.getSchools().find(s => s.id === profile.schoolId);
     return !!(school && school.venueId === venueId);
   }
