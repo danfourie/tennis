@@ -414,7 +414,8 @@ const Leagues = (() => {
       return;
     }
 
-    const DAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+    const DAYS  = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+    const today = new Date().toISOString().slice(0, 10);
 
     container.innerHTML = leagues.map(l => {
       const parts         = _getParticipants(l);
@@ -463,6 +464,9 @@ const Leagues = (() => {
             ${l.drawConfirmed || played > 0 ? 'disabled title="Cannot reset: draw confirmed or league has started"' : ''}>
             🔄 Reset Fixtures
           </button>
+          ${l.endDate && l.endDate < today && totalFixtures > 0
+            ? `<button class="btn btn-sm btn-success" data-closeout-league="${l.id}" title="Auto-complete draws, email results, archive league">🏁 Close Out</button>`
+            : ''}
           <button class="btn btn-sm btn-danger"    data-admin-league-del="${l.id}">Delete</button>
         </div>
       </div>`;
@@ -517,6 +521,36 @@ const Leagues = (() => {
         renderAdmin();
       });
     });
+    container.querySelectorAll('[data-closeout-league]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const l = DB.getLeagues().find(x => x.id === btn.dataset.closeoutLeague);
+        if (!l) return;
+        const unscored = (l.fixtures || []).filter(f => f.date && (f.homeScore === null || f.homeScore === undefined)).length;
+        const drawScore = Math.floor((l.scoreTotal || 67) / 2);
+        const msg = [
+          `Close out "${l.name}"?`,
+          '',
+          unscored > 0 ? `${unscored} unscored fixture(s) will be recorded as draws (${drawScore}–${drawScore}).` : 'All fixtures are scored.',
+          'Final standings will be emailed to all participants and admins.',
+          'The league will then be archived (visible in Deleted Leagues).',
+        ].join('\n');
+        if (!confirm(msg)) return;
+        btn.disabled = true;
+        btn.textContent = '⏳ Closing…';
+        try {
+          const fn = firebase.functions().httpsCallable('closeOutLeague');
+          const result = await fn({ leagueId: l.id });
+          toast(`${l.name} closed. ${result.data.sent} email(s) sent. ✓`, 'success');
+          renderAdmin();
+        } catch (err) {
+          console.error('[Leagues] closeOutLeague failed:', err);
+          toast('Close out failed — ' + (err.message || err), 'error');
+          btn.disabled = false;
+          btn.textContent = '🏁 Close Out';
+        }
+      });
+    });
+
     container.querySelectorAll('[data-league-notif]').forEach(btn => {
       btn.addEventListener('click', () => {
         const l = DB.getLeagues().find(x => x.id === btn.dataset.leagueNotif);

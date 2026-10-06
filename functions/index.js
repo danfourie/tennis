@@ -2565,3 +2565,171 @@ exports.bookGroenkloofCourt = onCall(
     return { ok: true, bookingIds, isNewUser, customToken };
   }
 );
+
+// ─────────────────────────────────────────────────────────────────────────────
+// closeOutLeague
+// Finalises a completed league: fills unscored fixtures as draws, recalculates
+// standings, emails all participants + admins, then soft-deletes the league.
+// ─────────────────────────────────────────────────────────────────────────────
+exports.closeOutLeague = onCall(
+  { secrets: [EMAIL_USER, EMAIL_PASS] },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Login required');
+
+    const db         = admin.firestore();
+    const callerSnap = await db.doc(`users/${request.auth.uid}`).get();
+    const caller     = callerSnap.exists ? callerSnap.data() : null;
+    if (!caller || !['master', 'admin'].includes(caller.role)) {
+      throw new HttpsError('permission-denied', 'Admins only');
+    }
+
+    const { leagueId } = request.data || {};
+    if (!leagueId) throw new HttpsError('invalid-argument', 'leagueId required');
+
+    const leagueSnap = await db.collection('leagues').doc(leagueId).get();
+    if (!leagueSnap.exists) throw new HttpsError('not-found', 'League not found');
+    const league = { id: leagueSnap.id, ...leagueSnap.data() };
+
+    // Draw score per side: floor(scoreTotal / 2)  e.g. 67→33, 7→3
+    const scoreTotal = league.scoreTotal || 67;
+    const drawScore  = Math.floor(scoreTotal / 2);
+
+    // Auto-fill unscored fixtures that have a date assigned
+    const fixtures = (league.fixtures || []).map(f => {
+      if (f.homeScore !== null && f.homeScore !== undefined) return f;
+      if (!f.date) return f; // unscheduled — leave as-is
+      return { ...f, homeScore: drawScore, awayScore: drawScore, masterVerified: true };
+    });
+
+    // Resolve school names and collect organizer emails
+    const schoolIds   = [...new Set((league.participants || []).map(p => p.schoolId).filter(Boolean))];
+    const schoolDocs  = await Promise.all(schoolIds.map(id => db.collection('schools').doc(id).get()));
+    const schoolNames = {};
+    const recipientEmails = new Set();
+
+    schoolDocs.forEach(doc => {
+      if (!doc.exists) return;
+      const s = doc.data();
+      schoolNames[doc.id] = s.name || doc.id;
+      (s.organizers || []).forEach(o => { if (o.email) recipientEmails.add(o.email.toLowerCase()); });
+      if (s.email) recipientEmails.add(s.email.toLowerCase());
+    });
+
+    // All registered users linked to participant schools or with admin role
+    const usersSnap = await db.collection('users').get();
+    usersSnap.docs.forEach(doc => {
+      const u = doc.data();
+      if (!u.email) return;
+      if (['master', 'admin'].includes(u.role) || schoolIds.includes(u.schoolId)) {
+        recipientEmails.add(u.email.toLowerCase());
+      }
+    });
+
+    // Recalculate standings from filled fixtures
+    const standingsMap = {};
+    (league.participants || []).forEach(p => {
+      const key = p.participantId || p.schoolId;
+      standingsMap[key] = {
+        participantId: key,
+        schoolId:      p.schoolId,
+        name: schoolNames[p.schoolId]
+          ? schoolNames[p.schoolId] + (p.teamSuffix ? ' ' + p.teamSuffix : '')
+          : key,
+        played: 0, won: 0, lost: 0, drawn: 0, points: 0,
+      };
+    });
+
+    fixtures.forEach(f => {
+      if (f.homeScore === null || f.homeScore === undefined) return;
+      const h = f.homeScore, a = f.awayScore;
+      const hk = f.homeParticipantId || f.homeSchoolId;
+      const ak = f.awayParticipantId || f.awaySchoolId;
+      if (!standingsMap[hk] || !standingsMap[ak]) return;
+      standingsMap[hk].played++; standingsMap[ak].played++;
+      if (h > a) {
+        standingsMap[hk].won++;   standingsMap[hk].points += 3; standingsMap[ak].lost++;
+      } else if (a > h) {
+        standingsMap[ak].won++;   standingsMap[ak].points += 3; standingsMap[hk].lost++;
+      } else {
+        standingsMap[hk].drawn++; standingsMap[hk].points++;
+        standingsMap[ak].drawn++; standingsMap[ak].points++;
+      }
+    });
+
+    const finalStandings = Object.values(standingsMap)
+      .sort((a, b) => b.points - a.points || b.won - a.won);
+    const winner = finalStandings[0];
+
+    // Build standings table HTML
+    const standingsRows = finalStandings.map((s, i) => `
+      <tr style="${i === 0 ? 'font-weight:bold;background:#f0fdf4' : (i % 2 === 0 ? '' : 'background:#f9fafb')}">
+        <td style="padding:6px 10px;text-align:center;border:1px solid #e5e7eb">${i + 1}</td>
+        <td style="padding:6px 10px;border:1px solid #e5e7eb">${s.name}</td>
+        <td style="padding:6px 10px;text-align:center;border:1px solid #e5e7eb">${s.played}</td>
+        <td style="padding:6px 10px;text-align:center;border:1px solid #e5e7eb">${s.won}</td>
+        <td style="padding:6px 10px;text-align:center;border:1px solid #e5e7eb">${s.drawn}</td>
+        <td style="padding:6px 10px;text-align:center;border:1px solid #e5e7eb">${s.lost}</td>
+        <td style="padding:6px 10px;text-align:center;font-weight:bold;border:1px solid #e5e7eb">${s.points}</td>
+      </tr>`).join('');
+
+    const leagueLabel = league.name + (league.division ? ` — ${league.division}` : '');
+    const subject     = `${league.name} — Final Results & Thank You`;
+    const htmlBody    = `
+<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;color:#1f2937;max-width:600px;margin:0 auto;padding:20px">
+  <h2 style="color:#166534">🏆 ${leagueLabel} — Season Complete!</h2>
+  <p>Dear Participants,</p>
+  <p>Thank you for your participation in the <strong>${leagueLabel}</strong> league. We hope you enjoyed the season and the competition it brought!</p>
+  ${winner ? `<p style="font-size:1.05rem">Congratulations to <strong style="color:#166534">${winner.name}</strong> on winning the league! 🎉🏆</p>` : ''}
+  <h3 style="margin-top:1.5rem;border-bottom:2px solid #e5e7eb;padding-bottom:.4rem">Final Standings</h3>
+  <table style="border-collapse:collapse;width:100%;font-size:14px;margin-top:.75rem">
+    <thead>
+      <tr style="background:#166534;color:white">
+        <th style="padding:8px 10px;border:1px solid #e5e7eb">#</th>
+        <th style="padding:8px 10px;text-align:left;border:1px solid #e5e7eb">Team</th>
+        <th style="padding:8px 10px;border:1px solid #e5e7eb" title="Played">P</th>
+        <th style="padding:8px 10px;border:1px solid #e5e7eb" title="Won">W</th>
+        <th style="padding:8px 10px;border:1px solid #e5e7eb" title="Drawn">D</th>
+        <th style="padding:8px 10px;border:1px solid #e5e7eb" title="Lost">L</th>
+        <th style="padding:8px 10px;border:1px solid #e5e7eb" title="Points">Pts</th>
+      </tr>
+    </thead>
+    <tbody>${standingsRows}</tbody>
+  </table>
+  <p style="margin-top:1.5rem">We look forward to seeing you in the next season. Keep playing! 🎾</p>
+  <p style="margin-top:1rem;font-size:12px;color:#6b7280">— Court Campus | <a href="https://www.courtcampus.co.za" style="color:#166534">courtcampus.co.za</a></p>
+</body></html>`;
+
+    // Send emails
+    const emailUser = EMAIL_USER.value();
+    const emailPass = EMAIL_PASS.value();
+    let sent = 0;
+    if (emailUser && emailPass && recipientEmails.size > 0) {
+      const transporter = nodemailer.createTransport({ service: 'gmail', auth: { user: emailUser, pass: emailPass } });
+      for (const toEmail of recipientEmails) {
+        try {
+          await transporter.sendMail({
+            from:    `"Court Campus" <${emailUser}>`,
+            to:      toEmail,
+            subject,
+            html:    htmlBody,
+          });
+          sent++;
+        } catch (e) {
+          console.error(`[closeOutLeague] sendMail to ${toEmail} failed:`, e.message);
+        }
+      }
+    }
+
+    // Soft-delete the league (moved to "Deleted leagues" section in admin)
+    await db.collection('leagues').doc(leagueId).update({
+      deleted:       true,
+      deletedAt:     new Date().toISOString(),
+      closedBy:      request.auth.uid,
+      fixtures,
+      standings:     finalStandings,
+    });
+
+    console.log(`[closeOutLeague] League "${league.name}" closed. Sent ${sent}/${recipientEmails.size} emails.`);
+    return { ok: true, sent, total: recipientEmails.size };
+  }
+);
