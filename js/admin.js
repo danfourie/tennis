@@ -516,26 +516,35 @@ const Admin = (() => {
                  </div>`
               : '<div class="text-muted" style="font-size:.78rem;margin-top:.1rem">🔘 No login recorded yet</div>'}
             ${loginHistoryHtml}
-            ${venues.length > 0 ? `
-            <div style="margin-top:.4rem;display:flex;align-items:center;gap:.4rem;flex-wrap:wrap">
-              <span style="font-size:.74rem;color:var(--text-muted);white-space:nowrap">📍 Extra venues:</span>
-              <select class="venue-multiselect" data-user-uid="${u.uid}" multiple
-                style="font-size:.73rem;padding:.2rem .3rem;border-radius:6px;border:1.5px solid var(--border,#e2e8f0);background:var(--surface,#fff);min-width:140px;max-width:260px;height:auto">
-                ${[...venues].sort((a, b) => {
-                    const asel = (u.managedVenueIds || []).includes(a.id);
-                    const bsel = (u.managedVenueIds || []).includes(b.id);
-                    if (asel !== bsel) return asel ? -1 : 1;
-                    return a.name.localeCompare(b.name);
-                  }).map(v => `
-                  <option value="${esc(v.id)}" ${(u.managedVenueIds || []).includes(v.id) ? 'selected' : ''}>
+            ${venues.length > 0 ? (() => {
+                const managedIds      = u.managedVenueIds || [];
+                const assignedVenues  = venues.filter(v =>  managedIds.includes(v.id)).sort((a,b) => a.name.localeCompare(b.name));
+                const availableVenues = venues.filter(v => !managedIds.includes(v.id)).sort((a,b) => a.name.localeCompare(b.name));
+                return `
+            <div style="margin-top:.5rem">
+              <span style="font-size:.74rem;color:var(--text-muted)">📍 Extra venues:</span>
+              ${assignedVenues.length > 0 ? `
+              <div style="display:flex;flex-wrap:wrap;gap:.3rem;margin:.3rem 0 .35rem">
+                ${assignedVenues.map(v => `
+                  <span style="display:inline-flex;align-items:center;gap:.2rem;font-size:.72rem;padding:.15rem .5rem .15rem .45rem;background:var(--surface-alt,#f1f5f9);border:1px solid var(--border,#e2e8f0);border-radius:999px;line-height:1.4">
                     ${esc(v.name)}
-                  </option>`).join('')}
-              </select>
-              ${(u.managedVenueIds || []).length > 0
-                ? `<button class="btn btn-xs btn-secondary venue-clear-btn" data-user-uid="${u.uid}"
-                     title="Clear all extra venue access" style="flex-shrink:0">✕ Clear</button>`
-                : ''}
-            </div>` : ''}
+                    <button class="venue-chip-remove" data-user-uid="${u.uid}" data-venue-id="${esc(v.id)}"
+                      style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:1rem;padding:0 0 0 .1rem;line-height:1;vertical-align:middle" title="Remove ${esc(v.name)}">×</button>
+                  </span>`).join('')}
+              </div>` : `<span style="font-size:.74rem;color:var(--text-muted);font-style:italic;margin-left:.3rem">None</span>`}
+              <div style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap;margin-top:.2rem">
+                <select class="venue-add-select" data-user-uid="${u.uid}"
+                  style="font-size:.73rem;padding:.2rem .4rem;border-radius:6px;border:1.5px solid var(--border,#e2e8f0);background:var(--surface,#fff)">
+                  <option value="">＋ Add venue…</option>
+                  ${availableVenues.map(v => `<option value="${esc(v.id)}">${esc(v.name)}</option>`).join('')}
+                </select>
+                ${assignedVenues.length > 0
+                  ? `<button class="btn btn-xs btn-secondary venue-clear-btn" data-user-uid="${u.uid}"
+                       title="Clear all extra venue access" style="flex-shrink:0">✕ Clear all</button>`
+                  : ''}
+              </div>
+            </div>`;
+              })() : ''}
           </div>
           <div class="item-actions">
             <label style="font-size:.75rem;color:var(--text-muted);margin-right:.25rem">Role:</label>
@@ -606,29 +615,34 @@ const Admin = (() => {
       });
     });
 
-    el.querySelectorAll('.venue-multiselect').forEach(sel => {
-      // Save on blur (after user finishes selecting) so multi-select isn't
-      // interrupted by a re-render firing on every individual click.
-      sel.addEventListener('blur', () => {
+    el.querySelectorAll('.venue-add-select').forEach(sel => {
+      sel.addEventListener('change', () => {
+        const venueId = sel.value;
+        if (!venueId) return;
         const userUid = sel.dataset.userUid;
         const user    = DB.getUsers().find(u => u.uid === userUid);
         if (!user) return;
-        const updated = Array.from(sel.selectedOptions).map(o => o.value);
-        const prev    = user.managedVenueIds || [];
-
-        // Re-sort options in-place: selected first, then alphabetical
-        Array.from(sel.options)
-          .sort((a, b) => {
-            if (a.selected !== b.selected) return a.selected ? -1 : 1;
-            return a.text.localeCompare(b.text);
-          })
-          .forEach(o => sel.appendChild(o));
-
-        if (JSON.stringify([...updated].sort()) === JSON.stringify([...prev].sort())) return;
+        const updated = [...new Set([...(user.managedVenueIds || []), venueId])];
         DB.updateUser({ ...user, managedVenueIds: updated });
         DB.writeAudit(
           'user_venue_access_changed', 'user',
-          `Extra venue access updated for ${esc(user.displayName || user.email)}: ${updated.map(id => DB.getVenues().find(v => v.id === id)?.name || id).join(', ') || 'none'}`,
+          `Extra venue added for ${esc(user.displayName || user.email)}: ${DB.getVenues().find(v => v.id === venueId)?.name || venueId}`,
+          userUid, user.displayName || user.email
+        );
+        toast('Venue access updated ✓', 'success');
+      });
+    });
+
+    el.querySelectorAll('.venue-chip-remove').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const { userUid, venueId } = btn.dataset;
+        const user = DB.getUsers().find(u => u.uid === userUid);
+        if (!user) return;
+        const updated = (user.managedVenueIds || []).filter(id => id !== venueId);
+        DB.updateUser({ ...user, managedVenueIds: updated });
+        DB.writeAudit(
+          'user_venue_access_changed', 'user',
+          `Extra venue removed for ${esc(user.displayName || user.email)}: ${DB.getVenues().find(v => v.id === venueId)?.name || venueId}`,
           userUid, user.displayName || user.email
         );
         toast('Venue access updated ✓', 'success');
