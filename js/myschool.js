@@ -290,13 +290,20 @@ const MySchool = (() => {
     // When impersonating, append a panel showing all notifications sent to this school
     if (_impersonateSchoolId) {
       html += `<div class="card" style="margin-top:1.25rem">
-        <div class="card-header" style="display:flex;align-items:center;justify-content:space-between">
-          <div class="card-title">📬 Notifications received by this school</div>
-          <button class="btn btn-xs btn-secondary" id="refreshSchoolNotifBtn">↻ Refresh</button>
-        </div>
-        <div class="card-body" style="padding:.5rem 1rem">
-          <div id="schoolNotifList"></div>
-        </div>
+        <details id="schoolNotifDetails">
+          <summary style="display:flex;align-items:center;justify-content:space-between;padding:.6rem 1rem;cursor:pointer;list-style:none;user-select:none"
+                   class="card-header" onclick="event.stopPropagation()">
+            <div class="card-title" style="pointer-events:none">📬 Notifications received by this school</div>
+            <div style="display:flex;align-items:center;gap:.5rem">
+              <button class="btn btn-xs btn-secondary" id="refreshSchoolNotifBtn"
+                onclick="event.stopPropagation()">↻ Refresh</button>
+              <span class="notif-chevron" style="font-size:.85rem;color:var(--text-muted);transition:transform .2s">▼</span>
+            </div>
+          </summary>
+          <div class="card-body" style="padding:.5rem 1rem">
+            <div id="schoolNotifList"></div>
+          </div>
+        </details>
       </div>`;
     }
 
@@ -480,14 +487,28 @@ const MySchool = (() => {
       });
     }
 
-    // If impersonating, load school notifications asynchronously
+    // If impersonating, wire up the collapsible notifications panel
     if (_impersonateSchoolId) {
-      NotificationService.renderSchoolNotifications(_impersonateSchoolId, 'schoolNotifList');
+      const details    = document.getElementById('schoolNotifDetails');
       const refreshBtn = document.getElementById('refreshSchoolNotifBtn');
+      let loaded       = false;
+
+      const loadNotifs = () => {
+        loaded = true;
+        NotificationService.renderSchoolNotifications(_impersonateSchoolId, 'schoolNotifList');
+      };
+
+      if (details) {
+        // Rotate chevron and lazy-load on first open
+        details.addEventListener('toggle', () => {
+          const chevron = details.querySelector('.notif-chevron');
+          if (chevron) chevron.style.transform = details.open ? 'rotate(180deg)' : '';
+          if (details.open && !loaded) loadNotifs();
+        });
+      }
+
       if (refreshBtn) {
-        refreshBtn.addEventListener('click', () =>
-          NotificationService.renderSchoolNotifications(_impersonateSchoolId, 'schoolNotifList')
-        );
+        refreshBtn.addEventListener('click', () => loadNotifs());
       }
     }
 
