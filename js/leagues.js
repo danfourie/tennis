@@ -2961,7 +2961,8 @@ const Leagues = (() => {
   // ════════════════════════════════════════════════════════════
 
   const _TEMPLATE_COLS = ['Name','Division','Start Date (YYYY-MM-DD)','End Date (YYYY-MM-DD)',
-    'Playing Day','Match Time (HH:MM)','Entry Deadline (YYYY-MM-DD)','Score Total','Home Matches (Yes/No)'];
+    'Playing Day','Match Time (HH:MM)','Entry Deadline (YYYY-MM-DD)','Score Total',
+    'Format (Home & Away / Meet Once)'];
 
   const _DAY_MAP = {
     sunday:0,sun:0, monday:1,mon:1, tuesday:2,tue:2,
@@ -2982,9 +2983,9 @@ const Leagues = (() => {
       const ws = XLSX.utils.aoa_to_sheet([
         _TEMPLATE_COLS,
         // Example row 1
-        ['U14 Boys League 2027','U14 Boys','2027-02-07','2027-06-28','Friday','14:00','2027-01-31',67,'Yes'],
-        // Example row 2 — show a different config
-        ['Open Singles League','Open','2027-03-01','2027-07-31','Saturday','09:00','',7,'No'],
+        ['U14 Boys League 2027','U14 Boys','2027-02-07','2027-06-28','Friday','14:00','2027-01-31',67,'Home & Away'],
+        // Example row 2
+        ['Open Singles League','Open','2027-03-01','2027-07-31','Saturday','09:00','',7,'Meet Once'],
       ]);
       // Column widths
       ws['!cols'] = _TEMPLATE_COLS.map((h, i) => ({ wch: [28,18,22,20,14,18,26,12,20][i] }));
@@ -3059,7 +3060,7 @@ const Leagues = (() => {
     const iTime       = col('match time');
     const iDeadline   = col('deadline');
     const iScore      = col('score total');
-    const iHomeMatch  = col('home match');
+    const iHomeMatch  = col('format');
 
     const parsed = [];
     for (let r = headerIdx + 1; r < rawRows.length; r++) {
@@ -3074,7 +3075,7 @@ const Leagues = (() => {
       const timeRaw  = iTime >= 0     ? String(row[iTime] || '14:00').trim(): '14:00';
       const dlRaw    = iDeadline >= 0 ? row[iDeadline]  : '';
       const scoreRaw = iScore >= 0    ? row[iScore]      : 67;
-      const homeRaw  = iHomeMatch >= 0? String(row[iHomeMatch] || '').trim() : 'Yes';
+      const homeRaw  = iHomeMatch >= 0 ? String(row[iHomeMatch] || '').trim() : 'Home & Away';
 
       const errors = [];
       if (!name) errors.push('Name required');
@@ -3090,7 +3091,7 @@ const Leagues = (() => {
       const matchTime      = /^\d{1,2}:\d{2}$/.test(timeRaw) ? timeRaw : '14:00';
       const entryDeadline  = _excelDate(dlRaw) || null;
       const scoreTotal     = parseInt(scoreRaw) || 67;
-      const homeMatches    = /^(yes|y|1|true)$/i.test(homeRaw) ? 1 : 0;
+      const homeMatches    = /^(home|h&a|home\s*&\s*away|yes|y|1|true)$/i.test(homeRaw) ? 1 : 0;
 
       parsed.push({ rowNum: r + 1, name, division, startDate, endDate, playingDay, matchTime,
                     entryDeadline, scoreTotal, homeMatches, errors });
@@ -3128,7 +3129,7 @@ const Leagues = (() => {
         <td style="padding:4px 8px;border:1px solid var(--border,#e2e8f0);font-size:.78rem;white-space:nowrap">${r.endDate || '—'}</td>
         <td style="padding:4px 8px;border:1px solid var(--border,#e2e8f0);font-size:.78rem">${DAYS_SHORT[r.playingDay]} ${r.matchTime}</td>
         <td style="padding:4px 8px;border:1px solid var(--border,#e2e8f0);font-size:.78rem">${r.scoreTotal}</td>
-        <td style="padding:4px 8px;border:1px solid var(--border,#e2e8f0);font-size:.78rem">${r.homeMatches ? 'H&A' : 'Once'}</td>
+        <td style="padding:4px 8px;border:1px solid var(--border,#e2e8f0);font-size:.78rem">${r.homeMatches ? 'Home & Away' : 'Meet Once'}</td>
         <td style="padding:4px 8px;border:1px solid var(--border,#e2e8f0);font-size:.78rem;color:var(--danger,#dc2626)">${r.errors.join('; ') || ''}</td>
       </tr>`;
     };
