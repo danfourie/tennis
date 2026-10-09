@@ -197,6 +197,9 @@
               <option value="">All Divisions</option>
             </select>
             <input type="search" id="adminLeaguesSearch" class="search-input" placeholder="🔍 Search…">
+            <button class="btn btn-secondary" id="downloadLeagueTemplateBtnAdmin" title="Download Excel template for bulk league creation">⬇ Template</button>
+            <button class="btn btn-secondary" id="importLeaguesBtnAdmin" title="Import multiple leagues from Excel">⬆ Import</button>
+            <input type="file" id="bulkLeagueFileInput" accept=".xlsx,.xls,.csv" style="display:none">
             <button class="btn btn-primary" id="addLeagueBtnAdmin">+ Create League</button>
           </div>
         </div>
@@ -720,6 +723,24 @@
     </div>
   </div>
 
+  <!-- Bulk League Import Modal -->
+  <div class="modal-overlay hidden" id="bulkLeagueImportModal">
+    <div class="modal modal-lg">
+      <div class="modal-header">
+        <h3>Import Leagues from Excel</h3>
+        <button class="modal-close" data-modal="bulkLeagueImportModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="bulkLeagueImportStatus" style="margin-bottom:.75rem;font-size:.9rem"></div>
+        <div id="bulkLeagueImportPreview" style="overflow-x:auto;max-height:55vh;overflow-y:auto"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-modal="bulkLeagueImportModal">Cancel</button>
+        <button class="btn btn-primary" id="bulkLeagueImportConfirmBtn" disabled>Create Leagues</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Tournament Modal -->
   <div class="modal-overlay hidden" id="tournamentModal">
     <div class="modal modal-lg">
@@ -1164,9 +1185,9 @@
   <script src="js/notifications.js?v=20261001b"></script>
   <script src="js/calendar.js?v=20261006a"></script>
   <script src="js/courtbooking.js?v=20261005a"></script>
-  <script src="js/leagues.js?v=20261006b"></script>
+  <script src="js/leagues.js?v=20261007b"></script>
   <script src="js/tournaments.js?v=20260426"></script>
-  <script src="js/admin.js?v=20261007a"></script>
+  <script src="js/admin.js?v=20261007b"></script>
   <script src="js/myschool.js?v=20261007a"></script>
   <script src="js/myvenue.js?v=20261005b"></script>
   <script src="js/mybookings.js?v=20261002d"></script>

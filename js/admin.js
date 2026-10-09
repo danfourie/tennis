@@ -76,6 +76,17 @@ const Admin = (() => {
 
     // League admin buttons (in admin tab — different IDs from public view)
     document.getElementById('addLeagueBtnAdmin').addEventListener('click', () => Leagues.openLeagueModal());
+    document.getElementById('downloadLeagueTemplateBtnAdmin').addEventListener('click', () => Leagues.downloadBulkTemplate());
+    document.getElementById('importLeaguesBtnAdmin').addEventListener('click', () => Leagues.openBulkImport());
+
+    const bulkFileInput = document.getElementById('bulkLeagueFileInput');
+    if (bulkFileInput) {
+      bulkFileInput.addEventListener('change', () => {
+        if (bulkFileInput.files[0]) Leagues.parseBulkFile(bulkFileInput.files[0]);
+      });
+    }
+    const bulkConfirmBtn = document.getElementById('bulkLeagueImportConfirmBtn');
+    if (bulkConfirmBtn) bulkConfirmBtn.addEventListener('click', () => Leagues.executeBulkImport());
 
     // Tournament admin buttons
     document.getElementById('addTournamentBtnAdmin').addEventListener('click', () => Tournaments.openTournamentModal());

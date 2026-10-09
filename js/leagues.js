@@ -2956,6 +2956,242 @@ const Leagues = (() => {
     _downloadCSV(`${league.name.replace(/[^a-z0-9]/gi,'_')}_standings.csv`, rows);
   }
 
+  // ════════════════════════════════════════════════════════════
+  // BULK IMPORT
+  // ════════════════════════════════════════════════════════════
+
+  const _TEMPLATE_COLS = ['Name','Division','Start Date (YYYY-MM-DD)','End Date (YYYY-MM-DD)',
+    'Playing Day','Match Time (HH:MM)','Entry Deadline (YYYY-MM-DD)','Score Total','Home Matches (Yes/No)'];
+
+  const _DAY_MAP = {
+    sunday:0,sun:0, monday:1,mon:1, tuesday:2,tue:2,
+    wednesday:3,wed:3, thursday:4,thu:4, friday:5,fri:5, saturday:6,sat:6,
+  };
+
+  function _loadXlsx(cb) {
+    if (window.XLSX) return cb();
+    const s   = document.createElement('script');
+    s.src     = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    s.onload  = cb;
+    s.onerror = () => toast('Could not load Excel library — check your connection', 'error');
+    document.head.appendChild(s);
+  }
+
+  function downloadBulkTemplate() {
+    _loadXlsx(() => {
+      const ws = XLSX.utils.aoa_to_sheet([
+        _TEMPLATE_COLS,
+        // Example row 1
+        ['U14 Boys League 2027','U14 Boys','2027-02-07','2027-06-28','Friday','14:00','2027-01-31',67,'Yes'],
+        // Example row 2 — show a different config
+        ['Open Singles League','Open','2027-03-01','2027-07-31','Saturday','09:00','',7,'No'],
+      ]);
+      // Column widths
+      ws['!cols'] = _TEMPLATE_COLS.map((h, i) => ({ wch: [28,18,22,20,14,18,26,12,20][i] }));
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Leagues');
+      XLSX.writeFile(wb, 'league_import_template.xlsx');
+    });
+  }
+
+  let _bulkParsedRows = [];
+
+  function openBulkImport() {
+    const inp = document.getElementById('bulkLeagueFileInput');
+    if (!inp) return;
+    inp.value = '';
+    inp.click();
+  }
+
+  function _parseBulkFile(file) {
+    _loadXlsx(() => {
+      const reader = new FileReader();
+      reader.onload = e => {
+        try {
+          const wb   = XLSX.read(e.target.result, { type: 'binary', cellDates: true });
+          const ws   = wb.Sheets[wb.SheetNames[0]];
+          const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+          if (rows.length < 2) { toast('Template appears empty — add at least one league row', 'error'); return; }
+          _processBulkRows(rows);
+        } catch (err) {
+          toast('Could not read file — ' + err.message, 'error');
+        }
+      };
+      reader.readAsBinaryString(file);
+    });
+  }
+
+  function _excelDate(v) {
+    if (!v && v !== 0) return '';
+    if (v instanceof Date) return v.toISOString().slice(0, 10);
+    if (typeof v === 'string') {
+      const s = v.trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+      // Try parsing other common formats
+      const d = new Date(s);
+      return isNaN(d) ? s : d.toISOString().slice(0, 10);
+    }
+    if (typeof v === 'number') {
+      // Excel date serial
+      const d = new Date(Math.round((v - 25569) * 86400 * 1000));
+      return d.toISOString().slice(0, 10);
+    }
+    return String(v).trim();
+  }
+
+  function _processBulkRows(rawRows) {
+    // Find header row (first row containing 'Name')
+    let headerIdx = 0;
+    for (let i = 0; i < Math.min(rawRows.length, 5); i++) {
+      if (rawRows[i].some(c => String(c).trim().toLowerCase() === 'name')) { headerIdx = i; break; }
+    }
+    const headers = rawRows[headerIdx].map(h => String(h).trim().toLowerCase());
+    const col = key => {
+      const idx = headers.findIndex(h => h.includes(key));
+      return idx >= 0 ? idx : -1;
+    };
+
+    const iName       = col('name');
+    const iDiv        = col('division');
+    const iStart      = col('start');
+    const iEnd        = col('end');
+    const iDay        = col('playing day');
+    const iTime       = col('match time');
+    const iDeadline   = col('deadline');
+    const iScore      = col('score total');
+    const iHomeMatch  = col('home match');
+
+    const parsed = [];
+    for (let r = headerIdx + 1; r < rawRows.length; r++) {
+      const row = rawRows[r];
+      if (row.every(c => !String(c).trim())) continue; // fully blank
+
+      const name     = iName >= 0     ? String(row[iName] || '').trim()     : '';
+      const division = iDiv >= 0      ? String(row[iDiv]  || '').trim()     : '';
+      const startRaw = iStart >= 0    ? row[iStart]  : '';
+      const endRaw   = iEnd >= 0      ? row[iEnd]    : '';
+      const dayRaw   = iDay >= 0      ? String(row[iDay]  || '').trim()     : '';
+      const timeRaw  = iTime >= 0     ? String(row[iTime] || '14:00').trim(): '14:00';
+      const dlRaw    = iDeadline >= 0 ? row[iDeadline]  : '';
+      const scoreRaw = iScore >= 0    ? row[iScore]      : 67;
+      const homeRaw  = iHomeMatch >= 0? String(row[iHomeMatch] || '').trim() : 'Yes';
+
+      const errors = [];
+      if (!name) errors.push('Name required');
+
+      const startDate = _excelDate(startRaw);
+      const endDate   = _excelDate(endRaw);
+      if (startDate && endDate && startDate > endDate) errors.push('Start must be before End');
+
+      const dayKey = dayRaw.toLowerCase().split(' ')[0];
+      const playingDay = _DAY_MAP[dayKey] !== undefined ? _DAY_MAP[dayKey] : 5;
+      if (dayRaw && _DAY_MAP[dayKey] === undefined) errors.push(`Unknown day "${dayRaw}"`);
+
+      const matchTime      = /^\d{1,2}:\d{2}$/.test(timeRaw) ? timeRaw : '14:00';
+      const entryDeadline  = _excelDate(dlRaw) || null;
+      const scoreTotal     = parseInt(scoreRaw) || 67;
+      const homeMatches    = /^(yes|y|1|true)$/i.test(homeRaw) ? 1 : 0;
+
+      parsed.push({ rowNum: r + 1, name, division, startDate, endDate, playingDay, matchTime,
+                    entryDeadline, scoreTotal, homeMatches, errors });
+    }
+
+    _bulkParsedRows = parsed;
+    _renderBulkPreview(parsed);
+    Modal.open('bulkLeagueImportModal');
+  }
+
+  function _renderBulkPreview(rows) {
+    const valid   = rows.filter(r => !r.errors.length);
+    const invalid = rows.filter(r =>  r.errors.length);
+    const status  = document.getElementById('bulkLeagueImportStatus');
+    const preview = document.getElementById('bulkLeagueImportPreview');
+    const confirmBtn = document.getElementById('bulkLeagueImportConfirmBtn');
+    if (!status || !preview || !confirmBtn) return;
+
+    status.innerHTML = [
+      `<strong>${rows.length}</strong> row(s) found — `,
+      `<span style="color:var(--success,#16a34a)"><strong>${valid.length}</strong> valid</span>`,
+      invalid.length ? `, <span style="color:var(--danger,#dc2626)"><strong>${invalid.length}</strong> with errors</span>` : '',
+      '.',
+      valid.length === 0 ? ' <em>Fix the errors before importing.</em>' : '',
+    ].join('');
+
+    const DAYS_SHORT = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    const row2tr = r => {
+      const errStyle = r.errors.length ? 'background:var(--danger-bg,#fef2f2);' : '';
+      return `<tr style="${errStyle}">
+        <td style="padding:4px 8px;border:1px solid var(--border,#e2e8f0);font-size:.78rem">${r.rowNum}</td>
+        <td style="padding:4px 8px;border:1px solid var(--border,#e2e8f0);font-size:.78rem;white-space:nowrap">${esc(r.name) || '<em style="color:var(--danger)">—</em>'}</td>
+        <td style="padding:4px 8px;border:1px solid var(--border,#e2e8f0);font-size:.78rem">${esc(r.division) || '—'}</td>
+        <td style="padding:4px 8px;border:1px solid var(--border,#e2e8f0);font-size:.78rem;white-space:nowrap">${r.startDate || '—'}</td>
+        <td style="padding:4px 8px;border:1px solid var(--border,#e2e8f0);font-size:.78rem;white-space:nowrap">${r.endDate || '—'}</td>
+        <td style="padding:4px 8px;border:1px solid var(--border,#e2e8f0);font-size:.78rem">${DAYS_SHORT[r.playingDay]} ${r.matchTime}</td>
+        <td style="padding:4px 8px;border:1px solid var(--border,#e2e8f0);font-size:.78rem">${r.scoreTotal}</td>
+        <td style="padding:4px 8px;border:1px solid var(--border,#e2e8f0);font-size:.78rem">${r.homeMatches ? 'H&A' : 'Once'}</td>
+        <td style="padding:4px 8px;border:1px solid var(--border,#e2e8f0);font-size:.78rem;color:var(--danger,#dc2626)">${r.errors.join('; ') || ''}</td>
+      </tr>`;
+    };
+
+    preview.innerHTML = `<table style="border-collapse:collapse;width:100%;font-size:.82rem">
+      <thead><tr style="background:var(--surface-alt,#f8fafc)">
+        <th style="padding:5px 8px;border:1px solid var(--border,#e2e8f0);text-align:left">#</th>
+        <th style="padding:5px 8px;border:1px solid var(--border,#e2e8f0);text-align:left">Name</th>
+        <th style="padding:5px 8px;border:1px solid var(--border,#e2e8f0);text-align:left">Division</th>
+        <th style="padding:5px 8px;border:1px solid var(--border,#e2e8f0);text-align:left">Start</th>
+        <th style="padding:5px 8px;border:1px solid var(--border,#e2e8f0);text-align:left">End</th>
+        <th style="padding:5px 8px;border:1px solid var(--border,#e2e8f0);text-align:left">Day & Time</th>
+        <th style="padding:5px 8px;border:1px solid var(--border,#e2e8f0);text-align:left">Score</th>
+        <th style="padding:5px 8px;border:1px solid var(--border,#e2e8f0);text-align:left">Format</th>
+        <th style="padding:5px 8px;border:1px solid var(--border,#e2e8f0);text-align:left">Errors</th>
+      </tr></thead>
+      <tbody>${rows.map(row2tr).join('')}</tbody>
+    </table>`;
+
+    confirmBtn.textContent = `Create ${valid.length} League${valid.length === 1 ? '' : 's'}`;
+    confirmBtn.disabled    = valid.length === 0;
+  }
+
+  async function _executeBulkImport() {
+    const valid = _bulkParsedRows.filter(r => !r.errors.length);
+    if (!valid.length) return;
+    const confirmBtn = document.getElementById('bulkLeagueImportConfirmBtn');
+    if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Creating…'; }
+    let created = 0;
+    for (const r of valid) {
+      try {
+        const league = {
+          id: uid(),
+          name:          r.name,
+          division:      r.division,
+          startDate:     r.startDate,
+          endDate:       r.endDate,
+          playingDay:    r.playingDay,
+          matchTime:     r.matchTime,
+          entryDeadline: r.entryDeadline,
+          scoreTotal:    r.scoreTotal,
+          homeMatches:   r.homeMatches,
+          neutralVenueId: null,
+          excludedDates:  [],
+          participants:   [],
+          schoolIds:      [],
+          standings:      [],
+          fixtures:       [],
+        };
+        await DB.addLeague(league);
+        DB.writeAudit('league_created', 'league', `Bulk import — created league: ${r.name}`, league.id, r.name);
+        created++;
+      } catch (err) {
+        console.error('[bulkImport] failed for row', r.rowNum, err);
+      }
+    }
+    Modal.close('bulkLeagueImportModal');
+    toast(`${created} league${created === 1 ? '' : 's'} created ✓`, 'success');
+    render();
+    renderAdmin();
+  }
+
   return { init, refresh, render, renderAdmin, openLeagueModal, openLeagueDetail, saveScore, verifyScore,
-           openEntriesModal, renderPendingEntries, openScoreSheet };
+           openEntriesModal, renderPendingEntries, openScoreSheet,
+           downloadBulkTemplate, openBulkImport, parseBulkFile: _parseBulkFile, executeBulkImport: _executeBulkImport };
 })();
