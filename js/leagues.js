@@ -104,6 +104,17 @@ const Leagues = (() => {
   // ENTRY HELPERS
   // ════════════════════════════════════════════════════════════
 
+  /** Count non-rejected entries (pending + approved) for a league. */
+  function _leagueTeamCount(leagueId) {
+    return DB.getLeagueEntries().filter(e => e.leagueId === leagueId && e.status !== 'rejected').length;
+  }
+
+  /** True when the league has reached its maxTeams registration cap. */
+  function _isLeagueFull(league) {
+    const max = league.maxTeams || 6;
+    return _leagueTeamCount(league.id) >= max;
+  }
+
   /** True when the entry window is still open for a league. */
   function _entryOpen(league) {
     // Entries close once the league has any played fixtures (in progress or complete)
@@ -135,6 +146,10 @@ const Leagues = (() => {
     const league  = DB.getLeagues().find(l => l.id === leagueId);
     const profile = Auth.getProfile();
     if (!league || !profile || !profile.schoolId) return;
+    if (_isLeagueFull(league)) {
+      toast(`This league is full (${league.maxTeams || 6} teams maximum)`, 'error');
+      return;
+    }
 
     const school = DB.getSchools().find(s => s.id === profile.schoolId);
     const { count } = _schoolEntryCount(leagueId, profile.schoolId);
@@ -185,6 +200,9 @@ const Leagues = (() => {
     // Guards
     if (count >= 2) { toast('Your school already has 2 teams entered in this league', 'error'); return; }
     if (!_entryOpen(league)) { toast('Entries for this league are closed', 'error'); return; }
+    if (_isLeagueFull(league)) {
+      toast(`This league is full (${league.maxTeams || 6} teams maximum)`, 'error'); return;
+    }
 
     const schoolName    = school ? school.name : (profile.schoolId);
     const team1RawName  = document.getElementById('leagueEntryTeam1Name').value.trim();
@@ -194,9 +212,12 @@ const Leagues = (() => {
     if (!team1RawName) { toast('Please enter a team name', 'error'); return; }
     if (addSecond && !team2RawName) { toast('Please enter a name for the second team', 'error'); return; }
 
-    // Build the list of entries to submit
+    // Build the list of entries to submit — cap at remaining capacity
+    const maxTeams    = league.maxTeams || 6;
+    const slotsLeft   = maxTeams - _leagueTeamCount(leagueId);
     const toSubmit = [{ teamName: team1RawName, suffix: count === 0 ? 'A' : 'B' }];
-    if (addSecond) toSubmit.push({ teamName: team2RawName, suffix: 'B' });
+    if (addSecond && slotsLeft >= 2) toSubmit.push({ teamName: team2RawName, suffix: 'B' });
+    else if (addSecond && slotsLeft < 2) toast('Only 1 slot remaining — submitting first team only', 'info');
 
     const now = new Date().toISOString();
     const btn = document.getElementById('leagueEntrySubmitBtn');
@@ -324,12 +345,20 @@ const Leagues = (() => {
 
     // ── Entry deadline row ────────────────────────────────────
     const entryOpen   = _entryOpen(l);
+    const leagueFull  = _isLeagueFull(l);
+    const maxTeamsCap = l.maxTeams || 6;
+    const teamCount   = _leagueTeamCount(l.id);
+    const capacityRow = `<div style="font-size:.8rem;color:${leagueFull ? 'var(--danger,#dc2626)' : 'var(--text-muted)'};margin-top:.15rem">
+      👥 ${teamCount}/${maxTeamsCap} teams${leagueFull ? ' · <strong>League Full</strong>' : ''}
+    </div>`;
     const deadlineRow = l.entryDeadline
       ? `<div class="entry-deadline-row">
            📋 Entry deadline: <strong>${formatDate(l.entryDeadline)}</strong>
-           ${entryOpen
+           ${entryOpen && !leagueFull
              ? '<span class="entry-open-badge">Open for entries</span>'
-             : '<span class="entry-closed-badge">Entries closed</span>'}
+             : leagueFull
+               ? '<span class="entry-closed-badge">League Full</span>'
+               : '<span class="entry-closed-badge">Entries closed</span>'}
          </div>`
       : '';
 
@@ -357,6 +386,8 @@ const Leagues = (() => {
 
       if (count >= 2) {
         // both slots filled — no button needed
+      } else if (leagueFull) {
+        entryBtn = `<span class="entry-closed-badge" style="font-size:.8rem">League Full</span>`;
       } else if (entryOpen) {
         const btnLabel = count === 0 ? '📝 Enter a Team' : '📝 Enter 2nd team';
         entryBtn = `<button class="btn btn-sm btn-primary" data-league-enter="${esc(l.id)}">${btnLabel}</button>`;
@@ -388,6 +419,7 @@ const Leagues = (() => {
       <div class="card-body">
         <div style="display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:.5rem">${badges}</div>
         <div class="text-muted">${l.startDate ? formatDate(l.startDate) : '—'} → ${l.endDate ? formatDate(l.endDate) : '—'}</div>
+        ${capacityRow}
         ${deadlineRow}
         <div class="text-muted mt-1">${totalFixtures} fixtures · ${played} played</div>
         ${pendingBanner}
@@ -434,13 +466,19 @@ const Leagues = (() => {
       const entryBadge = pendingEntries.length > 0
         ? ` <span class="badge badge-amber" style="font-size:.72rem">${pendingEntries.length} pending</span>`
         : '';
+      const lMax      = l.maxTeams || 6;
+      const lCount    = _leagueTeamCount(l.id);
+      const lFull     = lCount >= lMax;
+      const capBadge  = lFull
+        ? `<span class="badge badge-red"  style="font-size:.72rem">🈵 Full ${lCount}/${lMax}</span>`
+        : `<span class="badge badge-gray" style="font-size:.72rem">👥 ${lCount}/${lMax}</span>`;
       const deadlineMeta = l.entryDeadline
         ? `<div class="module-meta">📋 Entry deadline: ${formatDate(l.entryDeadline)}${_entryOpen(l) ? ' · <em style="color:var(--success)">Open</em>' : ' · <em style="color:var(--danger)">Closed</em>'}</div>`
         : '';
 
       return `<div class="admin-module-item${pendingEntries.length > 0 ? ' admin-module-item--pending' : ''}" data-league-id="${l.id}">
         <div class="module-info">
-          <div class="module-title">${esc(l.name)}${pendingEntries.length > 0 ? ` <span class="badge badge-amber" style="font-size:.72rem;vertical-align:middle">⏳ ${pendingEntries.length} pending</span>` : ''}</div>
+          <div class="module-title">${esc(l.name)}${pendingEntries.length > 0 ? ` <span class="badge badge-amber" style="font-size:.72rem;vertical-align:middle">⏳ ${pendingEntries.length} pending</span>` : ''} ${capBadge}</div>
           <div class="module-meta">
             ${esc(l.division || 'No division')}
             · ${l.startDate ? formatDate(l.startDate) : '?'} → ${l.endDate ? formatDate(l.endDate) : '?'}
@@ -733,6 +771,13 @@ const Leagues = (() => {
     const entries = DB.getEntriesForLeague(leagueId);
     const leagues = DB.getLeagues().filter(l => l.id !== leagueId);
 
+    // Capacity display in modal title
+    const cap        = league ? (league.maxTeams || 6) : 6;
+    const teamCount  = league ? _leagueTeamCount(leagueId) : 0;
+    const capBadge   = `<span style="font-size:.8rem;font-weight:normal;margin-left:.5rem;color:${teamCount >= cap ? 'var(--danger,#dc2626)' : 'var(--text-muted)'}">(${teamCount}/${cap} teams)</span>`;
+    const titleEl    = document.getElementById('leagueEntriesModalTitle');
+    if (titleEl && league) titleEl.innerHTML = `📝 Entries — ${esc(league.name)}${capBadge}`;
+
     if (entries.length === 0) {
       body.innerHTML = `<p class="text-muted" style="padding:.5rem 0">No entries yet for this league.</p>`;
       return;
@@ -743,9 +788,12 @@ const Leagues = (() => {
       : s === 'rejected' ? '<span class="badge badge-red">✕ Rejected</span>'
       : '<span class="badge badge-amber">⏳ Pending</span>';
 
-    const moveOpts = leagues.map(l =>
-      `<option value="${esc(l.id)}">${esc(l.name)}${l.division ? ' · ' + esc(l.division) : ''}</option>`
-    ).join('');
+    const moveOpts = leagues.map(l => {
+      const lCount = _leagueTeamCount(l.id);
+      const lMax   = l.maxTeams || 6;
+      const full   = lCount >= lMax;
+      return `<option value="${esc(l.id)}" ${full ? 'disabled' : ''}>${esc(l.name)}${l.division ? ' · ' + esc(l.division) : ''}${full ? ' (full)' : ` (${lCount}/${lMax})`}</option>`;
+    }).join('');
 
     body.innerHTML = entries.map(e => {
       const school = DB.getSchools().find(s => s.id === e.schoolId);
@@ -793,6 +841,10 @@ const Leagues = (() => {
     const entry  = DB.getLeagueEntries().find(e => e.id === entryId);
     const league = DB.getLeagues().find(l => l.id === leagueId);
     if (!entry || !league) return;
+    if (_isLeagueFull(league)) {
+      toast(`Cannot approve — league is full (${league.maxTeams || 6} teams maximum)`, 'error');
+      return;
+    }
     const profile = Auth.getProfile();
     const updated = {
       ...entry,
@@ -889,6 +941,13 @@ const Leagues = (() => {
     const fromLeague = DB.getLeagues().find(l => l.id === fromLeagueId);
     const toLeague   = DB.getLeagues().find(l => l.id === toLeagueId);
     if (!entry || !fromLeague || !toLeague) return;
+    if (_isLeagueFull(toLeague)) {
+      toast(`Cannot move — "${toLeague.name}" is full (${toLeague.maxTeams || 6} teams maximum)`, 'error');
+      // Reset the select to blank so the user can try another
+      const sel = document.querySelector(`.entry-move-sel[data-entry="${entryId}"]`);
+      if (sel) sel.value = '';
+      return;
+    }
     const profile = Auth.getProfile();
     const updated = {
       ...entry,
@@ -1008,6 +1067,7 @@ const Leagues = (() => {
     document.getElementById('leagueMatchTime').value         = l ? (l.matchTime      || '14:00') : '14:00';
     document.getElementById('leagueEntryDeadline').value    = l ? (l.entryDeadline  || '')      : '';
     document.getElementById('leagueScoreTotal').value        = l ? (l.scoreTotal     || 67)      : 67;
+    document.getElementById('leagueMaxTeams').value          = l ? (l.maxTeams       ?? 6)       : 6;
     document.getElementById('leagueEditId').value            = l ? l.id : '';
 
     // Excluded dates
@@ -1178,6 +1238,7 @@ const Leagues = (() => {
     const matchTime      = document.getElementById('leagueMatchTime').value || '14:00';
     const division       = document.getElementById('leagueDivision').value.trim();
     const scoreTotal     = parseInt(document.getElementById('leagueScoreTotal')?.value) || 67;
+    const maxTeams       = parseInt(document.getElementById('leagueMaxTeams')?.value)   || 6;
     const excludedDates  = [..._excludedDates];
 
     // ── Details-only save (updates settings + participants, no fixture regen) ──
@@ -1187,7 +1248,7 @@ const Leagues = (() => {
         const newLeague = {
           id: uid(),
           name, division, startDate, endDate, entryDeadline,
-          homeMatches, neutralVenueId, playingDay, matchTime, scoreTotal,
+          homeMatches, neutralVenueId, playingDay, matchTime, scoreTotal, maxTeams,
           excludedDates: [..._excludedDates],
           participants: [],
           schoolIds:    [],
@@ -1238,7 +1299,7 @@ const Leagues = (() => {
       const updated = {
         ...existing,
         name, division, startDate, endDate, entryDeadline,
-        homeMatches, neutralVenueId, playingDay, matchTime, scoreTotal,
+        homeMatches, neutralVenueId, playingDay, matchTime, scoreTotal, maxTeams,
         excludedDates: [..._excludedDates],
         participants: newParticipants,
         schoolIds:    newSchoolIds,
@@ -1286,7 +1347,7 @@ const Leagues = (() => {
         excludedDates,
         schoolIds,
         participants,
-        homeMatches, neutralVenueId, playingDay, matchTime, scoreTotal,
+        homeMatches, neutralVenueId, playingDay, matchTime, scoreTotal, maxTeams,
         fixtures:  [],
         standings: generateStandings(participants),
       };
@@ -1346,6 +1407,7 @@ const Leagues = (() => {
       playingDay,
       matchTime,
       scoreTotal,
+      maxTeams,
       fixtures:  generatedFixtures,
       standings: generateStandings(participants),
     };
@@ -2962,7 +3024,7 @@ const Leagues = (() => {
 
   const _TEMPLATE_COLS = ['Name','Division','Start Date (YYYY-MM-DD)','End Date (YYYY-MM-DD)',
     'Playing Day','Match Time (HH:MM)','Entry Deadline (YYYY-MM-DD)','Score Total',
-    'Format (Home & Away / Meet Once)'];
+    'Format (Home & Away / Meet Once)','Max Teams'];
 
   const _DAY_MAP = {
     sunday:0,sun:0, monday:1,mon:1, tuesday:2,tue:2,
@@ -2983,12 +3045,12 @@ const Leagues = (() => {
       const ws = XLSX.utils.aoa_to_sheet([
         _TEMPLATE_COLS,
         // Example row 1
-        ['U14 Boys League 2027','U14 Boys','2027-02-07','2027-06-28','Friday','14:00','2027-01-31',67,'Home & Away'],
+        ['U14 Boys League 2027','U14 Boys','2027-02-07','2027-06-28','Friday','14:00','2027-01-31',67,'Home & Away',6],
         // Example row 2
-        ['Open Singles League','Open','2027-03-01','2027-07-31','Saturday','09:00','',7,'Meet Once'],
+        ['Open Singles League','Open','2027-03-01','2027-07-31','Saturday','09:00','',7,'Meet Once',8],
       ]);
       // Column widths
-      ws['!cols'] = _TEMPLATE_COLS.map((h, i) => ({ wch: [28,18,22,20,14,18,26,12,20][i] }));
+      ws['!cols'] = _TEMPLATE_COLS.map((h, i) => ({ wch: [28,18,22,20,14,18,26,12,22,10][i] }));
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'Leagues');
       XLSX.writeFile(wb, 'league_import_template.xlsx');
@@ -3061,6 +3123,7 @@ const Leagues = (() => {
     const iDeadline   = col('deadline');
     const iScore      = col('score total');
     const iHomeMatch  = col('format');
+    const iMaxTeams   = col('max teams');
 
     const parsed = [];
     for (let r = headerIdx + 1; r < rawRows.length; r++) {
@@ -3075,7 +3138,8 @@ const Leagues = (() => {
       const timeRaw  = iTime >= 0     ? String(row[iTime] || '14:00').trim(): '14:00';
       const dlRaw    = iDeadline >= 0 ? row[iDeadline]  : '';
       const scoreRaw = iScore >= 0    ? row[iScore]      : 67;
-      const homeRaw  = iHomeMatch >= 0 ? String(row[iHomeMatch] || '').trim() : 'Home & Away';
+      const homeRaw     = iHomeMatch >= 0 ? String(row[iHomeMatch] || '').trim() : 'Home & Away';
+      const maxTeamsRaw = iMaxTeams  >= 0 ? row[iMaxTeams] : 6;
 
       const errors = [];
       if (!name) errors.push('Name required');
@@ -3092,9 +3156,10 @@ const Leagues = (() => {
       const entryDeadline  = _excelDate(dlRaw) || null;
       const scoreTotal     = parseInt(scoreRaw) || 67;
       const homeMatches    = /^(home|h&a|home\s*&\s*away|yes|y|1|true)$/i.test(homeRaw) ? 1 : 0;
+      const maxTeams       = parseInt(maxTeamsRaw) || 6;
 
       parsed.push({ rowNum: r + 1, name, division, startDate, endDate, playingDay, matchTime,
-                    entryDeadline, scoreTotal, homeMatches, errors });
+                    entryDeadline, scoreTotal, homeMatches, maxTeams, errors });
     }
 
     _bulkParsedRows = parsed;
@@ -3130,6 +3195,7 @@ const Leagues = (() => {
         <td style="padding:4px 8px;border:1px solid var(--border,#e2e8f0);font-size:.78rem">${DAYS_SHORT[r.playingDay]} ${r.matchTime}</td>
         <td style="padding:4px 8px;border:1px solid var(--border,#e2e8f0);font-size:.78rem">${r.scoreTotal}</td>
         <td style="padding:4px 8px;border:1px solid var(--border,#e2e8f0);font-size:.78rem">${r.homeMatches ? 'Home & Away' : 'Meet Once'}</td>
+        <td style="padding:4px 8px;border:1px solid var(--border,#e2e8f0);font-size:.78rem;text-align:center">${r.maxTeams}</td>
         <td style="padding:4px 8px;border:1px solid var(--border,#e2e8f0);font-size:.78rem;color:var(--danger,#dc2626)">${r.errors.join('; ') || ''}</td>
       </tr>`;
     };
@@ -3144,6 +3210,7 @@ const Leagues = (() => {
         <th style="padding:5px 8px;border:1px solid var(--border,#e2e8f0);text-align:left">Day & Time</th>
         <th style="padding:5px 8px;border:1px solid var(--border,#e2e8f0);text-align:left">Score</th>
         <th style="padding:5px 8px;border:1px solid var(--border,#e2e8f0);text-align:left">Format</th>
+        <th style="padding:5px 8px;border:1px solid var(--border,#e2e8f0);text-align:left">Max</th>
         <th style="padding:5px 8px;border:1px solid var(--border,#e2e8f0);text-align:left">Errors</th>
       </tr></thead>
       <tbody>${rows.map(row2tr).join('')}</tbody>
@@ -3172,6 +3239,7 @@ const Leagues = (() => {
           entryDeadline: r.entryDeadline,
           scoreTotal:    r.scoreTotal,
           homeMatches:   r.homeMatches,
+          maxTeams:      r.maxTeams,
           neutralVenueId: null,
           excludedDates:  [],
           participants:   [],
