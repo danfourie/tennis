@@ -814,6 +814,7 @@ const Leagues = (() => {
                  <option value="">🔄 Move to…</option>${moveOpts}
                </select>`
             : ''}
+          <button class="btn btn-xs btn-outline-danger entry-delete-btn" title="Permanently delete this entry">🗑 Delete</button>
         </div>
       </div>`;
     }).join('');
@@ -835,6 +836,27 @@ const Leagues = (() => {
         if (sel.value) _moveEntry(row.dataset.entryId, leagueId, sel.value);
       });
     });
+    // Wire delete
+    body.querySelectorAll('.entry-delete-btn').forEach(btn => {
+      const row = btn.closest('[data-entry-id]');
+      btn.addEventListener('click', () => _deleteEntry(row.dataset.entryId, leagueId));
+    });
+  }
+
+  function _deleteEntry(entryId, leagueId) {
+    const entry  = DB.getLeagueEntries().find(e => e.id === entryId);
+    const league = DB.getLeagues().find(l => l.id === leagueId);
+    if (!entry || !league) return;
+    const label = entry.teamLabel || entry.schoolId || entryId;
+    const confirmed = window.confirm(
+      `Permanently delete entry "${label}" from ${league.name}?\n\n⚠️ This action cannot be reversed.`
+    );
+    if (!confirmed) return;
+    DB.deleteLeagueEntry(entryId);
+    DB.writeAudit('entry_deleted', 'league', `Force-deleted entry: ${label} from ${league.name}`, entryId, label);
+    toast(`Entry "${label}" permanently deleted`, 'success');
+    _renderEntriesModal(leagueId);
+    renderAdmin();
   }
 
   async function _approveEntry(entryId, leagueId) {
