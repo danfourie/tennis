@@ -15,6 +15,17 @@
 // ============================================================
 // IN-MEMORY CACHE
 // ============================================================
+
+// Tracks IDs written optimistically in this session but not yet confirmed by
+// the server snapshot. Only these IDs are preserved when a snapshot arrives
+// without them — prevents deleted docs (removed by another session or via the
+// Firestore console) from being re-added to the local cache.
+const _pendingAdds = {}; // { [cacheKey]: Set<id> }
+function _trackAdd(cacheKey, id) {
+  if (!_pendingAdds[cacheKey]) _pendingAdds[cacheKey] = new Set();
+  _pendingAdds[cacheKey].add(id);
+}
+
 const _cache = {
   venues:         [],
   schools:        [],
@@ -108,6 +119,7 @@ const DB = {
     if (duplicate) return null;  // caller should check for null and toast
     booking.id = booking.id || uid();
     _cache.bookings.push(booking);
+    _trackAdd('bookings', booking.id);
     _doc('bookings', booking.id).set(booking).catch(console.error);
     return booking;
   },
@@ -210,6 +222,7 @@ const DB = {
   addLeagueEntry(entry) {
     entry.id = entry.id || uid();
     _cache.leagueEntries.push(entry);
+    _trackAdd('leagueEntries', entry.id);
     _doc('leagueEntries', entry.id).set(entry).catch(console.error);
     return entry;
   },
@@ -476,12 +489,15 @@ const DB = {
         snap => {
           let serverDocs = snap.docs.map(d => d.data());
           if (SOFT_DELETE_COLS.has(colName)) serverDocs = serverDocs.filter(d => !d.deleted);
-          // Preserve any optimistic local entries not yet confirmed by Firestore
-          // (they have an id that doesn't appear in the server snapshot yet).
-          // This prevents newly added bookings/entries from disappearing while
-          // Firestore processes the write.
           const serverIds = new Set(serverDocs.map(d => d.id).filter(Boolean));
-          const localOnly = (_cache[cacheKey] || []).filter(d => d.id && !serverIds.has(d.id));
+          // Confirm any optimistic adds that the server now acknowledges
+          if (_pendingAdds[cacheKey]) serverIds.forEach(id => _pendingAdds[cacheKey].delete(id));
+          // Only preserve IDs that were added optimistically THIS session and haven't
+          // been confirmed yet. Any other cache entry not in the snapshot was deleted
+          // (by this session, another session, or the Firestore console) and must not
+          // be re-added.
+          const pending   = _pendingAdds[cacheKey] || new Set();
+          const localOnly = (_cache[cacheKey] || []).filter(d => d.id && pending.has(d.id) && !serverIds.has(d.id));
           _cache[cacheKey] = [...serverDocs, ...localOnly];
           if (onUpdate) onUpdate(colName);
         },
