@@ -503,7 +503,9 @@ const Leagues = (() => {
             🔄 Reset Fixtures
           </button>
           ${l.endDate && l.endDate < today && totalFixtures > 0
-            ? `<button class="btn btn-sm btn-success" data-closeout-league="${l.id}" title="Auto-complete draws, email results, archive league">🏁 Close Out</button>`
+            ? l.closedBy
+              ? `<button class="btn btn-sm btn-secondary" data-archive-league="${l.id}" title="Move back to Leagues History (no emails sent)">📦 Move to History</button>`
+              : `<button class="btn btn-sm btn-success" data-closeout-league="${l.id}" title="Auto-complete draws, email results, archive league">🏁 Close Out</button>`
             : ''}
           <button class="btn btn-sm btn-danger"    data-admin-league-del="${l.id}">Delete</button>
         </div>
@@ -585,6 +587,25 @@ const Leagues = (() => {
           toast('Close out failed — ' + (err.message || err), 'error');
           btn.disabled = false;
           btn.textContent = '🏁 Close Out';
+        }
+      });
+    });
+
+    container.querySelectorAll('[data-archive-league]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const l = DB.getLeagues().find(x => x.id === btn.dataset.archiveLeague);
+        if (!l) return;
+        if (!confirm(`Move "${l.name}" back to Leagues History?\n\nNo emails will be sent.`)) return;
+        btn.disabled = true; btn.textContent = '⏳ Archiving…';
+        try {
+          await DB.deleteLeague(l.id);
+          DB.writeAudit('league_archived', 'league', `League moved to history: ${l.name}`, l.id, l.name);
+          toast(`"${l.name}" moved to Leagues History`, 'success');
+          render();
+          renderAdmin();
+        } catch (err) {
+          toast('Archive failed — ' + (err.message || err), 'error');
+          btn.disabled = false; btn.textContent = '📦 Move to History';
         }
       });
     });
