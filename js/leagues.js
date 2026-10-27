@@ -570,7 +570,7 @@ const Leagues = (() => {
           '',
           unscored > 0 ? `${unscored} unscored fixture(s) will be recorded as draws (${drawScore}–${drawScore}).` : 'All fixtures are scored.',
           'Final standings will be emailed to all participants and admins.',
-          'The league will then be archived (visible in Deleted Leagues).',
+          'The league will then be archived (visible in Leagues History).',
         ].join('\n');
         if (!confirm(msg)) return;
         btn.disabled = true;
@@ -704,7 +704,7 @@ const Leagues = (() => {
       });
     }
 
-    // ── Deleted leagues (collapsible) ─────────────────────────
+    // ── Leagues history (collapsible) ─────────────────────────
     const deletedLeaguesSec = document.getElementById('deletedLeaguesSection');
     if (deletedLeaguesSec) {
       DB.loadDeletedItems('leagues').then(deleted => {
@@ -712,25 +712,37 @@ const Leagues = (() => {
         deletedLeaguesSec.innerHTML = `
           <details style="margin-top:1.2rem">
             <summary style="cursor:pointer;font-size:.85rem;color:var(--text-muted);user-select:none;padding:.3rem 0">
-              🗑️ Deleted leagues <span style="background:#fee2e2;color:#991b1b;border-radius:10px;padding:.1rem .45rem;font-size:.75rem;margin-left:.3rem">${deleted.length}</span>
+              🏛️ Leagues history <span style="background:var(--bg-subtle,#f3f4f6);color:var(--text-muted);border-radius:10px;padding:.1rem .45rem;font-size:.75rem;margin-left:.3rem">${deleted.length}</span>
             </summary>
             <div style="margin-top:.5rem;display:flex;flex-direction:column;gap:.5rem">
               ${deleted.map(l => `
-                <div class="admin-module-item" style="opacity:.75">
+                <div class="admin-module-item" style="opacity:.85">
                   <div class="module-info">
                     <div class="module-title">${esc(l.name)}</div>
                     <div class="module-meta">
                       ${esc(l.division || 'No division')}
                       · ${l.startDate ? formatDate(l.startDate) : '?'} → ${l.endDate ? formatDate(l.endDate) : '?'}
                     </div>
-                    ${l.deletedAt ? `<div class="module-meta" style="color:#991b1b">Deleted: ${formatDate(l.deletedAt.slice(0,10))}</div>` : ''}
+                    ${l.closedBy ? `<div class="module-meta" style="color:var(--text-muted)">Closed ${l.deletedAt ? formatDate(l.deletedAt.slice(0,10)) : ''}</div>` : ''}
                   </div>
                   <div class="module-actions">
+                    <button class="btn btn-sm btn-secondary" data-history-view="${esc(l.id)}">📊 View Results</button>
                     <button class="btn btn-sm btn-success" data-restore-league="${esc(l.id)}">↩ Restore</button>
                   </div>
                 </div>`).join('')}
             </div>
           </details>`;
+
+        // Wire view results
+        deletedLeaguesSec.querySelectorAll('[data-history-view]').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const id  = btn.dataset.historyView;
+            const l   = deleted.find(x => x.id === id);
+            if (l) _openHistoryModal(l);
+          });
+        });
+
+        // Wire restore
         deletedLeaguesSec.querySelectorAll('[data-restore-league]').forEach(btn => {
           btn.addEventListener('click', async () => {
             const id = btn.dataset.restoreLeague;
@@ -749,6 +761,32 @@ const Leagues = (() => {
         });
       }).catch(console.error);
     }
+  }
+
+  function _openHistoryModal(league) {
+    const schools = DB.getSchools();
+    const titleEl = document.getElementById('leagueDetailTitle');
+    const body    = document.getElementById('leagueDetailBody');
+    if (!titleEl || !body) return;
+
+    titleEl.innerHTML = `${esc(league.name)} <span style="font-size:.75rem;font-weight:normal;color:var(--text-muted);margin-left:.5rem">🏛️ Archived</span>`;
+    body.innerHTML = `
+      <div class="modal-tabs">
+        <button class="modal-tab active" data-tab="fixtures">Fixtures</button>
+        <button class="modal-tab" data-tab="standings">Standings</button>
+      </div>
+      <div id="tab-fixtures">${_fixturesTab(league, schools, false)}</div>
+      <div id="tab-standings" class="hidden">${_standingsTab(league, schools)}</div>
+    `;
+    body.querySelectorAll('.modal-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        body.querySelectorAll('.modal-tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        body.querySelectorAll('[id^="tab-"]').forEach(p => p.classList.add('hidden'));
+        document.getElementById('tab-' + tab.dataset.tab).classList.remove('hidden');
+      });
+    });
+    Modal.open('leagueDetailModal');
   }
 
   // ════════════════════════════════════════════════════════════
